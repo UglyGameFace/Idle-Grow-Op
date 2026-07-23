@@ -17,6 +17,8 @@ Audit and correct every player-value mutation before adding new gameplay systems
 - Daily rewards and crew operations were vulnerable to overlapping command mutations.
 - Support/vote XP ignored configured cooldowns and trusted any bot account in the support channel.
 - Admin maintenance commands accepted negative balances, item quantities, and invalid levels.
+- Crime payouts, robbery transfers, laundering, and crew-bank raids mutated related balances without one atomic accounting path.
+- Crew-heist integer division discarded payout remainders without explicitly accounting for them.
 
 ## Changes Completed So Far
 - Added deterministic per-strain harvest accounting with no cash mutation.
@@ -32,22 +34,25 @@ Audit and correct every player-value mutation before adding new gameplay systems
 - Queued lab processing now reserves the exact rounded-up flower cost atomically.
 - Added `collect` so completed queued batches credit concentrates exactly once.
 - Manual extraction reserves flower before gameplay, consumes it on success, refunds it on timeout, and returns all but the intended penalty on failure.
-- Added targeted regression tests for harvest accounting, canonical validators, flower reservation, rollback, and penalty splitting.
+- Added pure crime accounting helpers for laundering, robbery transfers, crew payout splits, raid transfers, and capped losses.
+- Replaced scattered crime balance mutations with one locked command implementation while retaining the existing public commands and aliases.
+- Solo/crew heists, raids, stealing, laundering, and heist-channel configuration now save related state together.
+- Crew payout remainders are explicitly assigned to the crew bank so the rolled payout is fully accounted for.
+- Added targeted regression tests for harvest, validators, flower reservation, rollback, crime value conservation, raid fees, and capped losses.
 
 ## Validation Status
 - Branch remains draft.
-- CI is running against the latest lab changes.
-- Full crime mutation inspection and final regression validation are still required.
+- A new CI run is expected for the latest crime commit.
+- Compilation, full pytest, real extension registration, diff review, and cleanup still need to pass before completion.
 
 ## Cleanup Status
 - Removed obsolete lab inventory loops and unused imports.
+- Replaced the old scattered crime mutation implementation rather than leaving a duplicate cog or fallback path.
 - No monkey patches, startup guards, compatibility shims, or duplicate command implementations were introduced.
-- Conflicting mutation paths were replaced instead of hidden behind fallback behavior.
 
 ## Remaining Work
-- Audit and harden crime/heist/raid/steal/launder payout paths.
-- Inspect auction/task interactions and persistence behavior.
-- Run full tests, extension registration smoke test, compilation, conflict inspection, and cleanup.
+- Inspect auction expiry processing in background tasks for conflicts with command-side settlement.
+- Run full tests, extension registration smoke test, compilation, conflict inspection, and final cleanup.
 
 ## Backlog Locked Behind This Task
 - Guild/global data architecture.
