@@ -5,6 +5,9 @@ from economy_integrity import (
     flower_required_for_output,
     pot_upgrade_capacity,
     require_positive_amount,
+    reserve_flower,
+    restore_flower,
+    split_reservation_penalty,
     validate_auction_prices,
     validate_bid_amount,
 )
@@ -118,6 +121,37 @@ def test_flower_requirement_rejects_invalid_output_and_ratio():
         flower_required_for_output(0, 0.2)
     with pytest.raises(ValueError):
         flower_required_for_output(1, 0)
+
+
+def test_flower_reservation_is_exact_and_reversible():
+    stash = {"schwag": 4, "og kush": 10}
+    reservation = reserve_flower(stash, 9)
+
+    assert reservation == {"schwag": 4, "og kush": 5}
+    assert stash == {"og kush": 5}
+
+    restore_flower(stash, reservation)
+    assert stash == {"schwag": 4, "og kush": 10}
+
+
+def test_failed_reservation_never_partially_mutates_stash():
+    stash = {"schwag": 3, "og kush": 2}
+    before = dict(stash)
+
+    with pytest.raises(ValueError, match="not enough"):
+        reserve_flower(stash, 6)
+
+    assert stash == before
+
+
+def test_reservation_penalty_refunds_only_the_unconsumed_remainder():
+    reservation = {"schwag": 4, "og kush": 6}
+    consumed, refundable = split_reservation_penalty(reservation, 3)
+
+    assert consumed == {"schwag": 3}
+    assert refundable == {"schwag": 1, "og kush": 6}
+    assert sum(consumed.values()) == 3
+    assert sum(refundable.values()) == 7
 
 
 def test_auction_prices_must_be_positive_and_coherent():
