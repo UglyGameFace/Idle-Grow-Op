@@ -11,6 +11,13 @@ from persistence_scope import (
 )
 
 
+REQUIRED_SCHEMA_VERSION = "001_guild_scoped_persistence"
+
+
+class SupabaseSchemaError(RuntimeError):
+    """Raised when the required scoped persistence schema is unavailable."""
+
+
 class SupabaseScopedBackend:
     """Persist scoped records in the normalized Supabase tables."""
 
@@ -18,6 +25,38 @@ class SupabaseScopedBackend:
         if client is None:
             raise ValueError("Supabase client is required")
         self.client = client
+
+    async def verify_schema(self) -> None:
+        await asyncio.to_thread(self._verify_schema_sync)
+
+    def _verify_schema_sync(self) -> None:
+        try:
+            response = (
+                self.client.table("app_schema_migrations")
+                .select("version")
+                .eq("version", REQUIRED_SCHEMA_VERSION)
+                .limit(1)
+                .execute()
+            )
+        except Exception as exc:
+            raise SupabaseSchemaError(
+                "Scoped Supabase schema is unavailable. Run "
+                "migrations/001_guild_scoped_persistence.sql with the Supabase SQL editor."
+            ) from exc
+
+        versions = response.data or []
+        if not versions:
+            raise SupabaseSchemaError(
+                f"Required Supabase migration is missing: {REQUIRED_SCHEMA_VERSION}"
+            )
+
+        for table_name in ("global_accounts", "guild_profiles", "guild_worlds"):
+            try:
+                self.client.table(table_name).select("data").limit(1).execute()
+            except Exception as exc:
+                raise SupabaseSchemaError(
+                    f"Required Supabase table is unavailable: {table_name}"
+                ) from exc
 
     async def load(self, key: RecordKey) -> Mapping[str, Any] | None:
         return await asyncio.to_thread(self._load_sync, key)
