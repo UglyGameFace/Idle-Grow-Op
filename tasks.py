@@ -22,141 +22,174 @@ class Tasks(commands.Cog):
         self.notification_check.cancel()
         self.status_cycle.cancel()
 
-    # ==========================================================
-    # 🌍 GAME CYCLE (Weather & Economy) - Every 15 Minutes
-    # ==========================================================
     @tasks.loop(minutes=15)
     async def game_cycle(self):
-        """Updates weather, economy, and random events."""
-        world = self.bot.db.world_state
+        """Update world state and settle expired auctions atomically."""
+        async with self.bot.db.lock:
+            economy = self.bot.get_cog("Economy")
+            if economy is None:
+                raise RuntimeError("Economy cog is required for auction settlement")
+            await economy._settle_expired_auctions()
 
-        current_event = world.get("event")
-        now = time.time()
+            world = self.bot.db.world_state
+            current_event = world.get("event")
+            now = time.time()
 
-        if current_event:
-            evt_data = SPECIAL_EVENTS.get(current_event["id"])
-            if not evt_data or now > current_event.get("expires", 0):
-                world["event"] = None
-                world["last_event"] = now
-                world["market_multiplier"] = 1.0
-                print(f"🏁 Event Ended: {current_event['id']}")
-            else:
+            if current_event:
+                event_data = SPECIAL_EVENTS.get(current_event.get("id"))
+                if not event_data or now > float(current_event.get("expires", 0)):
+                    event_id = current_event.get("id", "unknown")
+                    world["event"] = None
+                    world["last_event"] = now
+                    world["market_multiplier"] = 1.0
+                    print(f"🏁 Event Ended: {event_id}")
+                else:
+                    return
+
+            if not world.get("event") and random.random() < 0.05:
+                event_id = random.choice(list(SPECIAL_EVENTS.keys()))
+                event_data = SPECIAL_EVENTS[event_id]
+                world["event"] = {
+                    "id": event_id,
+                    "expires": now + event_data["duration"],
+                    "name": event_data["name"],
+                }
+                if event_data["effect"] == "price_up":
+                    world["market_multiplier"] = 1.5
+                elif event_data["effect"] == "price_down":
+                    world["market_multiplier"] = 0.6
+                print(f"🚨 EVENT STARTED: {event_id}")
+                await self.bot.db.save()
                 return
 
-        if not world.get("event") and random.random() < 0.05:
-            evt_id = random.choice(list(SPECIAL_EVENTS.keys()))
-            evt_data = SPECIAL_EVENTS[evt_id]
+            weather_names = list(WEATHER_TYPES.keys())
+            weights = [40] + [10] * (len(weather_names) - 1)
+            new_weather = random.choices(weather_names, weights=weights, k=1)[0]
+            world["weather"] = new_weather
 
-            world["event"] = {
-                "id": evt_id,
-                "expires": now + evt_data["duration"],
-                "name": evt_data["name"],
-            }
+            fluctuation = random.uniform(0.95, 1.05)
+            weather_data = WEATHER_TYPES.get(new_weather, {})
+            weather_price_modifier = weather_data.get("price", 1.0)
 
-            if evt_data["effect"] == "price_up":
-                world["market_multiplier"] = 1.5
-            elif evt_data["effect"] == "price_down":
-                world["market_multiplier"] = 0.6
+            district_multiplier = 1.0
+            district = world.get("district", {})
+            if district.get("owner_crew_id") and now < float(district.get("expires_at", 0)):
+                district_multiplier = float(district.get("multiplier", 1.10))
 
-            print(f"🚨 EVENT STARTED: {evt_id}")
+            new_multiplier = fluctuation * weather_price_modifier * district_multiplier
+            world["market_multiplier"] = max(0.5, min(3.0, new_multiplier))
+
+            history = world.setdefault("market_history", [])
+            history.append({"t": int(now), "m": round(new_multiplier, 2)})
+            if len(history) > 24:
+                del history[:-24]
+
             await self.bot.db.save()
-            return
 
-        weather_names = list(WEATHER_TYPES.keys())
-        weights = [40] + [10] * (len(weather_names) - 1)
-        new_weather = random.choices(weather_names, weights=weights, k=1)[0]
-        world["weather"] = new_weather
-
-        fluctuation = random.uniform(0.95, 1.05)
-        weather_data = WEATHER_TYPES.get(new_weather, {})
-        weather_price_modifier = weather_data.get("price", 1.0)
-
-        district_multiplier = 1.0
-        district = world.get("district", {})
-        if district.get("owner_crew_id") and now < district.get("expires_at", 0):
-            district_multiplier = district.get("multiplier", 1.10)
-
-        new_multiplier = fluctuation * weather_price_modifier * district_multiplier
-        world["market_multiplier"] = max(0.5, min(3.0, new_multiplier))
-
-        history = world.setdefault("market_history", [])
-        history.append({"t": int(now), "m": round(new_multiplier, 2)})
-        if len(history) > 24:
-            history.pop(0)
-
-        await self.bot.db.save()
         print(f"🌍 World Update: {new_weather} | Market: {int(new_multiplier * 100)}%")
 
     @game_cycle.before_loop
     async def before_game_cycle(self):
         await self.bot.wait_until_ready()
 
-    # ==========================================================
-    # 🔔 NOTIFICATIONS
-    # ==========================================================
     @tasks.loop(minutes=2)
     async def notification_check(self):
-        """Checks for ready plants/processing and DMs users."""
-        users = self.bot.db.data
+        """Send ready alerts and mark only successfully delivered notifications."""
         now = time.time()
+        pending = []
 
-        for user_id, user_data in users.items():
-            if user_id == "__world__":
-                continue
-            if not user_data.get("settings", {}).get("notifications", True):
-                continue
-
-            notifications = []
-
-            ready_plants = 0
-            for plant in user_data.get("plants", []):
-                if plant.get("notified"):
+        async with self.bot.db.lock:
+            for user_id, user_data in self.bot.db.data.items():
+                if user_id == "__world__":
                     continue
-                grow_time = get_plant_grow_time(user_data, self.bot.db.world_state, plant)
-                if now - plant["planted_at"] >= grow_time:
-                    ready_plants += 1
-                    plant["notified"] = True
-            if ready_plants > 0:
-                notifications.append(f"🌿 **{ready_plants} Plants** are ready!")
-
-            ready_lab = 0
-            for item in user_data.get("processing_queue", []):
-                if item.get("notified"):
+                if not user_data.get("settings", {}).get("notifications", True):
                     continue
-                if now >= item["finish_time"]:
-                    ready_lab += 1
-                    item["notified"] = True
-            if ready_lab > 0:
-                notifications.append(f"⚗️ **{ready_lab} Batches** are done!")
 
-            if notifications:
-                try:
-                    target = await self.bot.fetch_user(int(user_id))
-                    if target:
-                        await target.send(
-                            embed=discord.Embed(
-                                title="📟 Pager Alert",
-                                description="\n".join(notifications),
-                                color=discord.Color.green(),
-                            )
+                ready_plant_indexes = []
+                for index, plant in enumerate(user_data.get("plants", [])):
+                    if plant.get("notified"):
+                        continue
+                    grow_time = get_plant_grow_time(
+                        user_data,
+                        self.bot.db.world_state,
+                        plant,
+                    )
+                    if now - float(plant.get("planted_at", now)) >= grow_time:
+                        ready_plant_indexes.append(index)
+
+                ready_batch_indexes = []
+                for index, item in enumerate(user_data.get("processing_queue", [])):
+                    if item.get("notified"):
+                        continue
+                    if now >= float(item.get("finish_time", now + 1)):
+                        ready_batch_indexes.append(index)
+
+                if ready_plant_indexes or ready_batch_indexes:
+                    pending.append(
+                        (
+                            int(user_id),
+                            ready_plant_indexes,
+                            ready_batch_indexes,
                         )
-                        await self.bot.db.save()
-                except discord.DiscordException:
-                    pass
+                    )
+
+        for user_id, plant_indexes, batch_indexes in pending:
+            notifications = []
+            if plant_indexes:
+                notifications.append(f"🌿 **{len(plant_indexes)} Plants** are ready!")
+            if batch_indexes:
+                notifications.append(f"⚗️ **{len(batch_indexes)} Batches** are done!")
+
+            try:
+                target = await self.bot.fetch_user(user_id)
+                await target.send(
+                    embed=discord.Embed(
+                        title="📟 Pager Alert",
+                        description="\n".join(notifications),
+                        color=discord.Color.green(),
+                    )
+                )
+            except discord.DiscordException:
+                continue
+
+            async with self.bot.db.lock:
+                user_data = self.bot.db.get_user(user_id)
+                plants = user_data.get("plants", [])
+                queue = user_data.get("processing_queue", [])
+
+                for index in plant_indexes:
+                    if index < len(plants):
+                        plant = plants[index]
+                        grow_time = get_plant_grow_time(
+                            user_data,
+                            self.bot.db.world_state,
+                            plant,
+                        )
+                        if not plant.get("notified") and now - float(
+                            plant.get("planted_at", now)
+                        ) >= grow_time:
+                            plant["notified"] = True
+
+                for index in batch_indexes:
+                    if index < len(queue):
+                        item = queue[index]
+                        if not item.get("notified") and now >= float(
+                            item.get("finish_time", now + 1)
+                        ):
+                            item["notified"] = True
+
+                await self.bot.db.save()
 
     @notification_check.before_loop
     async def before_notification_check(self):
         await self.bot.wait_until_ready()
 
-    # ==========================================================
-    # 🔄 STATUS ROTATION
-    # ==========================================================
     @tasks.loop(minutes=5)
     async def status_cycle(self):
-        """Rotates the bot's status activity."""
+        """Rotate the bot's status activity."""
         world = self.bot.db.world_state
         weather = world.get("weather", "Sunny ☀️")
-        multiplier = int(world.get("market_multiplier", 1.0) * 100)
+        multiplier = int(float(world.get("market_multiplier", 1.0)) * 100)
 
         event_name = "None"
         event = world.get("event")
@@ -169,7 +202,6 @@ class Tasks(commands.Cog):
             f"Event: {event_name}",
             "!help | Growing 🌿",
         ]
-
         await self.bot.change_presence(activity=discord.Game(name=random.choice(statuses)))
 
     @status_cycle.before_loop
