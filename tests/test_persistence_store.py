@@ -38,94 +38,110 @@ def defaults(key):
     return {"grams": 500, "plants": []}
 
 
-@pytest.mark.asyncio
-async def test_records_are_loaded_lazily_one_key_at_a_time():
-    first = guild_profile_key(100, 200)
-    second = guild_profile_key(100, 201)
-    backend = MemoryBackend({first: {"grams": 900}})
-    store = ScopedRecordStore(backend, defaults)
-
-    assert not store.cached_keys
-    assert await store.get(first) == {"grams": 900}
-    assert backend.loads == [first.cache_key]
-    assert second.cache_key not in store.cached_keys
+def run(coro):
+    return asyncio.run(coro)
 
 
-@pytest.mark.asyncio
-async def test_missing_record_gets_default_and_is_marked_dirty():
-    key = guild_world_key(100)
-    backend = MemoryBackend()
-    store = ScopedRecordStore(backend, defaults)
+def test_records_are_loaded_lazily_one_key_at_a_time():
+    async def scenario():
+        first = guild_profile_key(100, 200)
+        second = guild_profile_key(100, 201)
+        backend = MemoryBackend({first: {"grams": 900}})
+        store = ScopedRecordStore(backend, defaults)
 
-    record = await store.get(key)
+        assert not store.cached_keys
+        assert await store.get(first) == {"grams": 900}
+        assert backend.loads == [first.cache_key]
+        assert second.cache_key not in store.cached_keys
 
-    assert record == {"weather": "Sunny", "market_multiplier": 1.0}
-    assert store.dirty_keys == {key.cache_key}
-
-
-@pytest.mark.asyncio
-async def test_flush_writes_only_explicitly_dirty_records():
-    changed = guild_profile_key(100, 200)
-    untouched = guild_profile_key(100, 201)
-    backend = MemoryBackend(
-        {
-            changed: {"grams": 500},
-            untouched: {"grams": 700},
-        }
-    )
-    store = ScopedRecordStore(backend, defaults)
-
-    changed_record = await store.get(changed)
-    await store.get(untouched)
-    changed_record["grams"] = 600
-    store.mark_dirty(changed)
-
-    result = await store.flush()
-
-    assert result.saved_keys == (changed.cache_key,)
-    assert backend.saved_batches == [{changed.cache_key: {"grams": 600}}]
-    assert not store.dirty_keys
+    run(scenario())
 
 
-@pytest.mark.asyncio
-async def test_failed_flush_keeps_records_dirty_for_retry():
-    key = guild_profile_key(100, 200)
-    backend = MemoryBackend({key: {"grams": 500}})
-    store = ScopedRecordStore(backend, defaults)
-    record = await store.get(key)
-    record["grams"] = 650
-    store.mark_dirty(key)
-    backend.fail_saves = True
+def test_missing_record_gets_default_and_is_marked_dirty():
+    async def scenario():
+        key = guild_world_key(100)
+        backend = MemoryBackend()
+        store = ScopedRecordStore(backend, defaults)
 
-    with pytest.raises(RuntimeError, match="backend unavailable"):
-        await store.flush()
+        record = await store.get(key)
 
-    assert store.dirty_keys == {key.cache_key}
+        assert record == {"weather": "Sunny", "market_multiplier": 1.0}
+        assert store.dirty_keys == {key.cache_key}
 
-    backend.fail_saves = False
-    result = await store.flush()
-    assert result.saved_keys == (key.cache_key,)
-    assert backend.records[key.cache_key] == {"grams": 650}
+    run(scenario())
 
 
-@pytest.mark.asyncio
-async def test_concurrent_first_reads_share_one_backend_load():
-    key = guild_profile_key(100, 200)
-    backend = MemoryBackend({key: {"grams": 500}})
-    store = ScopedRecordStore(backend, defaults)
+def test_flush_writes_only_explicitly_dirty_records():
+    async def scenario():
+        changed = guild_profile_key(100, 200)
+        untouched = guild_profile_key(100, 201)
+        backend = MemoryBackend(
+            {
+                changed: {"grams": 500},
+                untouched: {"grams": 700},
+            }
+        )
+        store = ScopedRecordStore(backend, defaults)
 
-    first, second = await asyncio.gather(store.get(key), store.get(key))
+        changed_record = await store.get(changed)
+        await store.get(untouched)
+        changed_record["grams"] = 600
+        store.mark_dirty(changed)
 
-    assert first is second
-    assert backend.loads == [key.cache_key]
+        result = await store.flush()
+
+        assert result.saved_keys == (changed.cache_key,)
+        assert backend.saved_batches == [{changed.cache_key: {"grams": 600}}]
+        assert not store.dirty_keys
+
+    run(scenario())
 
 
-@pytest.mark.asyncio
-async def test_dirty_record_cannot_be_evicted_before_flush():
-    key = guild_profile_key(100, 200)
-    backend = MemoryBackend()
-    store = ScopedRecordStore(backend, defaults)
-    await store.get(key)
+def test_failed_flush_keeps_records_dirty_for_retry():
+    async def scenario():
+        key = guild_profile_key(100, 200)
+        backend = MemoryBackend({key: {"grams": 500}})
+        store = ScopedRecordStore(backend, defaults)
+        record = await store.get(key)
+        record["grams"] = 650
+        store.mark_dirty(key)
+        backend.fail_saves = True
 
-    with pytest.raises(RuntimeError, match="cannot evict dirty"):
-        store.evict(key)
+        with pytest.raises(RuntimeError, match="backend unavailable"):
+            await store.flush()
+
+        assert store.dirty_keys == {key.cache_key}
+
+        backend.fail_saves = False
+        result = await store.flush()
+        assert result.saved_keys == (key.cache_key,)
+        assert backend.records[key.cache_key] == {"grams": 650}
+
+    run(scenario())
+
+
+def test_concurrent_first_reads_share_one_backend_load():
+    async def scenario():
+        key = guild_profile_key(100, 200)
+        backend = MemoryBackend({key: {"grams": 500}})
+        store = ScopedRecordStore(backend, defaults)
+
+        first, second = await asyncio.gather(store.get(key), store.get(key))
+
+        assert first is second
+        assert backend.loads == [key.cache_key]
+
+    run(scenario())
+
+
+def test_dirty_record_cannot_be_evicted_before_flush():
+    async def scenario():
+        key = guild_profile_key(100, 200)
+        backend = MemoryBackend()
+        store = ScopedRecordStore(backend, defaults)
+        await store.get(key)
+
+        with pytest.raises(RuntimeError, match="cannot evict dirty"):
+            store.evict(key)
+
+    run(scenario())
