@@ -78,7 +78,7 @@ class Social(commands.Cog):
     # ==========================================================
     # 👤 PROFILE & DAILY
     # ==========================================================
-    @commands.hybrid_command(name="profile", aliases=["p", "me", "stats"])
+    @commands.hybrid_command(name="profile", aliases=["me", "stats"])
     async def profile(self, ctx, target: discord.Member = None):
         """View your full profile and stats."""
         target = target or ctx.author
