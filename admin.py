@@ -5,7 +5,8 @@ import sys
 import discord
 from discord.ext import commands
 
-from utils import SHOP_ITEMS, db_manager, inv_add, inv_take
+from economy_integrity import require_positive_amount
+from utils import db_manager, inv_add
 
 
 class Admin(commands.Cog):
@@ -53,30 +54,48 @@ class Admin(commands.Cog):
 
     @commands.command(name="setmoney", hidden=True)
     async def setmoney(self, ctx, target: discord.User, amount: int):
-        """Set a user's balance."""
-        user = self.bot.db.get_user(target.id)
-        user["grams"] = amount
-        await self.bot.db.save()
+        """Set a user's non-negative cash balance."""
+        if amount < 0:
+            return await ctx.send("❌ Balance cannot be negative.")
+
+        async with self.bot.db.lock:
+            user = self.bot.db.get_user(target.id)
+            user["grams"] = int(amount)
+            await self.bot.db.save()
         await ctx.send(f"✅ Set {target.name}'s balance to **${amount:,}**.")
 
     @commands.command(name="giveitem", hidden=True)
     async def giveitem(self, ctx, target: discord.User, item_name: str, amount: int = 1):
-        """Spawn items for a user."""
-        user = self.bot.db.get_user(target.id)
-        clean_name = item_name.lower().strip()
+        """Spawn a positive quantity of items for a user."""
+        try:
+            quantity = require_positive_amount(amount)
+        except ValueError:
+            return await ctx.send("❌ Item amount must be a positive integer.")
 
-        inv_add(user, clean_name, amount)
-        await self.bot.db.save()
-        await ctx.send(f"✅ Gave **x{amount} {clean_name}** to {target.name}.")
+        clean_name = item_name.lower().strip()
+        if not clean_name:
+            return await ctx.send("❌ Item name cannot be empty.")
+
+        async with self.bot.db.lock:
+            user = self.bot.db.get_user(target.id)
+            inv_add(user, clean_name, quantity)
+            await self.bot.db.save()
+        await ctx.send(f"✅ Gave **x{quantity} {clean_name}** to {target.name}.")
 
     @commands.command(name="setlevel", hidden=True)
     async def setlevel(self, ctx, target: discord.User, level: int):
-        """Set a user's level."""
-        user = self.bot.db.get_user(target.id)
-        user["level"] = level
-        user["xp"] = 0
-        await self.bot.db.save()
-        await ctx.send(f"✅ Set {target.name}'s level to **{level}**.")
+        """Set a user's level to one or higher."""
+        try:
+            validated_level = require_positive_amount(level)
+        except ValueError:
+            return await ctx.send("❌ Level must be a positive integer.")
+
+        async with self.bot.db.lock:
+            user = self.bot.db.get_user(target.id)
+            user["level"] = validated_level
+            user["xp"] = 0
+            await self.bot.db.save()
+        await ctx.send(f"✅ Set {target.name}'s level to **{validated_level}**.")
 
     @commands.command(name="wipeuser", hidden=True)
     async def wipeuser(self, ctx, target: discord.User):
@@ -86,22 +105,26 @@ class Admin(commands.Cog):
         )
 
         def check(message):
-            return message.author == ctx.author and message.content.lower() == "yes"
+            return (
+                message.author == ctx.author
+                and message.channel == ctx.channel
+                and message.content.lower() == "yes"
+            )
 
         try:
             await self.bot.wait_for("message", timeout=15.0, check=check)
         except asyncio.TimeoutError:
             return await ctx.send("❌ Cancelled.")
 
-        uid = str(target.id)
-        if uid in self.bot.db.data:
-            from utils import make_default_user
+        from utils import make_default_user
 
+        uid = str(target.id)
+        async with self.bot.db.lock:
+            if uid not in self.bot.db.data:
+                return await ctx.send("❌ User not found in DB.")
             self.bot.db.data[uid] = make_default_user()
             await self.bot.db.save()
-            await ctx.send(f"💀 **Wiped {target.name}.** RIP.")
-        else:
-            await ctx.send("❌ User not found in DB.")
+        await ctx.send(f"💀 **Wiped {target.name}.** RIP.")
 
     @commands.command(name="announce", hidden=True)
     async def announce(self, ctx, channel: discord.TextChannel, *, message):

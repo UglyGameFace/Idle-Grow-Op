@@ -1,375 +1,482 @@
-import discord
 import random
 import time
-import asyncio
+
+import discord
 from discord.ext import commands
-# THE FIX: Importing from utils, NOT config
-from utils import (
-    db_manager, 
-    SHOP_ITEMS, 
-    GROWTH_CYCLES,
-    CONCENTRATE_TYPES,
-    SLOTS_SYMBOLS, 
-    SLOTS_PAYOUTS, 
-    inv_add, 
-    inv_get, 
-    inv_take,
-    jail_guard, 
-    _shop_price,
-    has_item,
-    _norm_item_key
+
+from economy_integrity import (
+    pot_upgrade_capacity,
+    require_positive_amount,
+    validate_auction_prices,
+    validate_bid_amount,
 )
+from utils import (
+    CONCENTRATE_TYPES,
+    GROWTH_CYCLES,
+    POT_UPGRADE_LIMITS,
+    SHOP_ITEMS,
+    SLOTS_PAYOUTS,
+    SLOTS_SYMBOLS,
+    _shop_price,
+    inv_add,
+    inv_get,
+    inv_take,
+    jail_guard,
+)
+
 
 class Economy(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    # ==========================================================
-    # 💰 BASIC MONEY COMMANDS
-    # ==========================================================
     @commands.hybrid_command(name="balance", aliases=["bal", "cash", "wallet"])
     async def balance(self, ctx, target: discord.User = None):
         target = target or ctx.author
         user = self.bot.db.get_user(target.id)
-        grams = user.get("grams", 0)
-        dirty = user.get("dirty_cash", 0)
-        
+        clean_cash = max(0, int(user.get("grams", 0)))
+        dirty_cash = max(0, int(user.get("dirty_cash", 0)))
+
         embed = discord.Embed(color=discord.Color.green())
         embed.set_author(name=f"{target.name}'s Wallet", icon_url=target.display_avatar.url)
-        embed.add_field(name="💸 Clean Cash", value=f"${grams:,}", inline=True)
-        if dirty > 0:
-            embed.add_field(name="🧼 Dirty Cash", value=f"${dirty:,}", inline=True)
+        embed.add_field(name="💸 Clean Cash", value=f"${clean_cash:,}", inline=True)
+        if dirty_cash:
+            embed.add_field(name="🧼 Dirty Cash", value=f"${dirty_cash:,}", inline=True)
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="give", aliases=["pay", "transfer"])
     async def give(self, ctx, target: discord.User, amount: int):
-        if amount <= 0: return await ctx.send("❌ Amount must be positive.")
-        if target.id == ctx.author.id: return await ctx.send("❌ Can't pay yourself.")
-        
+        try:
+            transfer_amount = require_positive_amount(amount)
+        except ValueError:
+            return await ctx.send("❌ Amount must be a positive whole number.")
+        if target.id == ctx.author.id:
+            return await ctx.send("❌ Can't pay yourself.")
+
         sender = self.bot.db.get_user(ctx.author.id)
-        receiver = self.bot.db.get_user(target.id)
-        
-        if await jail_guard(ctx, sender, "trade"): return
-        if sender.get("grams", 0) < amount: return await ctx.send("💸 **Insufficient funds.**")
-            
-        sender["grams"] -= amount
-        receiver["grams"] = receiver.get("grams", 0) + amount
-        await self.bot.db.save()
-        await ctx.send(f"💸 **Transferred:** ${amount:,} to {target.mention}.")
+        if await jail_guard(ctx, sender, "trade"):
+            return
+
+        async with self.bot.db.lock:
+            receiver = self.bot.db.get_user(target.id)
+            sender_balance = max(0, int(sender.get("grams", 0)))
+            if sender_balance < transfer_amount:
+                return await ctx.send("💸 **Insufficient funds.**")
+            sender["grams"] = sender_balance - transfer_amount
+            receiver["grams"] = max(0, int(receiver.get("grams", 0))) + transfer_amount
+            await self.bot.db.save()
+
+        await ctx.send(f"💸 **Transferred:** ${transfer_amount:,} to {target.mention}.")
 
     @commands.hybrid_command(name="leaderboard", aliases=["lb", "top", "rich"])
     async def leaderboard(self, ctx):
-        all_data = self.bot.db.data
         users = []
-        for uid, data in all_data.items():
-            if uid.isdigit(): users.append((uid, data.get("grams", 0)))
-        
-        users.sort(key=lambda x: x[1], reverse=True)
-        desc = ""
-        for idx, (uid, amt) in enumerate(users[:10]):
-            try:
-                member = ctx.guild.get_member(int(uid))
-                name = member.name if member else f"User {uid}"
-            except: name = f"User {uid}"
-            emoji = "🥇" if idx == 0 else "🥈" if idx == 1 else "🥉" if idx == 2 else f"#{idx+1}"
-            desc += f"{emoji} **{name}**: ${amt:,}\n"
-            
-        embed = discord.Embed(title="🏆 Global Leaderboard", description=desc, color=discord.Color.gold())
+        for uid, data in self.bot.db.data.items():
+            if uid.isdigit():
+                users.append((uid, max(0, int(data.get("grams", 0)))))
+        users.sort(key=lambda item: item[1], reverse=True)
+
+        lines = []
+        for index, (uid, amount) in enumerate(users[:10]):
+            member = ctx.guild.get_member(int(uid)) if ctx.guild else None
+            name = member.name if member else f"User {uid}"
+            rank = "🥇" if index == 0 else "🥈" if index == 1 else "🥉" if index == 2 else f"#{index + 1}"
+            lines.append(f"{rank} **{name}**: ${amount:,}")
+
+        embed = discord.Embed(
+            title="🏆 Global Leaderboard",
+            description="\n".join(lines) or "No players yet.",
+            color=discord.Color.gold(),
+        )
         await ctx.send(embed=embed)
 
-    # ==========================================================
-    # 📦 INVENTORY & SHOP
-    # ==========================================================
     @commands.hybrid_command(name="inventory", aliases=["inv", "bag", "stash"])
     async def inventory(self, ctx):
         user = self.bot.db.get_user(ctx.author.id)
-        
-        items_list = user.get("items", {})
-        sorted_items = sorted(items_list.items())
-        items_desc = "\n".join([f"**{name.title()}**: x{count}" for name, count in sorted_items]) or "Nothing."
+        items = user.get("items", {})
+        flower = user.get("flower_stash", {})
+        concentrates = user.get("concentrates", {})
 
-        flower_stash = user.get("flower_stash", {})
-        sorted_stash = sorted(flower_stash.items())
-        stash_desc = "\n".join([f"🌿 **{name.title()}**: {count}g" for name, count in sorted_stash]) or "Empty."
-        
-        conc_stash = user.get("concentrates", {})
-        sorted_conc = sorted(conc_stash.items())
-        conc_desc = "\n".join([f"🍯 **{name.title()}**: {count}g" for name, count in sorted_conc]) or "Empty."
+        items_desc = "\n".join(
+            f"**{name.title()}**: x{count}"
+            for name, count in sorted(items.items())
+            if int(count) > 0
+        ) or "Nothing."
+        flower_desc = "\n".join(
+            f"🌿 **{name.title()}**: {count}g"
+            for name, count in sorted(flower.items())
+            if int(count) > 0
+        ) or "Empty."
+        concentrate_desc = "\n".join(
+            f"🍯 **{name.title()}**: {count}g"
+            for name, count in sorted(concentrates.items())
+            if int(count) > 0
+        ) or "Empty."
 
         embed = discord.Embed(title=f"🎒 {ctx.author.name}'s Inventory", color=discord.Color.blue())
-        embed.add_field(name="💳 Wallet", value=f"${user.get('grams', 0):,}", inline=False)
+        embed.add_field(name="💳 Wallet", value=f"${max(0, int(user.get('grams', 0))):,}", inline=False)
         embed.add_field(name="📦 Items", value=items_desc, inline=True)
-        embed.add_field(name="🧱 Flower", value=stash_desc, inline=True)
-        embed.add_field(name="⚗️ Concentrates", value=conc_desc, inline=True)
+        embed.add_field(name="🧱 Flower", value=flower_desc, inline=True)
+        embed.add_field(name="⚗️ Concentrates", value=concentrate_desc, inline=True)
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="shop", aliases=["store"])
     async def shop(self, ctx, category: str = "all"):
         embed = discord.Embed(title="🛒 Shop", color=discord.Color.gold())
-        def get_cat(n, d):
-            t = d.get("type", "misc")
-            if "seed" in t: return "seeds"
-            if "equipment" in t or "pot" in t or "tool" in t: return "equipment"
-            return "misc"
-
         content = {"seeds": "", "equipment": "", "misc": ""}
-        for name, data in SHOP_ITEMS.items():
-            cat = get_cat(name, data)
-            if category != "all" and category not in cat: continue
-            price = _shop_price(data)
-            content[cat] += f"• **{name.title()}** — ${price:,}\n"
 
-        if content["seeds"]: embed.add_field(name="🌱 Seeds", value=content["seeds"], inline=False)
-        if content["equipment"]: embed.add_field(name="💡 Equipment", value=content["equipment"], inline=False)
-        if content["misc"]: embed.add_field(name="🔧 Misc", value=content["misc"], inline=False)
+        for name, data in SHOP_ITEMS.items():
+            item_type = data.get("type", "misc")
+            if "seed" in item_type:
+                item_category = "seeds"
+            elif "equipment" in item_type or "pot" in item_type or "tool" in item_type:
+                item_category = "equipment"
+            else:
+                item_category = "misc"
+            if category != "all" and category != item_category:
+                continue
+            content[item_category] += f"• **{name.title()}** — ${_shop_price(data):,}\n"
+
+        if content["seeds"]:
+            embed.add_field(name="🌱 Seeds", value=content["seeds"], inline=False)
+        if content["equipment"]:
+            embed.add_field(name="💡 Equipment", value=content["equipment"], inline=False)
+        if content["misc"]:
+            embed.add_field(name="🔧 Misc", value=content["misc"], inline=False)
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="buy")
     async def buy(self, ctx, *, item_name: str):
         user = self.bot.db.get_user(ctx.author.id)
-        if await jail_guard(ctx, user, "buy"): return
-        
-        clean = item_name.lower().strip()
-        if clean not in SHOP_ITEMS: return await ctx.send("❌ Item not found.")
-        
-        data = SHOP_ITEMS[clean]
-        cost = _shop_price(data)
-        
-        if user.get("grams", 0) < cost: return await ctx.send("💸 Too poor.")
-        if user.get("level", 1) < data.get("level_req", 1): return await ctx.send("🔒 Level locked.")
-        
-        if data.get("type") == "pot_upgrade":
-            user["max_pots"] = user.get("max_pots", 3) + 1
-        
-        user["grams"] -= cost
-        inv_add(user, clean, 1)
-        await self.bot.db.save()
-        await ctx.send(f"✅ Bought **{clean.title()}** for ${cost:,}.")
+        if await jail_guard(ctx, user, "buy"):
+            return
 
-    # ==========================================================
-    # 📉 SELLING & MARKET
-    # ==========================================================
+        clean_name = item_name.lower().strip()
+        item = SHOP_ITEMS.get(clean_name)
+        if item is None:
+            return await ctx.send("❌ Item not found.")
+
+        cost = _shop_price(item)
+        if cost < 0:
+            return await ctx.send("❌ This item is currently unavailable.")
+        if int(user.get("level", 1)) < int(item.get("level_req", 1)):
+            return await ctx.send("🔒 Level locked.")
+
+        async with self.bot.db.lock:
+            balance = max(0, int(user.get("grams", 0)))
+            if balance < cost:
+                return await ctx.send("💸 Too poor.")
+
+            new_capacity = None
+            if item.get("type") == "pot_upgrade":
+                try:
+                    new_capacity = pot_upgrade_capacity(user, clean_name, POT_UPGRADE_LIMITS)
+                except ValueError:
+                    return await ctx.send("🚫 You already own the maximum number of that pot upgrade.")
+
+            user["grams"] = balance - cost
+            inv_add(user, clean_name, 1)
+            if new_capacity is not None:
+                user["max_pots"] = new_capacity
+            await self.bot.db.save()
+
+        await ctx.send(f"✅ Bought **{clean_name.title()}** for ${cost:,}.")
+
     @commands.hybrid_command(name="sell")
     async def sell(self, ctx, amount: str = "all", *, strain_name: str = None):
         user = self.bot.db.get_user(ctx.author.id)
-        if await jail_guard(ctx, user, "sell"): return
-        
-        world = self.bot.db.world_state
-        market_mult = world.get("market_multiplier", 1.0)
-        stash = user.get("flower_stash", {})
-        total_earnings = 0
+        if await jail_guard(ctx, user, "sell"):
+            return
+
+        market_multiplier = max(0.0, float(self.bot.db.world_state.get("market_multiplier", 1.0)))
         sold_log = []
+        total_earnings = 0
 
-        def sell_strain(name, qty):
-            if qty <= 0: return 0
-            g_info = GROWTH_CYCLES.get(name, {"base_value": 10})
-            base = g_info.get("base_value", 10)
-            
-            # Skill Check
-            skill_mult = 1.0 
+        async with self.bot.db.lock:
+            stash = user.setdefault("flower_stash", {})
+            if amount.lower() == "all":
+                sale_items = [(name, max(0, int(qty))) for name, qty in list(stash.items()) if int(qty) > 0]
+                if not sale_items:
+                    return await ctx.send("🎒 Your flower stash is empty.")
+            else:
+                if not strain_name:
+                    return await ctx.send("❌ Usage: `!sell <amount> <strain>`")
+                try:
+                    quantity = require_positive_amount(amount)
+                except ValueError:
+                    return await ctx.send("❌ Amount must be a positive whole number.")
+                clean_name = strain_name.lower().strip()
+                if max(0, int(stash.get(clean_name, 0))) < quantity:
+                    return await ctx.send(f"❌ You don't have {quantity}g of {clean_name}.")
+                sale_items = [(clean_name, quantity)]
+
             skills = user.get("skills", {})
-            if "dealmaker" in skills: skill_mult += (skills["dealmaker"] * 0.05)
+            dealmaker_level = max(0, int(skills.get("dealmaker", 0)))
+            skill_multiplier = 1.0 + dealmaker_level * 0.05
 
-            price_per_g = int(base * market_mult * skill_mult)
-            earnings = price_per_g * qty
-            
-            stash[name] -= qty
-            if stash[name] <= 0: del stash[name]
-            return earnings
+            for name, quantity in sale_items:
+                base_value = max(0, int(GROWTH_CYCLES.get(name, {"base_value": 10}).get("base_value", 10)))
+                unit_price = max(0, int(base_value * market_multiplier * skill_multiplier))
+                total_earnings += unit_price * quantity
+                stash[name] = max(0, int(stash.get(name, 0))) - quantity
+                if stash[name] <= 0:
+                    stash.pop(name, None)
+                sold_log.append(f"{quantity}g {name.title()}")
 
-        if amount.lower() == "all":
-            items_to_sell = list(stash.items())
-            if not items_to_sell: return await ctx.send("🎒 Your flower stash is empty.")
-            for name, qty in items_to_sell:
-                earn = sell_strain(name, qty)
-                total_earnings += earn
-                sold_log.append(f"{qty}g {name.title()}")
-        else:
-            if not strain_name: return await ctx.send("❌ Usage: `!sell <amount> <strain>`")
-            try: qty = int(amount)
-            except: return await ctx.send("❌ Invalid amount.")
-            
-            clean_name = strain_name.lower().strip()
-            if stash.get(clean_name, 0) < qty: return await ctx.send(f"❌ You don't have {qty}g of {clean_name}.")
-            earn = sell_strain(clean_name, qty)
-            total_earnings += earn
-            sold_log.append(f"{qty}g {clean_name.title()}")
+            user["grams"] = max(0, int(user.get("grams", 0))) + total_earnings
+            stats = user.setdefault("stats", {})
+            stats["total_earned"] = max(0, int(stats.get("total_earned", 0))) + total_earnings
+            await self.bot.db.save()
 
-        user["grams"] = int(user.get("grams", 0) + total_earnings)
-        stats = user.setdefault("stats", {})
-        stats["total_earned"] = stats.get("total_earned", 0) + total_earnings
-        
-        await self.bot.db.save()
-        
-        desc = "\n".join(sold_log)
         embed = discord.Embed(title="🤝 Market Sale", color=discord.Color.green())
-        embed.add_field(name="Sold", value=desc or "Nothing", inline=False)
-        embed.add_field(name="Earnings", value=f"**${total_earnings:,}** (Market: {int(market_mult*100)}%)", inline=False)
+        embed.add_field(name="Sold", value="\n".join(sold_log), inline=False)
+        embed.add_field(
+            name="Earnings",
+            value=f"**${total_earnings:,}** (Market: {int(market_multiplier * 100)}%)",
+            inline=False,
+        )
         await ctx.send(embed=embed)
 
     @commands.command(name="sellconc")
     async def sellconc(self, ctx, amount: str = "all", *, type_name: str = None):
         user = self.bot.db.get_user(ctx.author.id)
-        if await jail_guard(ctx, user, "sell"): return
-        
-        conc_stash = user.get("concentrates", {})
-        total_earnings = 0
+        if await jail_guard(ctx, user, "sell"):
+            return
+
+        market_multiplier = max(0.0, float(self.bot.db.world_state.get("market_multiplier", 1.0)))
         sold_log = []
-        market_mult = self.bot.db.world_state.get("market_multiplier", 1.0)
+        total_earnings = 0
 
-        def sell_one(c_type, qty):
-            c_info = CONCENTRATE_TYPES.get(c_type, {})
-            mult = c_info.get("value_mult", 2.0)
-            base_price = 50 * mult 
-            final_price = int(base_price * market_mult)
-            earnings = final_price * qty
-            conc_stash[c_type] -= qty
-            if conc_stash[c_type] <= 0: del conc_stash[c_type]
-            return earnings
+        async with self.bot.db.lock:
+            stash = user.setdefault("concentrates", {})
+            if amount.lower() == "all":
+                sale_items = [(name, max(0, int(qty))) for name, qty in list(stash.items()) if int(qty) > 0]
+                if not sale_items:
+                    return await ctx.send("🍯 No concentrates to sell.")
+            else:
+                if not type_name:
+                    return await ctx.send("❌ Usage: `!sellconc <amount> <type>`")
+                try:
+                    quantity = require_positive_amount(amount)
+                except ValueError:
+                    return await ctx.send("❌ Amount must be a positive whole number.")
+                clean_name = type_name.lower().strip()
+                if max(0, int(stash.get(clean_name, 0))) < quantity:
+                    return await ctx.send("❌ Not enough.")
+                sale_items = [(clean_name, quantity)]
 
-        if amount.lower() == "all":
-            items = list(conc_stash.items())
-            if not items: return await ctx.send("🍯 No concentrates to sell.")
-            for c, q in items:
-                earn = sell_one(c, q)
-                total_earnings += earn
-                sold_log.append(f"{q}g {c.title()}")
-        else:
-            if not type_name: return await ctx.send("❌ Usage: `!sellconc <amount> <type>`")
-            try: qty = int(amount)
-            except: return await ctx.send("❌ Invalid amount.")
-            clean = type_name.lower().strip()
-            if conc_stash.get(clean, 0) < qty: return await ctx.send("❌ Not enough.")
-            earn = sell_one(clean, qty)
-            total_earnings += earn
-            sold_log.append(f"{qty}g {clean.title()}")
+            for concentrate_type, quantity in sale_items:
+                value_multiplier = max(
+                    0.0,
+                    float(CONCENTRATE_TYPES.get(concentrate_type, {}).get("value_mult", 2.0)),
+                )
+                unit_price = max(0, int(50 * value_multiplier * market_multiplier))
+                total_earnings += unit_price * quantity
+                stash[concentrate_type] = max(0, int(stash.get(concentrate_type, 0))) - quantity
+                if stash[concentrate_type] <= 0:
+                    stash.pop(concentrate_type, None)
+                sold_log.append(f"{quantity}g {concentrate_type.title()}")
 
-        user["grams"] += total_earnings
-        await self.bot.db.save()
+            user["grams"] = max(0, int(user.get("grams", 0))) + total_earnings
+            stats = user.setdefault("stats", {})
+            stats["total_earned"] = max(0, int(stats.get("total_earned", 0))) + total_earnings
+            await self.bot.db.save()
+
         await ctx.send(f"🍯 Sold **{', '.join(sold_log)}** for **${total_earnings:,}**.")
 
-    # ==========================================================
-    # 🔨 AUCTION SYSTEM
-    # ==========================================================
+    async def _settle_expired_auctions(self):
+        world = self.bot.db.world_state
+        auctions = world.setdefault("auctions", {})
+        now = time.time()
+        changed = False
+
+        for auction_id, auction in list(auctions.items()):
+            if now < float(auction.get("end_time", 0)):
+                continue
+
+            seller = self.bot.db.get_user(auction["seller_id"])
+            highest_bidder_id = auction.get("highest_bidder")
+            if highest_bidder_id is None:
+                inv_add(seller, auction["item_name"], 1)
+            else:
+                buyer = self.bot.db.get_user(highest_bidder_id)
+                inv_add(buyer, auction["item_name"], 1)
+                seller["grams"] = max(0, int(seller.get("grams", 0))) + max(0, int(auction["current_bid"]))
+            del auctions[auction_id]
+            changed = True
+
+        if changed:
+            await self.bot.db.save()
+
     @commands.group(invoke_without_command=True)
     async def auction(self, ctx):
-        auctions = self.bot.db.world_state.get("auctions", {})
-        if not auctions: return await ctx.send("🔨 **Auction House is closed.** No items listed.")
-            
+        async with self.bot.db.lock:
+            await self._settle_expired_auctions()
+            auctions = dict(self.bot.db.world_state.get("auctions", {}))
+
+        if not auctions:
+            return await ctx.send("🔨 **Auction House is closed.** No items listed.")
+
         embed = discord.Embed(title="🔨 Auction House", color=discord.Color.dark_orange())
-        for auc_id, data in auctions.items():
-            seller = data['seller_name']
-            item = data['item_name']
-            curr_bid = data['current_bid']
-            buyout = data.get('buyout', 'N/A')
-            expires = data['end_time']
-            time_left = int(expires - time.time())
-            
-            if time_left > 0:
-                m, s = divmod(time_left, 60)
-                desc = f"Seller: {seller}\nBid: ${curr_bid:,}\nBuyout: ${buyout}\nEnds in: {m}m {s}s"
-                embed.add_field(name=f"ID: {auc_id} | {item}", value=desc, inline=True)
-                
+        now = time.time()
+        for auction_id, auction in auctions.items():
+            seconds_left = max(0, int(float(auction["end_time"]) - now))
+            minutes, seconds = divmod(seconds_left, 60)
+            buyout = int(auction.get("buyout", 0))
+            buyout_text = f"${buyout:,}" if buyout else "N/A"
+            description = (
+                f"Seller: {auction['seller_name']}\n"
+                f"Bid: ${int(auction['current_bid']):,}\n"
+                f"Buyout: {buyout_text}\n"
+                f"Ends in: {minutes}m {seconds}s"
+            )
+            embed.add_field(
+                name=f"ID: {auction_id} | {auction['item_name']}",
+                value=description,
+                inline=True,
+            )
         embed.set_footer(text="Use !bid <id> <amount> or !auction list <item> <price> <buyout>")
         await ctx.send(embed=embed)
 
     @auction.command(name="list")
     async def auction_list(self, ctx, item_name: str, start_price: int, buyout: int = 0):
+        try:
+            valid_start, valid_buyout = validate_auction_prices(start_price, buyout)
+        except ValueError as exc:
+            return await ctx.send(f"❌ {exc}.")
+
         user = self.bot.db.get_user(ctx.author.id)
         clean_item = item_name.lower().strip()
-        
-        if inv_get(user, clean_item) < 1: return await ctx.send(f"❌ You don't have **{clean_item}**.")
-        inv_take(user, clean_item, 1)
-        
-        world = self.bot.db.world_state
-        if "auctions" not in world: world["auctions"] = {}
-        
-        auc_id = str(world.get("auction_counter", 1000) + 1)
-        world["auction_counter"] = int(auc_id)
-        
-        world["auctions"][auc_id] = {
-            "seller_id": ctx.author.id,
-            "seller_name": ctx.author.name,
-            "item_name": clean_item,
-            "start_price": start_price,
-            "current_bid": start_price,
-            "highest_bidder": None,
-            "buyout": buyout,
-            "end_time": time.time() + 3600
-        }
-        await self.bot.db.save()
-        await ctx.send(f"🔨 **Listed!** {clean_item} for ${start_price}. ID: `{auc_id}`")
+
+        async with self.bot.db.lock:
+            await self._settle_expired_auctions()
+            if inv_get(user, clean_item) < 1:
+                return await ctx.send(f"❌ You don't have **{clean_item}**.")
+            if not inv_take(user, clean_item, 1):
+                return await ctx.send(f"❌ You don't have **{clean_item}**.")
+
+            world = self.bot.db.world_state
+            auctions = world.setdefault("auctions", {})
+            auction_id = str(int(world.get("auction_counter", 1000)) + 1)
+            world["auction_counter"] = int(auction_id)
+            auctions[auction_id] = {
+                "seller_id": ctx.author.id,
+                "seller_name": ctx.author.name,
+                "item_name": clean_item,
+                "start_price": valid_start,
+                "current_bid": valid_start,
+                "highest_bidder": None,
+                "buyout": valid_buyout,
+                "end_time": time.time() + 3600,
+            }
+            await self.bot.db.save()
+
+        await ctx.send(f"🔨 **Listed!** {clean_item} for ${valid_start:,}. ID: `{auction_id}`")
 
     @commands.command(name="bid")
     async def bid(self, ctx, auction_id: str, amount: int):
-        world = self.bot.db.world_state
-        auctions = world.get("auctions", {})
-        if auction_id not in auctions: return await ctx.send("❌ Invalid Auction ID.")
-            
-        auc = auctions[auction_id]
         user = self.bot.db.get_user(ctx.author.id)
-        
-        if amount <= auc["current_bid"]: return await ctx.send(f"❌ Bid must be higher than ${auc['current_bid']}.")
-        if user.get("grams", 0) < amount: return await ctx.send("💸 Insufficient funds.")
-        if auc["seller_id"] == ctx.author.id: return await ctx.send("❌ You can't bid on your own item.")
-            
-        user["grams"] -= amount
-        
-        if auc["highest_bidder"]:
-            prev_user = self.bot.db.get_user(auc["highest_bidder"])
-            prev_user["grams"] += auc["current_bid"]
-            
-        auc["current_bid"] = amount
-        auc["highest_bidder"] = ctx.author.id
-        
-        if auc["buyout"] > 0 and amount >= auc["buyout"]:
-            buyer = self.bot.db.get_user(auc["highest_bidder"])
-            inv_add(buyer, auc["item_name"], 1)
-            seller = self.bot.db.get_user(auc["seller_id"])
-            seller["grams"] += auc["current_bid"]
-            del world["auctions"][auction_id]
-            await ctx.send(f"🔨 **BOOM!** You bought out the item!")
-        else:
-            await ctx.send(f"✅ **Bid Placed!** You are leading with ${amount}.")
-        await self.bot.db.save()
 
-    # ==========================================================
-    # 🎰 MINIGAMES
-    # ==========================================================
+        async with self.bot.db.lock:
+            await self._settle_expired_auctions()
+            auctions = self.bot.db.world_state.setdefault("auctions", {})
+            auction = auctions.get(auction_id)
+            if auction is None:
+                return await ctx.send("❌ Invalid or expired Auction ID.")
+            if int(auction["seller_id"]) == ctx.author.id:
+                return await ctx.send("❌ You can't bid on your own item.")
+
+            buyout = max(0, int(auction.get("buyout", 0)))
+            requested = buyout if buyout and amount >= buyout else amount
+            try:
+                valid_bid = validate_bid_amount(
+                    requested,
+                    current_bid=auction["current_bid"],
+                    end_time=auction["end_time"],
+                    now=time.time(),
+                )
+            except ValueError as exc:
+                return await ctx.send(f"❌ {exc}.")
+
+            previous_bidder_id = auction.get("highest_bidder")
+            current_bid = max(0, int(auction["current_bid"]))
+            bidder_balance = max(0, int(user.get("grams", 0)))
+            required_funds = valid_bid - current_bid if previous_bidder_id == ctx.author.id else valid_bid
+            if bidder_balance < required_funds:
+                return await ctx.send("💸 Insufficient funds.")
+
+            user["grams"] = bidder_balance - required_funds
+            if previous_bidder_id is not None and previous_bidder_id != ctx.author.id:
+                previous_bidder = self.bot.db.get_user(previous_bidder_id)
+                previous_bidder["grams"] = max(0, int(previous_bidder.get("grams", 0))) + current_bid
+
+            auction["current_bid"] = valid_bid
+            auction["highest_bidder"] = ctx.author.id
+
+            bought_out = bool(buyout and valid_bid >= buyout)
+            if bought_out:
+                inv_add(user, auction["item_name"], 1)
+                seller = self.bot.db.get_user(auction["seller_id"])
+                seller["grams"] = max(0, int(seller.get("grams", 0))) + valid_bid
+                del auctions[auction_id]
+            await self.bot.db.save()
+
+        if bought_out:
+            await ctx.send(f"🔨 **BOOM!** You bought out the item for ${valid_bid:,}!")
+        else:
+            await ctx.send(f"✅ **Bid Placed!** You are leading with ${valid_bid:,}.")
+
     @commands.hybrid_command(name="slots")
     async def slots(self, ctx, amount: int = 100):
         user = self.bot.db.get_user(ctx.author.id)
-        if await jail_guard(ctx, user, "gamble"): return
-        if amount < 10: return await ctx.send("Min bet 10.")
-        if user.get("grams", 0) < amount: return await ctx.send("💸 Broke.")
-        
-        user["grams"] -= amount
-        row = [random.choice(SLOTS_SYMBOLS) for _ in range(3)]
-        win = 0
-        
-        if row[0] == row[1] == row[2]: win = int(amount * SLOTS_PAYOUTS.get(row[0], 2) * 3)
-        elif row[0] == row[1] or row[1] == row[2]: win = int(amount * 1.5)
-            
-        user["grams"] += win
-        await self.bot.db.save()
-        res = "WIN" if win > 0 else "LOSE"
-        await ctx.send(f"🎰 | {' '.join(row)} | **{res}** (${win})")
+        if await jail_guard(ctx, user, "gamble"):
+            return
+        try:
+            bet = require_positive_amount(amount, minimum=10)
+        except ValueError:
+            return await ctx.send("❌ Minimum bet is $10.")
+
+        async with self.bot.db.lock:
+            balance = max(0, int(user.get("grams", 0)))
+            if balance < bet:
+                return await ctx.send("💸 Broke.")
+            user["grams"] = balance - bet
+            row = [random.choice(SLOTS_SYMBOLS) for _ in range(3)]
+            winnings = 0
+            if row[0] == row[1] == row[2]:
+                winnings = max(0, int(bet * SLOTS_PAYOUTS.get(row[0], 2) * 3))
+            elif row[0] == row[1] or row[1] == row[2]:
+                winnings = max(0, int(bet * 1.5))
+            user["grams"] += winnings
+            await self.bot.db.save()
+
+        result = "WIN" if winnings else "LOSE"
+        await ctx.send(f"🎰 | {' '.join(row)} | **{result}** (${winnings:,})")
 
     @commands.hybrid_command(name="dice")
     async def dice(self, ctx, bet: int = 100):
         user = self.bot.db.get_user(ctx.author.id)
-        if await jail_guard(ctx, user, "gamble"): return
-        if user.get("grams", 0) < bet: return await ctx.send("💸 Broke.")
-        
-        user["grams"] -= bet
-        roll = random.randint(1, 100)
-        if roll > 50:
-            win = int(bet * 1.9)
-            user["grams"] += win
-            await ctx.send(f"🎲 Rolled **{roll}**. You won ${win}!")
+        if await jail_guard(ctx, user, "gamble"):
+            return
+        try:
+            valid_bet = require_positive_amount(bet, minimum=10)
+        except ValueError:
+            return await ctx.send("❌ Minimum bet is $10.")
+
+        async with self.bot.db.lock:
+            balance = max(0, int(user.get("grams", 0)))
+            if balance < valid_bet:
+                return await ctx.send("💸 Broke.")
+            user["grams"] = balance - valid_bet
+            roll = random.randint(1, 100)
+            winnings = max(0, int(valid_bet * 1.9)) if roll > 50 else 0
+            user["grams"] += winnings
+            await self.bot.db.save()
+
+        if winnings:
+            await ctx.send(f"🎲 Rolled **{roll}**. You won ${winnings:,}!")
         else:
             await ctx.send(f"🎲 Rolled **{roll}**. You lost.")
-        await self.bot.db.save()
+
 
 async def setup(bot):
     await bot.add_cog(Economy(bot))
