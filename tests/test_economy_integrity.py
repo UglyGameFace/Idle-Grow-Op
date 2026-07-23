@@ -1,4 +1,13 @@
-from economy_integrity import calculate_harvest_outcome
+import pytest
+
+from economy_integrity import (
+    calculate_harvest_outcome,
+    flower_required_for_output,
+    pot_upgrade_capacity,
+    require_positive_amount,
+    validate_auction_prices,
+    validate_bid_amount,
+)
 
 
 def test_mixed_strain_harvest_preserves_per_strain_yields():
@@ -75,7 +84,7 @@ def test_yield_multiplier_is_applied_once_per_plant():
 
 
 def test_negative_yield_multiplier_is_rejected():
-    try:
+    with pytest.raises(ValueError, match="yield_multiplier"):
         calculate_harvest_outcome(
             [],
             now=0,
@@ -84,7 +93,56 @@ def test_negative_yield_multiplier_is_rejected():
             yield_multiplier=-1,
             randint=lambda minimum, maximum: minimum,
         )
-    except ValueError as error:
-        assert "yield_multiplier" in str(error)
-    else:
-        raise AssertionError("negative multiplier should be rejected")
+
+
+@pytest.mark.parametrize("value", [0, -1, -100, True, 1.5, "1.5", "nope"])
+def test_non_positive_or_non_integer_economy_amounts_are_rejected(value):
+    with pytest.raises(ValueError):
+        require_positive_amount(value)
+
+
+def test_positive_amount_can_enforce_a_minimum_bet():
+    assert require_positive_amount(10, minimum=10) == 10
+    with pytest.raises(ValueError):
+        require_positive_amount(9, minimum=10)
+
+
+def test_flower_requirement_rounds_up_instead_of_undercharging():
+    assert flower_required_for_output(1, 0.20) == 5
+    assert flower_required_for_output(2, 0.15) == 14
+    assert flower_required_for_output(10, 0.12) == 84
+
+
+def test_flower_requirement_rejects_invalid_output_and_ratio():
+    with pytest.raises(ValueError):
+        flower_required_for_output(0, 0.2)
+    with pytest.raises(ValueError):
+        flower_required_for_output(1, 0)
+
+
+def test_auction_prices_must_be_positive_and_coherent():
+    assert validate_auction_prices(100, 500) == (100, 500)
+    assert validate_auction_prices(100, 0) == (100, 0)
+    with pytest.raises(ValueError):
+        validate_auction_prices(0, 0)
+    with pytest.raises(ValueError):
+        validate_auction_prices(100, -1)
+    with pytest.raises(ValueError):
+        validate_auction_prices(100, 99)
+
+
+def test_expired_or_non_increasing_bids_are_rejected():
+    assert validate_bid_amount(101, current_bid=100, end_time=200, now=100) == 101
+    with pytest.raises(ValueError, match="expired"):
+        validate_bid_amount(101, current_bid=100, end_time=100, now=100)
+    with pytest.raises(ValueError, match="higher"):
+        validate_bid_amount(100, current_bid=100, end_time=200, now=100)
+
+
+def test_pot_upgrade_limit_is_enforced_before_capacity_changes():
+    user = {"max_pots": 5, "items": {"clay pot": 2}}
+    assert pot_upgrade_capacity(user, "clay pot", {"clay pot": 3}) == 6
+
+    user["items"]["clay pot"] = 3
+    with pytest.raises(ValueError, match="limit"):
+        pot_upgrade_capacity(user, "clay pot", {"clay pot": 3})
