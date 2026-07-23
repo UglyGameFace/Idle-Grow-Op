@@ -16,16 +16,20 @@ from utils import (
 class Tasks(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # Start loops
-        self.game_cycle.start()
-        self.notification_check.start()
-        # self.backup_db.start()  <-- DISABLED FOR DISCLOUD
-        self.status_cycle.start()
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        """Start background loops only after Discord has initialized the client."""
+        if not self.game_cycle.is_running():
+            self.game_cycle.start()
+        if not self.notification_check.is_running():
+            self.notification_check.start()
+        if not self.status_cycle.is_running():
+            self.status_cycle.start()
 
     def cog_unload(self):
         self.game_cycle.cancel()
         self.notification_check.cancel()
-        # self.backup_db.cancel()
         self.status_cycle.cancel()
 
     # ==========================================================
@@ -172,10 +176,6 @@ class Tasks(commands.Cog):
         ]
         
         await self.bot.change_presence(activity=discord.Game(name=random.choice(statuses)))
-
-    @game_cycle.before_loop
-    async def before_game_cycle(self):
-        await self.bot.wait_until_ready()
 
 async def setup(bot):
     await bot.add_cog(Tasks(bot))
