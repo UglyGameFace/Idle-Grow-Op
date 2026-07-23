@@ -6,7 +6,13 @@ import discord
 from discord.ext import commands
 
 from economy_integrity import require_positive_amount
-from utils import db_manager, inv_add
+from persistence_context import (
+    get_context_profile,
+    mark_context_profile_dirty,
+    require_guild_id,
+)
+from scoped_database import make_default_profile
+from utils import inv_add
 
 
 class Admin(commands.Cog):
@@ -48,25 +54,26 @@ class Admin(commands.Cog):
 
     @commands.command(hidden=True)
     async def backup(self, ctx):
-        """Request a database synchronization."""
-        await self.bot.db.save()
-        await ctx.send("💾 **Database save queued.**")
+        """Flush all currently dirty scoped records."""
+        result = await self.bot.db.flush()
+        await ctx.send(f"💾 **Saved {result.saved_count} dirty record(s).**")
 
     @commands.command(name="setmoney", hidden=True)
     async def setmoney(self, ctx, target: discord.User, amount: int):
-        """Set a user's non-negative cash balance."""
+        """Set a user's cash balance in the current server."""
         if amount < 0:
             return await ctx.send("❌ Balance cannot be negative.")
 
+        require_guild_id(ctx)
         async with self.bot.db.lock:
-            user = self.bot.db.get_user(target.id)
-            user["grams"] = int(amount)
-            await self.bot.db.save()
-        await ctx.send(f"✅ Set {target.name}'s balance to **${amount:,}**.")
+            profile = await get_context_profile(self.bot.db, ctx, target.id)
+            profile["grams"] = int(amount)
+            mark_context_profile_dirty(self.bot.db, ctx, target.id)
+        await ctx.send(f"✅ Set {target.name}'s balance to **${amount:,}** in this server.")
 
     @commands.command(name="giveitem", hidden=True)
     async def giveitem(self, ctx, target: discord.User, item_name: str, amount: int = 1):
-        """Spawn a positive quantity of items for a user."""
+        """Spawn a positive quantity of items in the current server."""
         try:
             quantity = require_positive_amount(amount)
         except ValueError:
@@ -76,32 +83,35 @@ class Admin(commands.Cog):
         if not clean_name:
             return await ctx.send("❌ Item name cannot be empty.")
 
+        require_guild_id(ctx)
         async with self.bot.db.lock:
-            user = self.bot.db.get_user(target.id)
-            inv_add(user, clean_name, quantity)
-            await self.bot.db.save()
-        await ctx.send(f"✅ Gave **x{quantity} {clean_name}** to {target.name}.")
+            profile = await get_context_profile(self.bot.db, ctx, target.id)
+            inv_add(profile, clean_name, quantity)
+            mark_context_profile_dirty(self.bot.db, ctx, target.id)
+        await ctx.send(f"✅ Gave **x{quantity} {clean_name}** to {target.name} in this server.")
 
     @commands.command(name="setlevel", hidden=True)
     async def setlevel(self, ctx, target: discord.User, level: int):
-        """Set a user's level to one or higher."""
+        """Set a user's local level to one or higher."""
         try:
             validated_level = require_positive_amount(level)
         except ValueError:
             return await ctx.send("❌ Level must be a positive integer.")
 
+        require_guild_id(ctx)
         async with self.bot.db.lock:
-            user = self.bot.db.get_user(target.id)
-            user["level"] = validated_level
-            user["xp"] = 0
-            await self.bot.db.save()
-        await ctx.send(f"✅ Set {target.name}'s level to **{validated_level}**.")
+            profile = await get_context_profile(self.bot.db, ctx, target.id)
+            profile["level"] = validated_level
+            profile["xp"] = 0
+            mark_context_profile_dirty(self.bot.db, ctx, target.id)
+        await ctx.send(f"✅ Set {target.name}'s level to **{validated_level}** in this server.")
 
     @commands.command(name="wipeuser", hidden=True)
     async def wipeuser(self, ctx, target: discord.User):
-        """Reset a user's profile completely."""
+        """Reset a user's profile in the current server only."""
+        require_guild_id(ctx)
         await ctx.send(
-            f"⚠️ **WARNING:** Are you sure you want to WIPE {target.name}? Type `yes`."
+            f"⚠️ **WARNING:** Wipe {target.name}'s Idle Grow profile in this server? Type `yes`."
         )
 
         def check(message):
@@ -116,15 +126,12 @@ class Admin(commands.Cog):
         except asyncio.TimeoutError:
             return await ctx.send("❌ Cancelled.")
 
-        from utils import make_default_user
-
-        uid = str(target.id)
         async with self.bot.db.lock:
-            if uid not in self.bot.db.data:
-                return await ctx.send("❌ User not found in DB.")
-            self.bot.db.data[uid] = make_default_user()
-            await self.bot.db.save()
-        await ctx.send(f"💀 **Wiped {target.name}.** RIP.")
+            profile = await get_context_profile(self.bot.db, ctx, target.id)
+            profile.clear()
+            profile.update(make_default_profile())
+            mark_context_profile_dirty(self.bot.db, ctx, target.id)
+        await ctx.send(f"💀 **Wiped {target.name}'s profile in this server.**")
 
     @commands.command(name="announce", hidden=True)
     async def announce(self, ctx, channel: discord.TextChannel, *, message):
