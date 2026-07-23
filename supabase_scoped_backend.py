@@ -50,12 +50,17 @@ class SupabaseScopedBackend:
                 f"Required Supabase migration is missing: {REQUIRED_SCHEMA_VERSION}"
             )
 
-        for table_name in ("global_accounts", "guild_profiles", "guild_worlds"):
+        required_columns = {
+            "global_accounts": "data",
+            "guild_profiles": "data,balance",
+            "guild_worlds": "data",
+        }
+        for table_name, columns in required_columns.items():
             try:
-                self.client.table(table_name).select("data").limit(1).execute()
+                self.client.table(table_name).select(columns).limit(1).execute()
             except Exception as exc:
                 raise SupabaseSchemaError(
-                    f"Required Supabase table is unavailable: {table_name}"
+                    f"Required Supabase table or column is unavailable: {table_name}"
                 ) from exc
 
     async def load(self, key: RecordKey) -> Mapping[str, Any] | None:
@@ -70,6 +75,42 @@ class SupabaseScopedBackend:
         if not response.data:
             return None
         return dict(response.data[0].get("data") or {})
+
+    async def list_guild_leaderboard(
+        self,
+        guild_id: Any,
+        *,
+        limit: int = 10,
+    ) -> list[tuple[int, int]]:
+        guild_number = int(guild_id)
+        if guild_number <= 0:
+            raise ValueError("guild_id must be positive")
+        if limit <= 0 or limit > 100:
+            raise ValueError("limit must be between 1 and 100")
+        return await asyncio.to_thread(
+            self._list_guild_leaderboard_sync,
+            guild_number,
+            int(limit),
+        )
+
+    def _list_guild_leaderboard_sync(
+        self,
+        guild_id: int,
+        limit: int,
+    ) -> list[tuple[int, int]]:
+        response = (
+            self.client.table("guild_profiles")
+            .select("user_id,balance")
+            .eq("guild_id", guild_id)
+            .order("balance", desc=True)
+            .order("user_id")
+            .limit(limit)
+            .execute()
+        )
+        return [
+            (int(row["user_id"]), max(0, int(row.get("balance", 0) or 0)))
+            for row in (response.data or [])
+        ]
 
     async def save_many(self, records: Mapping[RecordKey, Mapping[str, Any]]) -> None:
         if not records:
