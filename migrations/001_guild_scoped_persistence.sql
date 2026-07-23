@@ -17,6 +17,9 @@ create table if not exists public.guild_profiles (
     guild_id bigint not null,
     user_id bigint not null,
     data jsonb not null default '{}'::jsonb,
+    balance bigint generated always as (
+        greatest(0, coalesce((data ->> 'grams')::bigint, 0))
+    ) stored,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
     primary key (guild_id, user_id),
@@ -24,8 +27,16 @@ create table if not exists public.guild_profiles (
     constraint guild_profiles_user_id_positive check (user_id > 0)
 );
 
+alter table public.guild_profiles
+    add column if not exists balance bigint generated always as (
+        greatest(0, coalesce((data ->> 'grams')::bigint, 0))
+    ) stored;
+
 create index if not exists guild_profiles_user_id_idx
     on public.guild_profiles (user_id);
+
+create index if not exists guild_profiles_guild_balance_idx
+    on public.guild_profiles (guild_id, balance desc, user_id);
 
 create table if not exists public.guild_worlds (
     guild_id bigint primary key,
