@@ -18,19 +18,29 @@ Use a hybrid model:
 - Guild profile: all current economy, garden, inventory, crime, lab, quest, and local progression state.
 - Guild world: weather, market, events, crews, district, auctions, and server configuration.
 
-## Implementation Sequence
-1. Add canonical scope/key helpers and schema contracts.
-2. Replace load-all/save-all persistence with lazy record loading and per-record dirty tracking.
-3. Add explicit global-account, guild-profile, and guild-world accessors.
-4. Migrate every command and background caller to pass its guild scope.
-5. Add legacy migration tooling and database schema SQL.
-6. Remove the old global cache and compatibility paths.
-7. Run compilation, full tests, extension registration, migration tests, conflict inspection, and cleanup.
+## Changes Completed So Far
+- Added canonical typed keys for global accounts, guild profiles, and guild worlds.
+- Added strict Discord snowflake validation and rejection of ambiguous legacy cache keys.
+- Added a non-destructive Supabase schema for `global_accounts`, `guild_profiles`, and `guild_worlds`.
+- Added a lazy scoped record store that loads only requested records.
+- Added exact per-record dirty tracking instead of one global dirty flag.
+- Added retry-safe flushing: failed writes remain dirty.
+- Added concurrent first-read deduplication so one record is loaded only once.
+- Added a Supabase backend that routes each scope to its correct table and batches only supplied dirty rows.
+- Added regression tests for guild isolation, lazy loading, dirty-only writes, failed-write retries, concurrent reads, and Supabase table routing.
 
-## Current Status
-- Branch created from validated `main`.
-- Root storage execution path inspected.
-- No production code changed yet.
+## Remaining Work
+1. Integrate the scoped store into the production database manager.
+2. Add explicit global-account, guild-profile, and guild-world accessors.
+3. Migrate every command and background caller to pass its guild scope.
+4. Add legacy data migration tooling.
+5. Remove the old global cache, load-all query, global dirty flag, and save-all sync path.
+6. Run compilation, full tests, extension registration, migration tests, conflict inspection, and cleanup.
+
+## Validation Status
+- PR #3 remains draft.
+- New scoped-store and backend tests are awaiting CI on the latest head.
+- Production callers still use the legacy database manager, so the task is not merge-ready.
 
 ## Constraints
 - No monkey patches.
