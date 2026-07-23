@@ -41,7 +41,10 @@ def test_canonical_extensions_exist_and_are_loaded_from_root():
     for node in tree.body:
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            if not any(isinstance(target, ast.Name) and target.id == "GAME_EXTENSIONS" for target in targets):
+            if not any(
+                isinstance(target, ast.Name) and target.id == "GAME_EXTENSIONS"
+                for target in targets
+            ):
                 continue
 
             value = node.value
@@ -87,12 +90,15 @@ def test_profile_does_not_reuse_the_plant_short_alias():
     assert 'name="profile", aliases=["p"' not in source
 
 
-def test_background_loops_wait_for_discord_ready_event():
+def test_background_loops_use_native_cog_lifecycle_without_startup_guards():
     source = (ROOT / "tasks.py").read_text(encoding="utf-8")
-    init_block = source.split("def __init__", 1)[1].split("@commands.Cog.listener", 1)[0]
+    init_block = source.split("def __init__", 1)[1].split("async def cog_load", 1)[0]
+    cog_load_block = source.split("async def cog_load", 1)[1].split("def cog_unload", 1)[0]
 
     assert ".start()" not in init_block
-    assert "async def on_ready" in source
-    assert "if not self.game_cycle.is_running()" in source
-    assert "if not self.notification_check.is_running()" in source
-    assert "if not self.status_cycle.is_running()" in source
+    assert "self.game_cycle.start()" in cog_load_block
+    assert "self.notification_check.start()" in cog_load_block
+    assert "self.status_cycle.start()" in cog_load_block
+    assert "async def on_ready" not in source
+    assert ".is_running()" not in source
+    assert "await self.bot.wait_until_ready()" in source
