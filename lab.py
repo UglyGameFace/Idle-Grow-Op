@@ -13,12 +13,12 @@ from economy_integrity import (
     restore_flower,
     split_reservation_penalty,
 )
+from persistence_context import require_guild_id
 from utils import (
     CONCENTRATE_TYPES,
     SafeView,
     _xp_needed_for_level,
     add__progress,
-    db_manager,
     has_item,
     jail_guard,
 )
@@ -39,15 +39,14 @@ def _lab_prestige_mult(user):
     return 1.0 + (prestige * 0.05)
 
 
-def _lab_market_value(user, base_value):
-    world = db_manager.world_state
+def _lab_market_value(user, world, base_value):
     market_mult = float(world.get("market_multiplier", 1.0))
     prestige_mult = _lab_prestige_mult(user)
     district_mult = 1.0
     district = world.get("district", {})
     if (
         district.get("owner_crew_id") == user.get("crew_id")
-        and time.time() < district.get("expires_at", 0)
+        and time.time() < float(district.get("expires_at", 0) or 0)
     ):
         district_mult = float(district.get("multiplier", 1.10))
     return int(base_value * market_mult * prestige_mult * district_mult)
@@ -101,7 +100,8 @@ class Lab(commands.Cog):
 
     @commands.hybrid_command(name="process", aliases=["cook"])
     async def process(self, ctx, concentrate_type: str = None, amount: str = "1"):
-        user = self.bot.db.get_user(ctx.author.id)
+        guild_id = require_guild_id(ctx)
+        user = await self.bot.db.get_profile(guild_id, ctx.author.id)
         if await jail_guard(ctx, user, "process"):
             return
 
@@ -142,7 +142,6 @@ class Lab(commands.Cog):
         duration = 300 * qty
 
         async with self.bot.db.lock:
-            user = self.bot.db.get_user(ctx.author.id)
             if int(user.get("level", 1)) < required_level:
                 return await ctx.send(f"🔒 **Level {required_level} Required.**")
             if required_tool and not has_item(user, required_tool):
@@ -169,7 +168,7 @@ class Lab(commands.Cog):
                 }
             )
             add__progress(user, "process_dabs", qty)
-            await self.bot.db.save()
+            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
 
         embed = discord.Embed(
             title="⚗️ **Extraction Started**",
@@ -183,11 +182,12 @@ class Lab(commands.Cog):
     @commands.hybrid_command(name="collect", aliases=["collectlab"])
     async def collect(self, ctx):
         """Collect all completed queued concentrate batches exactly once."""
+        guild_id = require_guild_id(ctx)
+        user = await self.bot.db.get_profile(guild_id, ctx.author.id)
         now = time.time()
         collected: dict[str, int] = {}
 
         async with self.bot.db.lock:
-            user = self.bot.db.get_user(ctx.author.id)
             queue = user.setdefault("processing_queue", [])
             remaining = []
             for item in queue:
@@ -213,20 +213,22 @@ class Lab(commands.Cog):
             user["processing_queue"] = remaining
             concentrates = user.setdefault("concentrates", {})
             for c_type, qty in collected.items():
-                concentrates[c_type] = int(concentrates.get(c_type, 0)) + qty
+                concentrates[c_type] = max(0, int(concentrates.get(c_type, 0))) + qty
             stats = user.setdefault("stats", {})
-            stats["concentrate_made"] = int(stats.get("concentrate_made", 0)) + sum(
+            stats["concentrate_made"] = max(0, int(stats.get("concentrate_made", 0))) + sum(
                 collected.values()
             )
-            await self.bot.db.save()
+            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
 
         summary = "\n".join(f"• **{qty}g {name.title()}**" for name, qty in collected.items())
         await ctx.send(f"📦 **Lab collection complete:**\n{summary}")
 
     @commands.command(name="conc")
     async def conc(self, ctx, user_target: discord.Member = None):
+        guild_id = require_guild_id(ctx)
         target = user_target or ctx.author
-        player = self.bot.db.get_user(target.id)
+        player = await self.bot.db.get_profile(guild_id, target.id)
+        world = await self.bot.db.get_world(guild_id)
         concentrates = player.get("concentrates", {})
         queue = player.get("processing_queue", [])
 
@@ -244,7 +246,7 @@ class Lab(commands.Cog):
                 continue
             conc_data = CONCENTRATE_TYPES.get(conc_type, {"value_mult": 3.0})
             base_total = 500 * float(conc_data.get("value_mult", 3.0)) * amount
-            final_value = _lab_market_value(player, base_total)
+            final_value = _lab_market_value(player, world, base_total)
             total_value += final_value
             conc_lines.append(f"**{conc_type.title()}:** {amount}g (≈${final_value:,})")
         if conc_lines:
@@ -273,7 +275,8 @@ class Lab(commands.Cog):
     @commands.hybrid_command(name="lab")
     async def lab(self, ctx, conc_type: str = "shatter", amount: int = 10):
         """Play the manual extraction minigame with flower reserved up front."""
-        user = self.bot.db.get_user(ctx.author.id)
+        guild_id = require_guild_id(ctx)
+        user = await self.bot.db.get_profile(guild_id, ctx.author.id)
         if await jail_guard(ctx, user, "lab"):
             return
 
@@ -292,7 +295,6 @@ class Lab(commands.Cog):
         required_tool = info.get("req_item")
         required_level = int(info.get("level_req", 1))
         async with self.bot.db.lock:
-            user = self.bot.db.get_user(ctx.author.id)
             if required_tool and not has_item(user, required_tool):
                 return await ctx.send(f"❌ You need a **{required_tool.title()}**.")
             if int(user.get("level", 1)) < required_level:
@@ -302,7 +304,7 @@ class Lab(commands.Cog):
                 reservation = reserve_flower(stash, needed_flower)
             except ValueError:
                 return await ctx.send(f"🌿 **Not enough flower.** Need {needed_flower}g.")
-            await self.bot.db.save()
+            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
 
         target = random.randint(40, 75)
         view = LabMinigameView(ctx.author.id, c_type, qty, target)
@@ -337,22 +339,20 @@ class Lab(commands.Cog):
         level_up = None
         if not view.pressed:
             async with self.bot.db.lock:
-                user = self.bot.db.get_user(ctx.author.id)
                 restore_flower(user.setdefault("flower_stash", {}), reservation)
-                await self.bot.db.save()
+                self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
             await msg.edit(content="💥 **Timeout!** Reserved flower was returned.", view=None)
             return
 
         if view.success:
             async with self.bot.db.lock:
-                user = self.bot.db.get_user(ctx.author.id)
                 concentrates = user.setdefault("concentrates", {})
-                concentrates[c_type] = int(concentrates.get(c_type, 0)) + qty
+                concentrates[c_type] = max(0, int(concentrates.get(c_type, 0))) + qty
                 level_up = _credit_xp(user, qty * 5)
                 add__progress(user, "process_dabs", qty)
                 stats = user.setdefault("stats", {})
-                stats["concentrate_made"] = int(stats.get("concentrate_made", 0)) + qty
-                await self.bot.db.save()
+                stats["concentrate_made"] = max(0, int(stats.get("concentrate_made", 0))) + qty
+                self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
             await ctx.send(f"💎 **Success!** Created **{qty}g {c_type.title()}**.")
             if level_up:
                 await ctx.send(f"🎉 **Level Up!** You are now level {level_up}!")
@@ -361,9 +361,8 @@ class Lab(commands.Cog):
         penalty = min(needed_flower, max(1, ceil(needed_flower * 0.2)))
         _, refundable = split_reservation_penalty(reservation, penalty)
         async with self.bot.db.lock:
-            user = self.bot.db.get_user(ctx.author.id)
             restore_flower(user.setdefault("flower_stash", {}), refundable)
-            await self.bot.db.save()
+            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
         await ctx.send(f"💥 **Failed!** Lost {penalty}g flower; the rest was returned.")
 
 
