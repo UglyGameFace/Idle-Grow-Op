@@ -1,8 +1,14 @@
 import asyncio
 from copy import deepcopy
 
+import pytest
+
 from persistence_scope import global_account_key, guild_profile_key, guild_world_key
-from supabase_scoped_backend import SupabaseScopedBackend
+from supabase_scoped_backend import (
+    REQUIRED_SCHEMA_VERSION,
+    SupabaseSchemaError,
+    SupabaseScopedBackend,
+)
 
 
 class Response:
@@ -33,6 +39,8 @@ class Query:
         return self
 
     def execute(self):
+        if self.table_name in self.client.fail_tables:
+            raise RuntimeError(f"missing table: {self.table_name}")
         if self.payload is not None:
             self.client.upserts.append((self.table_name, self.payload))
             return Response(self.payload)
@@ -47,6 +55,7 @@ class FakeClient:
         self.loads = []
         self.selects = []
         self.upserts = []
+        self.fail_tables = set()
 
     def table(self, table_name):
         return Query(self, table_name)
@@ -54,6 +63,45 @@ class FakeClient:
 
 def run(coro):
     return asyncio.run(coro)
+
+
+def install_schema_version(client):
+    client.records[("app_schema_migrations", (("version", REQUIRED_SCHEMA_VERSION),))] = [
+        {"version": REQUIRED_SCHEMA_VERSION}
+    ]
+
+
+def test_schema_verification_requires_recorded_migration_and_all_tables():
+    client = FakeClient()
+    install_schema_version(client)
+    backend = SupabaseScopedBackend(client)
+
+    run(backend.verify_schema())
+
+    selected_tables = [table for table, _columns in client.selects]
+    assert selected_tables == [
+        "app_schema_migrations",
+        "global_accounts",
+        "guild_profiles",
+        "guild_worlds",
+    ]
+
+
+def test_schema_verification_rejects_missing_migration():
+    backend = SupabaseScopedBackend(FakeClient())
+
+    with pytest.raises(SupabaseSchemaError, match="Required Supabase migration is missing"):
+        run(backend.verify_schema())
+
+
+def test_schema_verification_reports_missing_table():
+    client = FakeClient()
+    install_schema_version(client)
+    client.fail_tables.add("guild_profiles")
+    backend = SupabaseScopedBackend(client)
+
+    with pytest.raises(SupabaseSchemaError, match="guild_profiles"):
+        run(backend.verify_schema())
 
 
 def test_load_routes_each_scope_to_its_own_table():
