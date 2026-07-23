@@ -78,3 +78,21 @@ def test_admin_reload_uses_root_extension_names():
 
     assert 'reload_extension(extension_name)' in source
     assert 'reload_extension(f"cogs.' not in source
+
+
+def test_profile_does_not_reuse_the_plant_short_alias():
+    source = (ROOT / "social.py").read_text(encoding="utf-8")
+
+    assert 'name="profile", aliases=["me", "stats"]' in source
+    assert 'name="profile", aliases=["p"' not in source
+
+
+def test_background_loops_wait_for_discord_ready_event():
+    source = (ROOT / "tasks.py").read_text(encoding="utf-8")
+    init_block = source.split("def __init__", 1)[1].split("@commands.Cog.listener", 1)[0]
+
+    assert ".start()" not in init_block
+    assert "async def on_ready" in source
+    assert "if not self.game_cycle.is_running()" in source
+    assert "if not self.notification_check.is_running()" in source
+    assert "if not self.status_cycle.is_running()" in source
