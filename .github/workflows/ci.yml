@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest
+
+      - name: Compile Python sources
+        run: python -m compileall -q .
+
+      - name: Run tests
+        env:
+          DISCORD_TOKEN: ""
+          SUPABASE_URL: ""
+          SUPABASE_KEY: ""
+        run: python -m pytest -q
+
+      - name: Import game extensions
+        env:
+          DISCORD_TOKEN: ""
+          SUPABASE_URL: ""
+          SUPABASE_KEY: ""
+        run: |
+          python - <<'PY'
+          import asyncio
+          import importlib
+
+          MODULES = (
+              "admin",
+              "ai",
+              "crime",
+              "economy",
+              "farming",
+              "lab",
+              "social",
+              "tasks",
+          )
+
+          async def main():
+              import utils
+              await utils.db_manager.start()
+              for module_name in MODULES:
+                  module = importlib.import_module(module_name)
+                  assert callable(getattr(module, "setup", None)), module_name
+              await utils.db_manager.stop()
+
+          asyncio.run(main())
+          PY
