@@ -57,13 +57,14 @@ jobs:
               import main
 
               main.bot.db = utils.db_manager
-              await main.load_extensions()
+              async with main.bot:
+                  await main.load_extensions()
 
-              expected = set(main.GAME_EXTENSIONS)
-              loaded = set(main.bot.extensions)
-              assert loaded == expected, f"loaded={sorted(loaded)} expected={sorted(expected)}"
-
-              await main.bot.close()
+                  expected = set(main.GAME_EXTENSIONS)
+                  loaded = set(main.bot.extensions)
+                  assert loaded == expected, (
+                      f"loaded={sorted(loaded)} expected={sorted(expected)}"
+                  )
 
           asyncio.run(smoke_test())
           PY
