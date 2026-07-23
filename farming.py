@@ -5,6 +5,7 @@ import discord
 from discord.ext import commands
 
 from economy_integrity import calculate_harvest_outcome
+from persistence_context import require_guild_id
 from utils import (
     GROWTH_CYCLES,
     check_achievements,
@@ -36,8 +37,9 @@ class Farming(commands.Cog):
 
     @commands.hybrid_command(name="plant", aliases=["p", "grow"])
     async def plant(self, ctx, *, strain_name: str = ""):
-        """Plant a seed."""
-        user = self.bot.db.get_user(ctx.author.id)
+        """Plant a seed in the current server's grow operation."""
+        guild_id = require_guild_id(ctx)
+        user = await self.bot.db.get_profile(guild_id, ctx.author.id)
         if await jail_guard(ctx, user, "plant"):
             return
 
@@ -51,108 +53,117 @@ class Farming(commands.Cog):
             return await ctx.send(f"❌ Unknown strain: **{clean_name}**. Check `!strains`.")
 
         strain_info = GROWTH_CYCLES[clean_name]
-        if user.get("level", 1) < strain_info.get("level_req", 1):
-            return await ctx.send(f"🔒 You need Level **{strain_info['level_req']}** to grow this.")
+        world = await self.bot.db.get_world(guild_id)
 
-        if inv_get(user, seed_item_name) < 1:
-            return await ctx.send(
-                f"❌ You don't have any **{clean_name.title()} Seeds**!\nBuy some in the `!shop`."
-            )
+        async with self.bot.db.lock:
+            if int(user.get("level", 1)) < int(strain_info.get("level_req", 1)):
+                return await ctx.send(f"🔒 You need Level **{strain_info['level_req']}** to grow this.")
 
-        max_pots = int(user.get("max_pots", 3))
-        current_plants = user.get("plants", [])
-        if len(current_plants) >= max_pots:
-            return await ctx.send(
-                f"🚫 **No Pots Available!** ({len(current_plants)}/{max_pots})\n"
-                "Harvest plants or buy Pot Upgrades in the shop."
-            )
+            if inv_get(user, seed_item_name) < 1:
+                return await ctx.send(
+                    f"❌ You don't have any **{clean_name.title()} Seeds**!\nBuy some in the `!shop`."
+                )
 
-        if not inv_take(user, seed_item_name, 1):
-            return await ctx.send("❌ That seed is no longer available. Try again.")
+            max_pots = max(0, int(user.get("max_pots", 3)))
+            current_plants = user.setdefault("plants", [])
+            if len(current_plants) >= max_pots:
+                return await ctx.send(
+                    f"🚫 **No Pots Available!** ({len(current_plants)}/{max_pots})\n"
+                    "Harvest plants or buy Pot Upgrades in the shop."
+                )
 
-        new_plant = {
-            "strain": clean_name,
-            "planted_at": time.time(),
-            "last_watered": time.time(),
-            "water_count": 1,
-            "quality": 1.0,
-        }
-        user.setdefault("plants", []).append(new_plant)
-        await self.bot.db.save()
+            if not inv_take(user, seed_item_name, 1):
+                return await ctx.send("❌ That seed is no longer available. Try again.")
 
-        grow_time = get_plant_grow_time(user, self.bot.db.world_state, new_plant)
-        ready_at = int(time.time() + grow_time)
+            planted_at = time.time()
+            new_plant = {
+                "strain": clean_name,
+                "planted_at": planted_at,
+                "last_watered": planted_at,
+                "water_count": 1,
+                "quality": 1.0,
+            }
+            current_plants.append(new_plant)
+            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+
+        grow_time = get_plant_grow_time(user, world, new_plant)
+        ready_at = int(planted_at + grow_time)
         await ctx.send(f"🌱 **Planted:** {clean_name.title()}\n⏳ **Ready:** {discord_relative_time(ready_at)}")
 
     @commands.hybrid_command(name="water", aliases=["hydrate"])
     async def water(self, ctx):
-        """Water all plants that are ready for watering."""
-        user = self.bot.db.get_user(ctx.author.id)
+        """Water all eligible plants in the current server."""
+        guild_id = require_guild_id(ctx)
+        user = await self.bot.db.get_profile(guild_id, ctx.author.id)
         if await jail_guard(ctx, user, "water"):
             return
 
-        plants = user.get("plants", [])
-        if not plants:
-            return await ctx.send("🏜️ You have no plants to water.")
+        async with self.bot.db.lock:
+            plants = user.get("plants", [])
+            if not plants:
+                return await ctx.send("🏜️ You have no plants to water.")
 
-        count = 0
-        now = time.time()
-        for plant in plants:
-            if now - plant.get("last_watered", 0) > 300:
-                plant["last_watered"] = now
-                plant["water_count"] = plant.get("water_count", 0) + 1
-                count += 1
+            count = 0
+            now = time.time()
+            for plant in plants:
+                if now - float(plant.get("last_watered", 0) or 0) > 300:
+                    plant["last_watered"] = now
+                    plant["water_count"] = max(0, int(plant.get("water_count", 0))) + 1
+                    count += 1
 
-        if count == 0:
-            return await ctx.send("💧 Plants are already wet enough.")
+            if count == 0:
+                return await ctx.send("💧 Plants are already wet enough.")
 
-        await self.bot.db.save()
+            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+
         await ctx.send(f"💦 **Watered {count} plants.** Keep 'em happy!")
 
     @commands.hybrid_command(name="harvest", aliases=["h"])
     async def harvest(self, ctx):
-        """Harvest all ready plants into the flower stash."""
-        user = self.bot.db.get_user(ctx.author.id)
+        """Harvest ready plants into this server's flower stash."""
+        guild_id = require_guild_id(ctx)
+        user = await self.bot.db.get_profile(guild_id, ctx.author.id)
         if await jail_guard(ctx, user, "harvest"):
             return
+        world = await self.bot.db.get_world(guild_id)
 
-        plants = user.get("plants", [])
-        if not plants:
-            return await ctx.send("🌱 You have no plants.")
+        async with self.bot.db.lock:
+            plants = user.get("plants", [])
+            if not plants:
+                return await ctx.send("🌱 You have no plants.")
 
-        multiplier = 1.0
-        if inv_get(user, "led lights") > 0:
-            multiplier += 0.5
-        if inv_get(user, "hydroponic") > 0:
-            multiplier += 1.0
+            multiplier = 1.0
+            if inv_get(user, "led lights") > 0:
+                multiplier += 0.5
+            if inv_get(user, "hydroponic") > 0:
+                multiplier += 1.0
 
-        world = self.bot.db.world_state
-        outcome = calculate_harvest_outcome(
-            plants,
-            now=time.time(),
-            strain_configs=GROWTH_CYCLES,
-            grow_time_for_plant=lambda plant: get_plant_grow_time(user, world, plant),
-            yield_multiplier=multiplier,
-            randint=random.randint,
-        )
-
-        if outcome["harvested_count"] == 0:
-            return await ctx.send(
-                "⏳ **Nothing is ready to harvest yet.**\nUse `!status` to check remaining time."
+            outcome = calculate_harvest_outcome(
+                plants,
+                now=time.time(),
+                strain_configs=GROWTH_CYCLES,
+                grow_time_for_plant=lambda plant: get_plant_grow_time(user, world, plant),
+                yield_multiplier=multiplier,
+                randint=random.randint,
             )
 
-        # Harvesting produces flower only. Cash is credited later by the sell command.
-        user["plants"] = outcome["remaining_plants"]
-        stash = user.setdefault("flower_stash", {})
-        for strain, amount in outcome["flower_by_strain"].items():
-            stash[strain] = int(stash.get(strain, 0)) + int(amount)
+            if outcome["harvested_count"] == 0:
+                return await ctx.send(
+                    "⏳ **Nothing is ready to harvest yet.**\nUse `!status` to check remaining time."
+                )
 
-        stats = user.setdefault("stats", {})
-        stats["harvested"] = int(stats.get("harvested", 0)) + outcome["harvested_count"]
+            # Harvesting produces flower only. Cash is credited later by the sell command.
+            user["plants"] = outcome["remaining_plants"]
+            stash = user.setdefault("flower_stash", {})
+            for strain, amount in outcome["flower_by_strain"].items():
+                stash[strain] = max(0, int(stash.get(strain, 0))) + max(0, int(amount))
 
-        await self._add_xp(ctx, user, outcome["total_xp"])
-        await self.bot.db.save()
-        await check_achievements(ctx, user)
+            stats = user.setdefault("stats", {})
+            stats["harvested"] = max(0, int(stats.get("harvested", 0))) + outcome["harvested_count"]
+
+            await self._add_xp(ctx, user, outcome["total_xp"])
+            await check_achievements(ctx, user)
+            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
 
         harvested_summary = ", ".join(
             f"{strain.title()} ({amount}g)"
@@ -167,8 +178,9 @@ class Farming(commands.Cog):
 
     @commands.hybrid_command(name="status", aliases=["quickcheck", "check", "garden"])
     async def status(self, ctx):
-        """Check plant progress."""
-        user = self.bot.db.get_user(ctx.author.id)
+        """Check plant progress for the current server."""
+        guild_id = require_guild_id(ctx)
+        user = await self.bot.db.get_profile(guild_id, ctx.author.id)
         plants = user.get("plants", [])
 
         if not plants:
@@ -179,17 +191,17 @@ class Farming(commands.Cog):
             )
             return await ctx.send(embed=embed)
 
+        world = await self.bot.db.get_world(guild_id)
         embed = discord.Embed(title=f"🌱 {ctx.author.name}'s Garden", color=discord.Color.green())
         now = time.time()
-        world = self.bot.db.world_state
         lines = []
         ready_count = 0
 
         for index, plant in enumerate(plants, start=1):
             strain = plant["strain"]
             grow_time = get_plant_grow_time(user, world, plant)
-            elapsed = now - plant["planted_at"]
-            percent = min(100, int((elapsed / grow_time) * 100))
+            elapsed = now - float(plant["planted_at"])
+            percent = min(100, max(0, int((elapsed / grow_time) * 100)))
             filled = int(percent / 10)
             bar = "🟩" * filled + "⬛" * (10 - filled)
 
@@ -211,6 +223,7 @@ class Farming(commands.Cog):
     @commands.hybrid_command(name="strains", aliases=["seeds"])
     async def strains(self, ctx):
         """List available strains."""
+        require_guild_id(ctx)
         embed = discord.Embed(title="🧬 Strain Database", color=discord.Color.purple())
         sorted_strains = sorted(GROWTH_CYCLES.items(), key=lambda item: item[1]["level_req"])
 
