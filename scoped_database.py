@@ -88,6 +88,7 @@ class ScopedDatabaseManager:
     def __init__(self, backend, *, flush_interval: float = FLUSH_INTERVAL_SECONDS):
         if flush_interval <= 0:
             raise ValueError("flush_interval must be positive")
+        self.backend = backend
         self.lock = asyncio.Lock()
         self.store = ScopedRecordStore(backend, default_record)
         self.flush_interval = float(flush_interval)
@@ -102,6 +103,17 @@ class ScopedDatabaseManager:
 
     async def get_world(self, guild_id: Any) -> MutableMapping[str, Any]:
         return await self.store.get(guild_world_key(guild_id))
+
+    async def list_guild_leaderboard(
+        self,
+        guild_id: Any,
+        *,
+        limit: int = 10,
+    ) -> list[tuple[int, int]]:
+        query = getattr(self.backend, "list_guild_leaderboard", None)
+        if query is None:
+            raise RuntimeError("database backend does not support guild leaderboards")
+        return await query(guild_id, limit=limit)
 
     def mark_account_dirty(self, user_id: Any) -> None:
         self.store.mark_dirty(global_account_key(user_id))
