@@ -1,106 +1,91 @@
-import discord
-import os
 import asyncio
 import logging
+import os
 import platform
+
+import discord
 from discord.ext import commands
+from dotenv import load_dotenv
 
-# Import the database from utils.py
-# This ensures the DB is loaded before the bot starts
-try:
-    from utils import db_manager
-except ImportError:
-    print("❌ CRITICAL ERROR: Could not import 'db_manager' from utils.py.")
-    print("   Make sure utils.py exists in the same folder!")
-    exit()
 
-# ==========================================================
-# ⚙️ CONFIGURATION & SETUP
-# ==========================================================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+logger = logging.getLogger(__name__)
 
-# Setup Logging (So you can see errors in the console)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
-
-# Load Token (Supports .env files if you use python-dotenv)
+load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-    if not TOKEN: 
-        TOKEN = os.getenv("DISCORD_TOKEN")
-except ImportError:
-    pass
 
-# Setup Discord Intents
-# 'members' is CRITICAL for Economy/Social features
+GAME_EXTENSIONS = (
+    "admin",
+    "ai",
+    "crime",
+    "economy",
+    "farming",
+    "lab",
+    "social",
+    "tasks",
+)
+
 intents = discord.Intents.default()
-intents.message_content = True 
+intents.message_content = True
 intents.members = True
 intents.presences = True
 
-# Initialize Bot
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
-# 🔗 Attach Database to Bot
-# This allows Cogs to access the DB via 'self.bot.db'
-bot.db = db_manager 
-
-# ==========================================================
-# 🚀 STARTUP EVENTS
-# ==========================================================
 
 @bot.event
 async def on_ready():
-    print(f"\n{'='*40}")
-    print(f"🌿 Stoney Baloney v4.2.0 is ONLINE")
-    print(f"✅ Logged in as: {bot.user}")
-    print(f"🆔 Bot ID: {bot.user.id}")
-    print(f"🐍 Python: {platform.python_version()}")
-    print(f"👾 Discord.py: {discord.__version__}")
-    print(f"💾 Database: {bot.db.filename}")
-    print(f"{'='*40}\n")
-    
-    # Set Status
+    database_backend = "Supabase" if getattr(bot.db, "supabase", None) else "memory-only fallback"
+    logger.info("=" * 40)
+    logger.info("Stoney Baloney v4.2.0 is ONLINE")
+    logger.info("Logged in as: %s", bot.user)
+    logger.info("Bot ID: %s", bot.user.id if bot.user else "unknown")
+    logger.info("Python: %s", platform.python_version())
+    logger.info("Discord.py: %s", discord.__version__)
+    logger.info("Database: %s", database_backend)
+    logger.info("Loaded extensions: %s", ", ".join(sorted(bot.extensions)))
+    logger.info("=" * 40)
+
     await bot.change_presence(activity=discord.Game(name="!help | Growing 🌿"))
 
-# ==========================================================
-# 🧩 COG LOADER
-# ==========================================================
 
-async def load_extensions():
-    """Scans the 'cogs' folder and loads every file."""
-    if not os.path.exists("./cogs"):
-        print("❌ 'cogs' folder not found! Creating it...")
-        os.makedirs("./cogs")
-        return
+async def load_extensions() -> None:
+    """Load every canonical game extension from the repository root."""
+    failures = []
 
-    print("⚙️ Loading Cogs...")
-    for filename in os.listdir('./cogs'):
-        if filename.endswith('.py'):
-            extension_name = f'cogs.{filename[:-3]}'
-            try:
-                await bot.load_extension(extension_name)
-                print(f"   ✅ Loaded: {filename}")
-            except Exception as e:
-                print(f"   ❌ FAILED to load: {filename}")
-                print(f"      Error: {e}")
+    for extension_name in GAME_EXTENSIONS:
+        try:
+            await bot.load_extension(extension_name)
+            logger.info("Loaded extension: %s", extension_name)
+        except Exception:
+            logger.exception("Failed to load extension: %s", extension_name)
+            failures.append(extension_name)
 
-# ==========================================================
-# 🏁 MAIN ENTRY POINT
-# ==========================================================
+    if failures:
+        failed = ", ".join(failures)
+        raise RuntimeError(f"Required game extensions failed to load: {failed}")
 
-async def main():
+
+async def main() -> None:
     if not TOKEN:
-        print("\n❌ CRITICAL ERROR: 'DISCORD_TOKEN' is missing.")
-        print("   Please set it in your environment variables or .env file.")
-        return
+        raise RuntimeError("DISCORD_TOKEN is missing from the environment")
+
+    # Importing utils constructs the database manager and starts its background
+    # sync task. This must happen after asyncio.run() has created the event loop.
+    from utils import db_manager
+
+    bot.db = db_manager
 
     async with bot:
         await load_extensions()
         await bot.start(TOKEN)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n🛑 Bot stopped by user.")
+        logger.info("Bot stopped by user")

@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "fix/**"
+      - "feature/**"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest
+
+      - name: Compile Python sources
+        run: python -m compileall -q .
+
+      - name: Run tests
+        env:
+          DISCORD_TOKEN: ""
+          SUPABASE_URL: ""
+          SUPABASE_KEY: ""
+        run: python -m pytest -q
+
+      - name: Load every game extension into the bot
+        env:
+          DISCORD_TOKEN: ""
+          SUPABASE_URL: ""
+          SUPABASE_KEY: ""
+        run: |
+          python - <<'PY'
+          import asyncio
+
+          async def smoke_test():
+              # Import utils only after asyncio.run() establishes the loop because
+              # the current database manager starts its background task on import.
+              import utils
+              import main
+
+              main.bot.db = utils.db_manager
+              async with main.bot:
+                  await main.load_extensions()
+
+                  expected = set(main.GAME_EXTENSIONS)
+                  loaded = set(main.bot.extensions)
+                  assert loaded == expected, (
+                      f"loaded={sorted(loaded)} expected={sorted(expected)}"
+                  )
+
+          asyncio.run(smoke_test())
+          PY
