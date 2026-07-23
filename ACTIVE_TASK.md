@@ -1,44 +1,44 @@
-# Completed Task: Economy and Inventory Integrity
+# Active Task: Guild-Scoped Persistence Architecture
 
 ## Scope
-Audit and correct every player-value mutation before adding new gameplay systems.
+Replace the single global in-memory user/world cache with an explicit hybrid model that can scale across many Discord servers without cross-server economy leakage or full-database rewrites.
 
-## Findings Resolved
-- Harvesting credited the same output as both cash and flower.
-- Mixed-strain harvests redistributed aggregate yield incorrectly.
-- Unknown legacy plants could be deleted during harvest.
-- Invalid bets, transfers, sales, purchases, crew deposits, and admin values could corrupt balances or inventory.
-- Concentrate processing undercharged flower, lacked reliable queued collection, and exposed a manual-minigame inventory race.
-- Pot upgrades ignored configured limits.
-- Auctions mishandled validation, escrow, rebids, buyouts, expiry, and background settlement.
-- Daily, crew, support-reward, world-cycle, and notification mutations were not consistently atomic.
-- Crime payouts, robbery transfers, laundering, fines, and crew-bank raids lacked one value-conserving accounting path.
-- Notification flags could be committed before successful delivery.
+## Confirmed Findings
+- Player records are keyed only by Discord user ID, so balances, inventory, plants, crews, heat, jail, and progression leak across every server.
+- One `__world__` record is shared globally, so weather, markets, crews, districts, auctions, and events are unintentionally shared by all guilds.
+- Startup eagerly loads every user row into RAM.
+- Any mutation marks one global dirty flag.
+- Every sync rewrites every cached user plus the world record.
+- The current schema has no explicit global-account, guild-profile, or guild-world boundary.
+- Leaderboards and background tasks iterate the complete cache instead of a guild scope.
 
-## Changes
-- Added deterministic flower-only harvest accounting with exact per-strain yields.
-- Added canonical amount, flower reservation/refund, auction, pot-limit, and crime-accounting helpers.
-- Hardened player-value mutations under the database lock.
-- Added coherent auction escrow and automatic expiry settlement through one canonical implementation.
-- Added exact lab input reservations, rollback/refund behavior, and one-time queued-batch collection.
-- Added value-conserving crime, laundering, robbery, raid, fine, and crew-payout calculations.
-- Made notification flags commit only after successful delivery.
-- Preserved the existing public command surface and aliases.
+## Architecture Decision
+Use a hybrid model:
+- Global account: cross-server identity and future collection/cosmetic/prestige metadata.
+- Guild profile: all current economy, garden, inventory, crime, lab, quest, and local progression state.
+- Guild world: weather, market, events, crews, district, auctions, and server configuration.
 
-## Validation
-- Python compilation passed.
-- Full pytest suite passed.
-- Real Discord extension-registration smoke test passed.
-- GitHub Actions checks passed on the implementation head.
-- Final changed-file and command-surface conflict inspection passed.
-- PR is mergeable with no review comments or unresolved conflicts.
+## Implementation Sequence
+1. Add canonical scope/key helpers and schema contracts.
+2. Replace load-all/save-all persistence with lazy record loading and per-record dirty tracking.
+3. Add explicit global-account, guild-profile, and guild-world accessors.
+4. Migrate every command and background caller to pass its guild scope.
+5. Add legacy migration tooling and database schema SQL.
+6. Remove the old global cache and compatibility paths.
+7. Run compilation, full tests, extension registration, migration tests, conflict inspection, and cleanup.
 
-## Cleanup
-- Removed obsolete mutation loops, stale imports, and conflicting implementations.
-- No temporary scripts, debug files, backup files, second cogs, duplicate settlement algorithms, monkey patches, startup guards, or compatibility shims remain.
+## Current Status
+- Branch created from validated `main`.
+- Root storage execution path inspected.
+- No production code changed yet.
 
-## Backlog
-- Guild/global data architecture.
-- Persistence scalability and transactional database redesign.
+## Constraints
+- No monkey patches.
+- No startup guards or silent compatibility shims.
+- No permanent dual-write path.
+- No command may silently fall back from guild state to another guild or global economy.
+
+## Backlog Locked Behind This Task
 - Player onboarding and Discord-native control panel.
 - Admin setup and server customization.
+- Large-scale sharding, distributed cache, and worker deployment.
