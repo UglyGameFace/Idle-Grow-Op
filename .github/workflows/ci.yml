@@ -41,7 +41,7 @@ jobs:
           SUPABASE_KEY: ""
         run: python -m pytest -q
 
-      - name: Import game extensions
+      - name: Load every game extension into the bot
         env:
           DISCORD_TOKEN: ""
           SUPABASE_URL: ""
@@ -49,27 +49,21 @@ jobs:
         run: |
           python - <<'PY'
           import asyncio
-          import importlib
 
-          MODULES = (
-              "admin",
-              "ai",
-              "crime",
-              "economy",
-              "farming",
-              "lab",
-              "social",
-              "tasks",
-          )
+          async def smoke_test():
+              # Import utils only after asyncio.run() establishes the loop because
+              # the current database manager starts its background task on import.
+              import utils
+              import main
 
-          async def main():
-              # utils creates its background sync task during import, so import it
-              # only after asyncio.run() has established the event loop.
-              import utils  # noqa: F401
+              main.bot.db = utils.db_manager
+              await main.load_extensions()
 
-              for module_name in MODULES:
-                  module = importlib.import_module(module_name)
-                  assert callable(getattr(module, "setup", None)), module_name
+              expected = set(main.GAME_EXTENSIONS)
+              loaded = set(main.bot.extensions)
+              assert loaded == expected, f"loaded={sorted(loaded)} expected={sorted(expected)}"
 
-          asyncio.run(main())
+              await main.bot.close()
+
+          asyncio.run(smoke_test())
           PY
