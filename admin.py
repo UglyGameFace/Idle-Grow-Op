@@ -1,59 +1,56 @@
-import discord
+import asyncio
 import os
 import sys
-import json
-import time
+
+import discord
 from discord.ext import commands
-from utils import db_manager, inv_add, inv_take, SHOP_ITEMS
+
+from utils import SHOP_ITEMS, db_manager, inv_add, inv_take
+
 
 class Admin(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    # ==========================================================
-    # 👑 OWNER ONLY CHECKS
-    # ==========================================================
     async def cog_check(self, ctx):
         """Only allow the bot owner to use these commands."""
         return await self.bot.is_owner(ctx.author)
 
-    # ==========================================================
-    # 🛠️ SYSTEM COMMANDS
-    # ==========================================================
     @commands.command(hidden=True)
     async def sync(self, ctx):
-        """Syncs slash commands (Important!)."""
+        """Sync slash commands."""
         msg = await ctx.send("⚙️ Syncing commands...")
         try:
             synced = await self.bot.tree.sync()
             await msg.edit(content=f"✅ **Synced {len(synced)} slash commands.**")
-        except Exception as e:
-            await msg.edit(content=f"❌ Sync failed: {e}")
+        except Exception as exc:
+            await msg.edit(content=f"❌ Sync failed: {exc}")
 
     @commands.command(hidden=True)
     async def reload(self, ctx, extension):
-        """Reloads a specific cog (e.g. !reload cogs.farming)."""
+        """Reload a canonical root extension, such as ``!reload farming``."""
+        extension_name = extension.removeprefix("cogs.").strip()
+        if extension_name not in getattr(self.bot, "extensions", {}):
+            return await ctx.send(f"❌ Unknown or unloaded extension: `{extension_name}`")
+
         try:
-            await self.bot.reload_extension(f"cogs.{extension}")
-            await ctx.send(f"✅ Reloaded `{extension}`")
-        except Exception as e:
-            await ctx.send(f"❌ Error: {e}")
+            await self.bot.reload_extension(extension_name)
+            await ctx.send(f"✅ Reloaded `{extension_name}`")
+        except Exception as exc:
+            await ctx.send(f"❌ Error: {exc}")
 
     @commands.command(hidden=True)
     async def restart(self, ctx):
-        """Restarts the bot process."""
+        """Restart the bot process."""
         await ctx.send("👋 Restarting...")
-        os.execv(sys.executable, ['python'] + sys.argv)
+        os.execv(sys.executable, [sys.executable, *sys.argv])
 
     @commands.command(hidden=True)
     async def backup(self, ctx):
-        """Force a database backup."""
+        """Request a database synchronization."""
         await self.bot.db.save()
-        await ctx.send("💾 **Database Saved.**")
+        await ctx.send("💾 **Database save queued.**")
 
-    # ==========================================================
-    # 💰 ECONOMY MANAGEMENT
-    # ==========================================================
     @commands.command(name="setmoney", hidden=True)
     async def setmoney(self, ctx, target: discord.User, amount: int):
         """Set a user's balance."""
@@ -67,7 +64,7 @@ class Admin(commands.Cog):
         """Spawn items for a user."""
         user = self.bot.db.get_user(target.id)
         clean_name = item_name.lower().strip()
-        
+
         inv_add(user, clean_name, amount)
         await self.bot.db.save()
         await ctx.send(f"✅ Gave **x{amount} {clean_name}** to {target.name}.")
@@ -81,17 +78,16 @@ class Admin(commands.Cog):
         await self.bot.db.save()
         await ctx.send(f"✅ Set {target.name}'s level to **{level}**.")
 
-    # ==========================================================
-    # 🚨 MODERATION / DEBUG
-    # ==========================================================
     @commands.command(name="wipeuser", hidden=True)
     async def wipeuser(self, ctx, target: discord.User):
         """Reset a user's profile completely."""
-        confirm_msg = await ctx.send(f"⚠️ **WARNING:** Are you sure you want to WIPE {target.name}? Type `yes`.")
-        
-        def check(m):
-            return m.author == ctx.author and m.content.lower() == "yes"
-            
+        await ctx.send(
+            f"⚠️ **WARNING:** Are you sure you want to WIPE {target.name}? Type `yes`."
+        )
+
+        def check(message):
+            return message.author == ctx.author and message.content.lower() == "yes"
+
         try:
             await self.bot.wait_for("message", timeout=15.0, check=check)
         except asyncio.TimeoutError:
@@ -99,9 +95,8 @@ class Admin(commands.Cog):
 
         uid = str(target.id)
         if uid in self.bot.db.data:
-            # We don't delete the key, just reset values to default
-            # to avoid key errors elsewhere.
             from utils import make_default_user
+
             self.bot.db.data[uid] = make_default_user()
             await self.bot.db.save()
             await ctx.send(f"💀 **Wiped {target.name}.** RIP.")
@@ -113,6 +108,7 @@ class Admin(commands.Cog):
         """Make the bot say something."""
         await channel.send(message)
         await ctx.message.add_reaction("✅")
+
 
 async def setup(bot):
     await bot.add_cog(Admin(bot))
