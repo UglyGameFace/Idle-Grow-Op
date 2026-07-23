@@ -8,38 +8,44 @@ Audit and correct every player-value mutation before adding new gameplay systems
 - Mixed-strain harvests redistributed aggregate yield incorrectly.
 - Unknown legacy plant records could be deleted during harvest.
 - Dice accepted zero or negative bets.
-- Concentrate calculations can accept invalid output amounts or undercharge flower through floor rounding.
+- Concentrate calculations accepted invalid output amounts and undercharged flower through floor rounding.
+- Queued lab batches consumed flower but had no player collection path.
+- Manual lab extraction checked inventory before an animation and consumed it afterward, allowing an inventory race.
 - Pot upgrade purchase limits were not enforced.
 - Auctions accepted invalid prices, allowed expired bids, lacked reliable expiry settlement, and mishandled bidder escrow.
 - Crew deposits accepted negative amounts.
 - Daily rewards and crew operations were vulnerable to overlapping command mutations.
 - Support/vote XP ignored configured cooldowns and trusted any bot account in the support channel.
+- Admin maintenance commands accepted negative balances, item quantities, and invalid levels.
 
 ## Changes Completed So Far
 - Added deterministic per-strain harvest accounting with no cash mutation.
 - Preserved unknown plants and verified seed consumption before planting.
-- Added canonical positive-amount, flower-cost, auction-price, bid, and pot-limit validators.
+- Added canonical positive-amount, flower-cost, reservation/refund, auction-price, bid, and pot-limit validators.
 - Hardened transfers, buying, flower sales, concentrate sales, slots, and dice under the database mutation lock.
 - Enforced pot upgrade limits.
 - Added auction price validation, expiry settlement, bidder escrow/refunds, incremental rebids, and exact buyout charging.
 - Made daily rewards, crew creation/join/deposits, and district ownership mutations atomic.
 - Enforced positive crew deposits.
 - Enforced configured support-service identities and per-service reward cooldowns.
-- Added targeted regression tests for harvest accounting and canonical economy validators.
+- Hardened admin balance, item, level, and wipe mutations.
+- Queued lab processing now reserves the exact rounded-up flower cost atomically.
+- Added `collect` so completed queued batches credit concentrates exactly once.
+- Manual extraction reserves flower before gameplay, consumes it on success, refunds it on timeout, and returns all but the intended penalty on failure.
+- Added targeted regression tests for harvest accounting, canonical validators, flower reservation, rollback, and penalty splitting.
 
 ## Validation Status
 - Branch remains draft.
-- CI is running against the latest mutation-layer changes.
-- Full lab, crime, admin, and remaining reward-path inspection is still required.
+- CI is running against the latest lab changes.
+- Full crime mutation inspection and final regression validation are still required.
 
 ## Cleanup Status
+- Removed obsolete lab inventory loops and unused imports.
 - No monkey patches, startup guards, compatibility shims, or duplicate command implementations were introduced.
 - Conflicting mutation paths were replaced instead of hidden behind fallback behavior.
 
 ## Remaining Work
-- Wire canonical flower-cost validation into queued and manual lab extraction.
-- Audit crime/heist/raid/steal/launder/bail payout paths.
-- Harden admin balance and item mutation commands.
+- Audit and harden crime/heist/raid/steal/launder payout paths.
 - Inspect auction/task interactions and persistence behavior.
 - Run full tests, extension registration smoke test, compilation, conflict inspection, and cleanup.
 
