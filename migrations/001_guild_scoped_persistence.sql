@@ -1,5 +1,10 @@
 begin;
 
+create table if not exists public.app_schema_migrations (
+    version text primary key,
+    applied_at timestamptz not null default now()
+);
+
 create table if not exists public.global_accounts (
     user_id bigint primary key,
     data jsonb not null default '{}'::jsonb,
@@ -54,5 +59,24 @@ drop trigger if exists guild_worlds_set_updated_at on public.guild_worlds;
 create trigger guild_worlds_set_updated_at
 before update on public.guild_worlds
 for each row execute function public.set_updated_at();
+
+alter table public.app_schema_migrations enable row level security;
+alter table public.global_accounts enable row level security;
+alter table public.guild_profiles enable row level security;
+alter table public.guild_worlds enable row level security;
+
+revoke all on table public.app_schema_migrations from anon, authenticated;
+revoke all on table public.global_accounts from anon, authenticated;
+revoke all on table public.guild_profiles from anon, authenticated;
+revoke all on table public.guild_worlds from anon, authenticated;
+
+grant all on table public.app_schema_migrations to service_role;
+grant all on table public.global_accounts to service_role;
+grant all on table public.guild_profiles to service_role;
+grant all on table public.guild_worlds to service_role;
+
+insert into public.app_schema_migrations (version)
+values ('001_guild_scoped_persistence')
+on conflict (version) do nothing;
 
 commit;
