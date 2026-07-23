@@ -1,14 +1,10 @@
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from math import ceil
 from typing import Any
 
 
 def require_positive_amount(value: Any, *, minimum: int = 1) -> int:
-    """Return a validated positive integer amount.
-
-    Economy commands must reject booleans, zero, negatives, floats, and strings
-    that are not exact integers before mutating player state.
-    """
+    """Return a validated positive integer amount."""
     if isinstance(value, bool):
         raise ValueError("amount must be an integer")
 
@@ -31,6 +27,80 @@ def flower_required_for_output(output_amount: Any, yield_ratio: Any) -> int:
     if ratio <= 0:
         raise ValueError("yield ratio must be positive")
     return max(1, ceil(amount / ratio))
+
+
+def reserve_flower(stash: MutableMapping[str, Any], amount: Any) -> dict[str, int]:
+    """Remove exactly ``amount`` flower and return the per-strain reservation.
+
+    Validation occurs before mutation, so insufficient or malformed inventory leaves
+    the stash unchanged.
+    """
+    required = require_positive_amount(amount)
+    normalized: list[tuple[str, int]] = []
+    total = 0
+    for strain, raw_qty in stash.items():
+        qty = int(raw_qty)
+        if qty < 0:
+            raise ValueError("flower inventory cannot be negative")
+        normalized.append((strain, qty))
+        total += qty
+
+    if total < required:
+        raise ValueError("not enough flower")
+
+    reservation: dict[str, int] = {}
+    remaining = required
+    for strain, available in normalized:
+        if remaining == 0:
+            break
+        taken = min(available, remaining)
+        if taken <= 0:
+            continue
+        new_qty = available - taken
+        if new_qty:
+            stash[strain] = new_qty
+        else:
+            stash.pop(strain, None)
+        reservation[strain] = taken
+        remaining -= taken
+
+    if remaining:
+        raise RuntimeError("flower reservation did not consume the validated amount")
+    return reservation
+
+
+def restore_flower(stash: MutableMapping[str, Any], reservation: Mapping[str, Any]) -> None:
+    """Return a prior flower reservation to its original strain buckets."""
+    for strain, raw_qty in reservation.items():
+        qty = int(raw_qty)
+        if qty < 0:
+            raise ValueError("reservation cannot contain negative flower")
+        if qty:
+            stash[strain] = int(stash.get(strain, 0)) + qty
+
+
+def split_reservation_penalty(
+    reservation: Mapping[str, Any], penalty_amount: Any
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Split a reservation into consumed penalty and refundable flower."""
+    penalty = max(0, int(penalty_amount))
+    consumed: dict[str, int] = {}
+    refundable: dict[str, int] = {}
+    remaining_penalty = penalty
+
+    for strain, raw_qty in reservation.items():
+        qty = int(raw_qty)
+        if qty < 0:
+            raise ValueError("reservation cannot contain negative flower")
+        used = min(qty, remaining_penalty)
+        refund = qty - used
+        if used:
+            consumed[strain] = used
+        if refund:
+            refundable[strain] = refund
+        remaining_penalty -= used
+
+    return consumed, refundable
 
 
 def validate_auction_prices(start_price: Any, buyout: Any = 0) -> tuple[int, int]:
@@ -89,11 +159,7 @@ def calculate_harvest_outcome(
     yield_multiplier: float,
     randint: Callable[[int, int], int],
 ) -> dict[str, Any]:
-    """Calculate a harvest without mutating player state.
-
-    Flower is tracked per strain. This helper deliberately knows nothing about
-    cash so harvesting cannot accidentally credit currency.
-    """
+    """Calculate a harvest without mutating player state."""
     if yield_multiplier < 0:
         raise ValueError("yield_multiplier cannot be negative")
 
@@ -106,7 +172,6 @@ def calculate_harvest_outcome(
         strain = str(plant.get("strain", "")).strip().lower()
         config = strain_configs.get(strain)
         if config is None:
-            # Preserve unknown/malformed plants rather than deleting player data.
             remaining_plants.append(plant)
             continue
 
