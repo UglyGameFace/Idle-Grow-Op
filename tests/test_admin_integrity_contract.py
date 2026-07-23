@@ -23,4 +23,25 @@ def test_admin_does_not_import_or_use_inventory_subtraction_for_spawning():
     source = (ROOT / "admin.py").read_text(encoding="utf-8")
 
     assert "inv_take" not in source
-    assert "inv_add(user, clean_name, quantity)" in source
+    assert "inv_add(profile, clean_name, quantity)" in source
+
+
+def test_admin_uses_only_explicit_guild_profile_persistence():
+    source = (ROOT / "admin.py").read_text(encoding="utf-8")
+
+    assert "get_context_profile" in source
+    assert "mark_context_profile_dirty" in source
+    assert "require_guild_id(ctx)" in source
+    assert "await self.bot.db.flush()" in source
+    assert ".get_user(" not in source
+    assert ".world_state" not in source
+    assert ".db.data" not in source
+    assert ".db.save(" not in source
+
+
+def test_wipe_resets_only_the_current_guild_profile():
+    source = (ROOT / "admin.py").read_text(encoding="utf-8")
+
+    assert "profile.clear()" in source
+    assert "profile.update(make_default_profile())" in source
+    assert "in this server" in source
