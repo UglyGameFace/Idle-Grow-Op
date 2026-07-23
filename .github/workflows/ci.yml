@@ -61,12 +61,13 @@ jobs:
           )
 
           async def main():
-              import utils
-              await utils.db_manager.start()
+              # utils creates its background sync task during import, so import it
+              # only after asyncio.run() has established the event loop.
+              import utils  # noqa: F401
+
               for module_name in MODULES:
                   module = importlib.import_module(module_name)
                   assert callable(getattr(module, "setup", None)), module_name
-              await utils.db_manager.stop()
 
           asyncio.run(main())
           PY
