@@ -110,7 +110,7 @@ class ScopedDatabaseManager:
         *,
         limit: int = 10,
     ) -> list[tuple[int, int]]:
-        return await self._run_backend_leaderboard(
+        return await self._run_backend_query(
             "list_guild_leaderboard",
             guild_id,
             limit=limit,
@@ -122,19 +122,31 @@ class ScopedDatabaseManager:
         *,
         limit: int = 10,
     ) -> list[tuple[int, int]]:
-        return await self._run_backend_leaderboard(
+        return await self._run_backend_query(
             "list_guild_heist_leaderboard",
             guild_id,
             limit=limit,
         )
 
-    async def _run_backend_leaderboard(
+    async def list_guild_notification_candidates(
+        self,
+        guild_id: Any,
+        *,
+        limit: int = 500,
+    ) -> list[int]:
+        return await self._run_backend_query(
+            "list_guild_notification_candidates",
+            guild_id,
+            limit=limit,
+        )
+
+    async def _run_backend_query(
         self,
         method_name: str,
         guild_id: Any,
         *,
         limit: int,
-    ) -> list[tuple[int, int]]:
+    ):
         query = getattr(self.backend, method_name, None)
         if query is None:
             raise RuntimeError(f"database backend does not support {method_name}")
