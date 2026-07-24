@@ -63,12 +63,14 @@ jobs:
           exit 1
 
       - name: Load every Enterprise extension into the bot
+        id: extension_load
         env:
           DISCORD_TOKEN: ""
           IDLE_SUPABASE_URL: ""
           IDLE_SUPABASE_SERVICE_ROLE_KEY: ""
         run: |
-          python - <<'PY'
+          set +e
+          python - <<'PY' > extension-load.log 2>&1
           import asyncio
 
           from scoped_database import ScopedDatabaseManager
@@ -116,6 +118,24 @@ jobs:
 
           asyncio.run(smoke_test())
           PY
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload extension-load log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-load-log
+          path: extension-load.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Fail when extension loading failed
+        if: steps.extension_load.outputs.exit_code != '0'
+        run: |
+          cat extension-load.log
+          exit 1
 
       - name: Reject legacy persistence and backup artifacts
         run: |
