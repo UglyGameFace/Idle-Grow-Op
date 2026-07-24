@@ -10,6 +10,7 @@ Replace the single global in-memory user/world cache with an explicit hybrid mod
 - One global dirty flag caused every cached user and the world record to be rewritten.
 - Leaderboards and background tasks scanned the complete cache.
 - The old Supabase path accepted a generic key, could not verify schema version, and silently fell back to volatile memory.
+- Generic Supabase environment names could collide with Dank Shield or another bot's database configuration.
 - AI chat accepted an OpenAI key but always called OpenRouter, causing authentication failures.
 - AI image generation was unwanted and added unnecessary balance/refund persistence paths.
 
@@ -34,14 +35,15 @@ Local assets stay local unless a future feature explicitly defines a cross-serve
 - Added idempotent Supabase migration `001_guild_scoped_persistence` with a migration ledger.
 - Added `global_accounts`, `guild_profiles`, and `guild_worlds` tables.
 - Enabled RLS, revoked `anon` and `authenticated`, and restricted server persistence to `service_role`.
-- Production bootstrap requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
+- Production bootstrap requires `IDLE_SUPABASE_URL` and `IDLE_SUPABASE_SERVICE_ROLE_KEY` only.
+- Generic Supabase variables and the legacy `IDLE_SUPABASE_KEY` are intentionally ignored.
 - Startup verifies migration version, required tables, and required generated columns before Discord connects.
 - Removed the old Database class, global cache, `world_state`, load-all query, global dirty flag, generic `SUPABASE_KEY`, memory fallback, and import-time background task.
 - `main.py` is now the sole owner of database startup, assignment, flush, and shutdown.
 - Removed AI image generation commands and all image cost/refund/API code.
 - Corrected AI chat to require `OPENROUTER_API_KEY`, use a bounded timeout, validate responses, and report authentication, credit, rate-limit, provider, and timeout failures clearly.
 - Added a one-time legacy migration tool requiring an explicit target guild, defaulting to dry-run, refusing conflicting overwrites, batching writes, and preserving legacy tables for rollback.
-- Added a guarded manual GitHub Actions workflow for mobile-friendly dry-run/apply execution.
+- Added a guarded manual GitHub Actions workflow for mobile-friendly dry-run/apply execution using Idle Grow-specific secrets.
 
 ## Validation Completed
 - Python compilation passes.
@@ -67,12 +69,13 @@ Completed:
 6. Verified exact data parity with zero mismatches.
 
 Still required:
-1. Configure Discloud with `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DISCORD_TOKEN`, and a valid funded `OPENROUTER_API_KEY`.
-2. Remove obsolete `SUPABASE_KEY` and `OPENAI_API_KEY` deployment variables.
-3. Merge/deploy the scoped branch.
-4. Verify startup reports the scoped Supabase backend and every extension loads.
-5. Verify balances and worlds are isolated in at least two Discord servers.
-6. Keep legacy tables temporarily for rollback.
+1. Configure Discloud with `IDLE_SUPABASE_URL`, `IDLE_SUPABASE_SERVICE_ROLE_KEY`, `DISCORD_TOKEN`, and a valid funded `OPENROUTER_API_KEY`.
+2. Remove obsolete `IDLE_SUPABASE_KEY` and `OPENAI_API_KEY` deployment variables.
+3. Leave any Dank Shield Supabase variables untouched; Idle Grow does not read them.
+4. Merge/deploy the scoped branch.
+5. Verify startup reports the scoped Supabase backend and every extension loads.
+6. Verify balances and worlds are isolated in at least two Discord servers.
+7. Keep legacy tables temporarily for rollback.
 
 ## Cleanup Status
 - No monkey patches.
@@ -80,11 +83,12 @@ Still required:
 - No permanent dual-write or compatibility layer.
 - No silent cross-scope fallback.
 - No public anon-key persistence.
+- No cross-bot generic Supabase configuration.
 - No image generation.
 - Temporary pytest artifact logging remains intentionally in CI for diagnosable failures and is not production code.
 
 ## Remaining Before Task Completion
-- Final CI on the migration-record commit.
+- Final CI on the namespaced-environment commit.
 - Configure production environment variables.
 - Merge and deploy PR #3.
 - Verify the live bot in two servers.
