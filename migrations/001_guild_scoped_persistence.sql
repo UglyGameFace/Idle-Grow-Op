@@ -20,6 +20,9 @@ create table if not exists public.guild_profiles (
     balance bigint generated always as (
         greatest(0, coalesce((data ->> 'grams')::bigint, 0))
     ) stored,
+    heist_wins bigint generated always as (
+        greatest(0, coalesce((data #>> '{stats,heists_won}')::bigint, 0))
+    ) stored,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
     primary key (guild_id, user_id),
@@ -32,11 +35,19 @@ alter table public.guild_profiles
         greatest(0, coalesce((data ->> 'grams')::bigint, 0))
     ) stored;
 
+alter table public.guild_profiles
+    add column if not exists heist_wins bigint generated always as (
+        greatest(0, coalesce((data #>> '{stats,heists_won}')::bigint, 0))
+    ) stored;
+
 create index if not exists guild_profiles_user_id_idx
     on public.guild_profiles (user_id);
 
 create index if not exists guild_profiles_guild_balance_idx
     on public.guild_profiles (guild_id, balance desc, user_id);
+
+create index if not exists guild_profiles_guild_heist_wins_idx
+    on public.guild_profiles (guild_id, heist_wins desc, user_id);
 
 create table if not exists public.guild_worlds (
     guild_id bigint primary key,
