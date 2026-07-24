@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 
@@ -32,6 +33,16 @@ def test_main_loads_exactly_the_canonical_enterprise_surface():
     assert "cogs." not in source
 
 
+def _tracked_files() -> list[Path]:
+    result = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
+    return [ROOT / item.decode("utf-8") for item in result.stdout.split(b"\0") if item]
+
+
 def test_no_backup_runtime_or_secret_artifacts_are_committed():
     forbidden_names = {
         ".env",
@@ -41,11 +52,10 @@ def test_no_backup_runtime_or_secret_artifacts_are_committed():
         "last_startup_fingerprint.json",
     }
     found = []
-    for path in ROOT.rglob("*"):
-        if ".git" in path.parts or not path.is_file():
-            continue
-        if path.name in forbidden_names or "__pycache__" in path.parts:
-            found.append(str(path.relative_to(ROOT)))
+    for path in _tracked_files():
+        relative = path.relative_to(ROOT)
+        if path.name in forbidden_names or "__pycache__" in relative.parts or path.suffix == ".pyc":
+            found.append(str(relative))
     assert not found, f"forbidden runtime/secret artifacts committed: {found}"
 
 
