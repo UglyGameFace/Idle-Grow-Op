@@ -9,7 +9,11 @@ EXPECTED_EXTENSIONS = {
     "crime",
     "economy",
     "farming",
+    "gambling",
     "lab",
+    "progression",
+    "quick",
+    "sesh",
     "social",
     "tasks",
 }
