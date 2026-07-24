@@ -18,10 +18,11 @@ def test_schema_has_indexed_generated_balance_for_guild_leaderboards():
 def test_supabase_leaderboard_is_filtered_sorted_and_limited_in_database():
     source = (ROOT / "supabase_scoped_backend.py").read_text(encoding="utf-8")
 
+    assert 'metric="balance"' in source
     assert 'self.client.table("guild_profiles")' in source
-    assert '.select("user_id,balance")' in source
+    assert '.select(f"user_id,{metric}")' in source
     assert '.eq("guild_id", guild_id)' in source
-    assert '.order("balance", desc=True)' in source
+    assert '.order(metric, desc=True)' in source
     assert '.limit(limit)' in source
 
 
