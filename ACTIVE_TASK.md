@@ -1,65 +1,90 @@
 # Active Task: Guild-Scoped Persistence Architecture
 
 ## Scope
-Replace the single global in-memory user/world cache with an explicit hybrid model that can scale across many Discord servers without cross-server economy leakage or full-database rewrites.
+Replace the single global in-memory user/world cache with an explicit hybrid model that scales across Discord servers without cross-server economy leakage, startup-wide user loading, or full-database rewrites.
 
-## Confirmed Findings
-- Player records are keyed only by Discord user ID, so balances, inventory, plants, crews, heat, jail, and progression leak across every server.
-- One `__world__` record is shared globally, so weather, markets, crews, districts, auctions, and events are unintentionally shared by all guilds.
-- Startup eagerly loads every user row into RAM.
-- Any mutation marks one global dirty flag.
-- Every sync rewrites every cached user plus the world record.
-- The current schema has no explicit global-account, guild-profile, or guild-world boundary.
-- Leaderboards and background tasks iterate the complete cache instead of a guild scope.
-- The old Supabase path accepts a generic key, cannot verify schema version, and silently falls back to volatile memory.
+## Root Cause and Confirmed Findings
+- Player records were keyed only by Discord user ID, causing balances, inventory, plants, crews, heat, jail, and progression to leak across servers.
+- One global world record shared weather, markets, crews, districts, auctions, events, and configuration across every guild.
+- Startup loaded every user into RAM.
+- One global dirty flag caused every cached user and the world record to be rewritten.
+- Leaderboards and background tasks scanned the complete cache.
+- The old Supabase path accepted a generic key, could not verify schema version, and silently fell back to volatile memory.
+- AI chat accepted an OpenAI key but always called OpenRouter, causing authentication failures.
+- AI image generation was unwanted and added unnecessary balance/refund persistence paths.
 
 ## Architecture Decision
 Use a hybrid model:
-- Global account: cross-server identity and future collection/cosmetic/prestige metadata.
-- Guild profile: all current economy, garden, inventory, crime, lab, quest, and local progression state.
-- Guild world: weather, market, events, crews, district, auctions, and server configuration.
+- Global account: cross-server identity and future collection, cosmetic, reputation, and prestige metadata.
+- Guild profile: local economy, garden, inventory, crime, lab, quests, crew membership, and progression.
+- Guild world: weather, market, events, crews, districts, auctions, and server configuration.
 
-## Changes Completed So Far
-- Added canonical typed keys for global accounts, guild profiles, and guild worlds.
-- Added strict Discord snowflake validation and rejection of ambiguous legacy cache keys.
-- Added an idempotent Supabase schema for `global_accounts`, `guild_profiles`, and `guild_worlds`.
-- Added a migration ledger requiring `001_guild_scoped_persistence`.
-- Enabled RLS and revoked direct access from Supabase `anon` and `authenticated` roles.
-- Added a production bootstrap that requires `SUPABASE_SERVICE_ROLE_KEY`; generic anon keys are unsupported.
-- Added startup schema verification with exact missing-migration/table errors.
-- Added a lazy scoped record store that loads only requested records.
-- Added exact per-record dirty tracking instead of one global dirty flag.
-- Added retry-safe flushing: failed writes remain dirty.
-- Added concurrent first-read deduplication so one record is loaded only once.
-- Added a Supabase backend that routes each scope to its correct table and batches only supplied dirty rows.
-- Added a scoped database manager with explicit account/profile/world accessors and clean shutdown flushing.
-- Added one strict Discord guild-context boundary; DM commands cannot touch ambiguous game state.
-- Migrated the Admin cog to guild-scoped profiles and exact dirty marking.
-- Added regression tests for guild isolation, lazy loading, dirty-only writes, failed-write retries, concurrent reads, Supabase routing, schema verification, service-role configuration, and Admin legacy-path rejection.
+Local assets stay local unless a future feature explicitly defines a cross-server system.
 
-## Remaining Work
-1. Migrate Economy, Farming, Lab, Crime, Social, Tasks, and AI callers to explicit guild scopes.
-2. Wire `main.py` to the verified production Supabase bootstrap.
-3. Add guild-scoped leaderboard queries without loading every player into RAM.
-4. Add legacy data migration tooling with an explicit target guild and dry-run reporting.
-5. Remove the old global cache, load-all query, global dirty flag, generic `SUPABASE_KEY`, and memory fallback.
-6. Run compilation, full tests, extension registration, migration tests, conflict inspection, and cleanup.
+## Implementation Completed
+- Added canonical typed keys and strict Discord snowflake validation.
+- Added lazy loading and concurrent first-read deduplication.
+- Added exact per-record dirty tracking and retry-safe flushes.
+- Added a scoped database manager with explicit account/profile/world accessors.
+- Added strict guild-context helpers; ambiguous DM gameplay is rejected.
+- Migrated Admin, Economy, Farming, Lab, Crime, Social, Tasks, and AI to explicit guild scopes.
+- Added guild-local indexed wealth and heist leaderboards.
+- Added indexed background-notification candidate queries so Tasks does not scan every player.
+- Made active heist/session state include guild identity where required.
+- Added idempotent Supabase migration `001_guild_scoped_persistence` with a migration ledger.
+- Added `global_accounts`, `guild_profiles`, and `guild_worlds` tables.
+- Enabled RLS, revoked `anon` and `authenticated`, and restricted server persistence to `service_role`.
+- Production bootstrap requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
+- Startup verifies migration version, required tables, and required generated columns before Discord connects.
+- Removed the old Database class, global cache, `world_state`, load-all query, global dirty flag, generic `SUPABASE_KEY`, memory fallback, and import-time background task.
+- `main.py` is now the sole owner of database startup, assignment, flush, and shutdown.
+- Removed AI image generation commands and all image cost/refund/API code.
+- Corrected AI chat to require `OPENROUTER_API_KEY`, use a bounded timeout, validate responses, and report authentication, credit, rate-limit, provider, and timeout failures clearly.
+- Added a one-time legacy migration tool requiring an explicit target guild, defaulting to dry-run, refusing conflicting overwrites, batching writes, and preserving legacy tables for rollback.
 
-## Validation Status
-- PR #3 remains draft and mergeable.
-- Scoped manager tests passed on the previous implementation head.
-- Supabase hardening and bootstrap checks are running on the latest head.
-- Production gameplay callers still partly use the legacy database manager, so the task is not merge-ready.
+## Validation Completed
+- Python compilation passes.
+- Full pytest suite passes.
+- Every canonical game extension loads successfully with an explicit scoped test database.
+- Supabase schema/bootstrap tests pass.
+- Guild-isolation, routing, dirty-only write, failed-write retry, concurrency, leaderboard, background-task, and migration-tool tests pass.
+- AI runtime-contract tests pass.
+- Legacy persistence and image-generation regression contracts pass.
+- Latest complete CI: run 193, green on commit `0b8726908a38ef87f181cf30348fecc480a7044c`.
 
-## Constraints
+## Production Rollout Order
+1. Stop the currently deployed bot so legacy data cannot change during migration.
+2. Back up the existing Supabase `users` and `world` tables.
+3. Run `migrations/001_guild_scoped_persistence.sql` in Supabase.
+4. Set local migration credentials: `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
+5. Run the legacy migration tool in dry-run mode with the real home Discord guild ID.
+6. Review counts and conflicts. Do not continue if conflicts are reported.
+7. Rerun the tool with `--apply` for that home guild.
+8. Rerun dry-run to confirm all records are identical/skipped and no conflicts remain.
+9. Configure Discloud with `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DISCORD_TOKEN`, and a valid funded `OPENROUTER_API_KEY`.
+10. Remove obsolete `SUPABASE_KEY` and `OPENAI_API_KEY` variables from the deployment configuration.
+11. Deploy the branch only after the migration is applied.
+12. Verify startup reports the scoped Supabase backend, all extensions load, and commands work in at least two servers with isolated balances/worlds.
+13. Keep legacy tables temporarily for rollback; do not delete them as part of this PR.
+
+## Cleanup Status
 - No monkey patches.
-- No startup guards or silent compatibility shims.
-- No permanent dual-write path.
-- No command may silently fall back from guild state to another guild or global economy.
-- No live deployment may use a public Supabase anon key or volatile memory as its economy database.
+- No startup guards.
+- No permanent dual-write or compatibility layer.
+- No silent cross-scope fallback.
+- No public anon-key persistence.
+- No image generation.
+- Temporary pytest artifact logging remains intentionally in CI for diagnosable failures and is not production code.
+
+## Remaining Before Merge
+- Perform final branch-versus-main conflict inspection.
+- Confirm the production home guild ID for the one-time legacy migration.
+- Execute the SQL and legacy-data migration outside CI before deploying the merged code.
+- Verify the deployed bot in two servers.
 
 ## Backlog Locked Behind This Task
 - Player onboarding and Discord-native control panel.
 - Admin setup and server customization.
-- Solo-world versus open-world gameplay and item/progression overhaul.
+- Solo-world versus open-world gameplay, raids, multiplayer, and item/progression overhaul.
+- Cross-server tournaments and global account features.
 - Large-scale sharding, distributed cache, and worker deployment.
