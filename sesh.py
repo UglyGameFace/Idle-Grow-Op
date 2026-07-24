@@ -215,7 +215,10 @@ class Sesh(commands.Cog):
     async def _switch_session_voice_channel(self, old_key, new_channel):
         session = self._sesh_sessions.get(old_key); new_key = self._session_key(old_key[0], new_channel.id)
         if not session or not _voice_like(new_channel) or (new_key in self._sesh_sessions and new_key != old_key): return None
+        old_task = session.task
         self._sesh_sessions.pop(old_key); await self._persist_descriptor(None, old_key); session.voice_channel_id = new_channel.id; session.empty_since = None; self._sesh_sessions[new_key] = session; await self._persist_descriptor(session, new_key)
+        if old_task and old_task is not asyncio.current_task() and not old_task.done(): old_task.cancel()
+        session.task = asyncio.create_task(self._session_loop(new_key), name=f"sesh-{session.guild_id}-{new_channel.id}")
         await self._safe_edit_session_message(session, embed=self._embed(new_channel.guild, session), view=SeshView(self, new_key)); return new_key
     async def create_private_room(self, interaction, key):
         session = self._sesh_sessions.get(key)
@@ -232,8 +235,12 @@ class Sesh(commands.Cog):
         await interaction.response.send_message(f"✅ Private room created and set active: {channel.mention}", ephemeral=True)
     async def _private_room_cleanup(self, key, channel_id):
         try:
-            await asyncio.sleep(PRIVATE_TTL_SECONDS); guild = self.bot.get_guild(key[0]); channel = guild.get_channel(channel_id) if guild else None
-            if channel and _voice_like(channel) and not _humans(channel): await self._delete_channel_with_fallback(channel, reason="Private Sesh expired")
+            await asyncio.sleep(PRIVATE_TTL_SECONDS)
+            while True:
+                guild = self.bot.get_guild(key[0]); channel = guild.get_channel(channel_id) if guild else None
+                if not channel: return
+                if _voice_like(channel) and not _humans(channel): await self._delete_channel_with_fallback(channel, reason="Private Sesh expired"); return
+                await asyncio.sleep(60)
         except asyncio.CancelledError: raise
         finally: self._private_cleanup_tasks.pop(key, None)
     @commands.Cog.listener()
@@ -245,7 +252,9 @@ class Sesh(commands.Cog):
             session = self._sesh_sessions.get(self._session_key(member.guild.id, channel.id))
             if not session: continue
             state = session.participants.setdefault(member.id, ParticipantState(now, now))
-            if after.channel and after.channel.id == channel.id: state.last_seen = now; state.left_at = None; session.empty_since = None
+            if after.channel and after.channel.id == channel.id:
+                if state.left_at and now - state.left_at > VOICE_GRACE_SECONDS: state.joined_at = now; state.streak_awarded.clear()
+                state.last_seen = now; state.left_at = None; session.empty_since = None
             elif before.channel and before.channel.id == channel.id: state.left_at = now; session.empty_since = now if not _humans(channel) else session.empty_since
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel):
@@ -265,7 +274,7 @@ class Sesh(commands.Cog):
         session = SeshSession(guild_id, voice.id, ctx.channel.id, 0, ctx.author.id, session_type, note, media, now); view = SeshView(self, key)
         try: message = await ctx.send(content=f"{ping} — {ctx.author.mention} started {SESSION_TYPES[session_type][0]} in {voice.mention}!", embed=self._embed(ctx.guild, session), view=view)
         except discord.Forbidden: return await ctx.send("❌ I need Send Messages and Embed Links here.")
-        session.message_id = message.id; self._sesh_sessions[key] = session; await self._persist_descriptor(session, key); session.task = asyncio.create_task(self._session_loop(key))
+        session.message_id = message.id; session.last_xp_award_at = now; self._sesh_sessions[key] = session; await self._persist_descriptor(session, key); session.task = asyncio.create_task(self._session_loop(key), name=f"sesh-{guild_id}-{voice.id}")
     @commands.hybrid_command(name="sesh", aliases=["cheers", "smoke", "blaze"])
     async def sesh(self, ctx, *, note: str | None = None): await self._start_session(ctx, "SESH", note)
     @commands.hybrid_command(name="movie")
