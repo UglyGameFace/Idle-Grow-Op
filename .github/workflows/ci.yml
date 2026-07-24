@@ -39,7 +39,7 @@ jobs:
           DISCORD_TOKEN: ""
           SUPABASE_URL: ""
           SUPABASE_KEY: ""
-        run: python -m pytest -q
+        run: python -m pytest -q --tb=short -x
 
       - name: Load every game extension into the bot
         env:
