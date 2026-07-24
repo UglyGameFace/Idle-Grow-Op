@@ -2,8 +2,10 @@ import asyncio
 import logging
 import os
 import platform
+import traceback
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 
@@ -18,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
+ERROR_LOG_CHANNEL_ID = int(os.getenv("ERROR_LOG_CHANNEL_ID", "0") or 0)
 
 GAME_EXTENSIONS = (
     "admin",
@@ -25,7 +28,11 @@ GAME_EXTENSIONS = (
     "crime",
     "economy",
     "farming",
+    "gambling",
     "lab",
+    "progression",
+    "quick",
+    "sesh",
     "social",
     "tasks",
 )
@@ -38,10 +45,79 @@ intents.presences = True
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 
+async def _report_error(title: str, detail: str) -> None:
+    logger.error("%s | %s", title, detail)
+    if not ERROR_LOG_CHANNEL_ID or not bot.is_ready():
+        return
+    channel = bot.get_channel(ERROR_LOG_CHANNEL_ID)
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(ERROR_LOG_CHANNEL_ID)
+        except (discord.HTTPException, discord.NotFound, discord.Forbidden):
+            return
+    try:
+        await channel.send(
+            embed=discord.Embed(
+                title=f"🚨 {title}",
+                description=detail[:4000],
+                color=discord.Color.red(),
+            )
+        )
+    except discord.HTTPException:
+        logger.exception("Failed to send command error to configured log channel")
+
+
+@bot.event
+async def on_command_error(ctx: commands.Context, error: commands.CommandError):
+    if isinstance(error, commands.CommandNotFound):
+        return
+    if isinstance(error, commands.CommandOnCooldown):
+        return await ctx.send(f"⏳ Try again in **{error.retry_after:.1f}s**.")
+    if isinstance(error, commands.MissingRequiredArgument):
+        return await ctx.send(f"❌ Missing `{error.param.name}`. Try `!help` for usage.")
+    if isinstance(error, commands.BadArgument):
+        return await ctx.send("❌ I couldn't understand one of those values. Check the command usage and try again.")
+    if isinstance(error, commands.CheckFailure):
+        return await ctx.send("❌ You cannot use that command here.")
+
+    original = getattr(error, "original", error)
+    context = (
+        f"command={getattr(ctx.command, 'qualified_name', 'unknown')} "
+        f"guild={getattr(ctx.guild, 'id', None)} channel={getattr(ctx.channel, 'id', None)} "
+        f"user={getattr(ctx.author, 'id', None)} error={type(original).__name__}: {original}"
+    )
+    await _report_error("Prefix command failure", context)
+    try:
+        await ctx.send("❌ Something went wrong running that command. The error was logged.")
+    except discord.HTTPException:
+        pass
+
+
+async def _tree_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    original = getattr(error, "original", error)
+    detail = (
+        f"command={getattr(interaction.command, 'qualified_name', 'unknown')} "
+        f"guild={interaction.guild_id} channel={interaction.channel_id} user={interaction.user.id} "
+        f"error={type(original).__name__}: {original}"
+    )
+    await _report_error("Slash command failure", detail)
+    message = "❌ Something went wrong running that command. The error was logged."
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+    except discord.HTTPException:
+        pass
+
+
+bot.tree.on_error = _tree_error
+
+
 @bot.event
 async def on_ready():
     logger.info("=" * 40)
-    logger.info("Stoney Baloney v4.2.0 is ONLINE")
+    logger.info("Idle Grow Op Enterprise Scoped is ONLINE")
     logger.info("Logged in as: %s", bot.user)
     logger.info("Bot ID: %s", bot.user.id if bot.user else "unknown")
     logger.info("Python: %s", platform.python_version())
@@ -49,14 +125,12 @@ async def on_ready():
     logger.info("Database: verified guild-scoped Supabase")
     logger.info("Loaded extensions: %s", ", ".join(sorted(bot.extensions)))
     logger.info("=" * 40)
-
     await bot.change_presence(activity=discord.Game(name="!help | Growing 🌿"))
 
 
 async def load_extensions() -> None:
-    """Load every canonical game extension from the repository root."""
+    """Load every canonical Enterprise extension from the repository root."""
     failures = []
-
     for extension_name in GAME_EXTENSIONS:
         try:
             await bot.load_extension(extension_name)
@@ -64,10 +138,8 @@ async def load_extensions() -> None:
         except Exception:
             logger.exception("Failed to load extension: %s", extension_name)
             failures.append(extension_name)
-
     if failures:
-        failed = ", ".join(failures)
-        raise RuntimeError(f"Required game extensions failed to load: {failed}")
+        raise RuntimeError(f"Required game extensions failed to load: {', '.join(failures)}")
 
 
 async def main() -> None:
@@ -76,7 +148,6 @@ async def main() -> None:
 
     database = await build_scoped_database()
     bot.db = database
-
     try:
         async with bot:
             await load_extensions()
@@ -90,3 +161,6 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
+    except Exception:
+        logger.critical("Fatal startup failure\n%s", traceback.format_exc())
+        raise
