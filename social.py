@@ -5,21 +5,16 @@ import discord
 from discord.ext import commands
 
 from economy_integrity import require_positive_amount
+from persistence_context import require_guild_id
 from utils import (
     SESSION_MEDIA,
     SESH_COLORS,
-    STONER_ROLE_NAME,
     STREAK_BONUSES,
     _xp_needed_for_level,
-    db_manager,
 )
 
-_ACTIVE_SESHES = {}
 
-DEFAULT_ACTIVITY_IDS = {
-    "MOVIE": 880218394199220334,
-    "KARAOKE": 755600276941176913,
-}
+_ACTIVE_SESHES: dict[int, dict] = {}
 
 SESH_QUOTES = [
     "Pass it to the left.",
@@ -49,8 +44,7 @@ SUPPORT_COOLDOWN_SECONDS = {
 SUPPORT_REWARD_XP = 1000
 
 
-def get_crews():
-    world = db_manager.world_state
+def get_crews(world: dict) -> dict:
     crews = world.get("crews")
     if not isinstance(crews, dict):
         crews = {}
@@ -64,8 +58,11 @@ class Social(commands.Cog):
 
     @commands.hybrid_command(name="profile", aliases=["me", "stats"])
     async def profile(self, ctx, target: discord.Member = None):
+        guild_id = require_guild_id(ctx)
         target = target or ctx.author
-        user = self.bot.db.get_user(target.id)
+        user = await self.bot.db.get_profile(guild_id, target.id)
+        world = await self.bot.db.get_world(guild_id)
+
         level = max(1, int(user.get("level", 1)))
         xp = max(0, int(user.get("xp", 0)))
         needed = _xp_needed_for_level(level)
@@ -76,7 +73,7 @@ class Social(commands.Cog):
         crew_name = "None"
         crew_id = user.get("crew_id")
         if crew_id:
-            crew = get_crews().get(str(crew_id))
+            crew = get_crews(world).get(str(crew_id))
             if crew:
                 crew_name = crew.get("name", "Unknown")
 
@@ -108,9 +105,9 @@ class Social(commands.Cog):
 
     @commands.hybrid_command(name="daily")
     async def daily(self, ctx):
-        user = self.bot.db.get_user(ctx.author.id)
-
+        guild_id = require_guild_id(ctx)
         async with self.bot.db.lock:
+            user = await self.bot.db.get_profile(guild_id, ctx.author.id)
             now = time.time()
             last = max(0.0, float(user.get("last_daily", 0)))
             elapsed = now - last
@@ -140,7 +137,7 @@ class Social(commands.Cog):
             user["daily_streak"] = streak
             stats = user.setdefault("stats", {})
             stats["total_earned"] = max(0, int(stats.get("total_earned", 0))) + reward
-            await self.bot.db.save()
+            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
 
         await ctx.send(f"☀️ **Daily Collected!**\n💰 **+${reward:,}**\n{streak_message}")
 
@@ -154,21 +151,23 @@ class Social(commands.Cog):
 
     @crew.command(name="create")
     async def crew_create(self, ctx, *, name: str):
+        guild_id = require_guild_id(ctx)
         clean_name = name.strip()
         if not clean_name:
             return await ctx.send("❌ Crew name cannot be empty.")
         if len(clean_name) > 50:
             return await ctx.send("❌ Crew name is too long.")
 
-        user = self.bot.db.get_user(ctx.author.id)
         async with self.bot.db.lock:
+            user = await self.bot.db.get_profile(guild_id, ctx.author.id)
+            world = await self.bot.db.get_world(guild_id)
             if user.get("crew_id"):
                 return await ctx.send("❌ Already in a crew.")
             balance = max(0, int(user.get("grams", 0)))
             if balance < 50000:
                 return await ctx.send("💸 Cost: $50,000.")
 
-            crews = get_crews()
+            crews = get_crews(world)
             crew_id = str(random.randint(10000, 99999))
             while crew_id in crews:
                 crew_id = str(random.randint(10000, 99999))
@@ -182,40 +181,46 @@ class Social(commands.Cog):
             }
             user["grams"] = balance - 50000
             user["crew_id"] = crew_id
-            await self.bot.db.save()
+            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+            self.bot.db.mark_world_dirty(guild_id)
 
         await ctx.send(f"✅ **Crew Created!** ID: `{crew_id}`")
 
     @crew.command(name="join")
     async def crew_join(self, ctx, crew_id: str):
-        user = self.bot.db.get_user(ctx.author.id)
+        guild_id = require_guild_id(ctx)
         async with self.bot.db.lock:
+            user = await self.bot.db.get_profile(guild_id, ctx.author.id)
+            world = await self.bot.db.get_world(guild_id)
             if user.get("crew_id"):
                 return await ctx.send("❌ Leave current crew first.")
-            crew = get_crews().get(crew_id)
+            crew = get_crews(world).get(str(crew_id))
             if not crew:
                 return await ctx.send("❌ Crew not found.")
             members = crew.setdefault("members", [])
             if ctx.author.id not in members:
                 members.append(ctx.author.id)
-            user["crew_id"] = crew_id
-            await self.bot.db.save()
+            user["crew_id"] = str(crew_id)
+            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+            self.bot.db.mark_world_dirty(guild_id)
 
         await ctx.send(f"✅ Joined **{crew['name']}**!")
 
     @crew.command(name="deposit")
     async def crew_deposit(self, ctx, amount: int):
+        guild_id = require_guild_id(ctx)
         try:
             deposit = require_positive_amount(amount)
         except ValueError:
             return await ctx.send("❌ Deposit must be a positive whole number.")
 
-        user = self.bot.db.get_user(ctx.author.id)
         async with self.bot.db.lock:
+            user = await self.bot.db.get_profile(guild_id, ctx.author.id)
+            world = await self.bot.db.get_world(guild_id)
             crew_id = user.get("crew_id")
             if not crew_id:
                 return await ctx.send("❌ No crew.")
-            crew = get_crews().get(str(crew_id))
+            crew = get_crews(world).get(str(crew_id))
             if not crew:
                 return await ctx.send("❌ Crew data missing.")
             balance = max(0, int(user.get("grams", 0)))
@@ -223,24 +228,27 @@ class Social(commands.Cog):
                 return await ctx.send("💸 Insufficient funds.")
             user["grams"] = balance - deposit
             crew["bank"] = max(0, int(crew.get("bank", 0))) + deposit
-            await self.bot.db.save()
+            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+            self.bot.db.mark_world_dirty(guild_id)
 
         await ctx.send(f"🏦 Deposited ${deposit:,}.")
 
     @crew.command(name="war")
     @commands.cooldown(1, 3600, commands.BucketType.guild)
     async def crew_war(self, ctx):
-        user = self.bot.db.get_user(ctx.author.id)
-        crew_id = user.get("crew_id")
-        if not crew_id:
-            return await ctx.send("❌ You need a crew.")
-
+        guild_id = require_guild_id(ctx)
         async with self.bot.db.lock:
-            crews = get_crews()
+            user = await self.bot.db.get_profile(guild_id, ctx.author.id)
+            world = await self.bot.db.get_world(guild_id)
+            crew_id = user.get("crew_id")
+            if not crew_id:
+                return await ctx.send("❌ You need a crew.")
+
+            crews = get_crews(world)
             attacker = crews.get(str(crew_id))
             if not attacker:
                 return await ctx.send("❌ Crew data missing.")
-            district = self.bot.db.world_state.setdefault("district", {})
+            district = world.setdefault("district", {})
             current_owner = district.get("owner_crew_id")
             now = time.time()
 
@@ -253,7 +261,7 @@ class Social(commands.Cog):
                         "expires_at": now + 86400,
                     }
                 )
-                await self.bot.db.save()
+                self.bot.db.mark_world_dirty(guild_id)
                 return await ctx.send(f"🔥 **{attacker['name']}** claimed the empty district!")
             if str(current_owner) == str(crew_id):
                 return await ctx.send("🏙️ You already own the block.")
@@ -273,7 +281,7 @@ class Social(commands.Cog):
                         "expires_at": now + 86400,
                     }
                 )
-                await self.bot.db.save()
+                self.bot.db.mark_world_dirty(guild_id)
 
         if attacker_won:
             await ctx.send(f"💥 **WAR!** {attacker['name']} defeated {defender['name']} and took the district!")
@@ -282,7 +290,9 @@ class Social(commands.Cog):
 
     @commands.command(name="district")
     async def district(self, ctx):
-        district = self.bot.db.world_state.get("district", {})
+        guild_id = require_guild_id(ctx)
+        world = await self.bot.db.get_world(guild_id)
+        district = world.get("district", {})
         owner = district.get("owner_name", "None")
         multiplier = max(1.0, float(district.get("multiplier", 1.0)))
         bonus = int((multiplier - 1) * 100)
@@ -293,10 +303,12 @@ class Social(commands.Cog):
 
     @commands.hybrid_command(name="sesh")
     async def sesh(self, ctx, *, args: str = ""):
+        require_guild_id(ctx)
         await self._start_sesh_flow(ctx, args, "SESH")
 
     @commands.hybrid_command(name="movie")
     async def movie(self, ctx, *, args: str = ""):
+        require_guild_id(ctx)
         await self._start_sesh_flow(ctx, args, "MOVIE")
 
     async def _start_sesh_flow(self, ctx, args, kind):
@@ -326,7 +338,7 @@ class Social(commands.Cog):
             if created_private:
                 embed.set_footer(text="Private Room Created! Click Join below.")
 
-        view = SeshView(self.bot, host.id, target.id if target else None)
+        view = SeshView(self.bot, host.id)
         message = await ctx.send(embed=embed, view=view)
         _ACTIVE_SESHES[message.id] = {
             "guild_id": guild.id,
@@ -369,7 +381,7 @@ class Social(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message):
-        if message.channel.id != SUPPORT_CHANNEL_ID:
+        if message.guild is None or message.channel.id != SUPPORT_CHANNEL_ID:
             return
         service_name = SUPPORT_SERVICES.get(message.author.id)
         if service_name is None:
@@ -384,8 +396,9 @@ class Social(commands.Cog):
         if rewarded_user is None or rewarded_user.bot:
             return
 
+        guild_id = int(message.guild.id)
         async with self.bot.db.lock:
-            user_data = self.bot.db.get_user(rewarded_user.id)
+            user_data = await self.bot.db.get_profile(guild_id, rewarded_user.id)
             cooldowns = user_data.setdefault("support_cooldowns", {})
             now = time.time()
             last_reward = max(0.0, float(cooldowns.get(service_name, 0)))
@@ -394,7 +407,7 @@ class Social(commands.Cog):
                 return
             user_data["xp"] = max(0, int(user_data.get("xp", 0))) + SUPPORT_REWARD_XP
             cooldowns[service_name] = now
-            await self.bot.db.save()
+            self.bot.db.mark_profile_dirty(guild_id, rewarded_user.id)
 
         await message.channel.send(
             f"✅ **{rewarded_user.mention}** received {SUPPORT_REWARD_XP} XP for {service_name}!"
@@ -402,16 +415,18 @@ class Social(commands.Cog):
 
 
 class SeshView(discord.ui.View):
-    def __init__(self, bot, host_id, target_id):
+    def __init__(self, bot, host_id):
         super().__init__(timeout=None)
         self.bot = bot
-        self.host_id = host_id
+        self.host_id = int(host_id)
 
     @discord.ui.button(label="Join VC", style=discord.ButtonStyle.success, emoji="🔊")
     async def join_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         session = _ACTIVE_SESHES.get(interaction.message.id)
         if not session or not session.get("vc_id"):
             return await interaction.response.send_message("❌ No VC attached.", ephemeral=True)
+        if interaction.guild is None or int(interaction.guild.id) != int(session.get("guild_id", 0)):
+            return await interaction.response.send_message("❌ Invalid server session.", ephemeral=True)
         voice_channel = interaction.guild.get_channel(session["vc_id"])
         if voice_channel:
             await voice_channel.set_permissions(interaction.user, connect=True, view_channel=True)
@@ -422,11 +437,17 @@ class SeshView(discord.ui.View):
 
     @discord.ui.button(label="Puff & Pass", style=discord.ButtonStyle.primary, emoji="🔥")
     async def puff_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        async with db_manager.lock:
-            user = db_manager.get_user(interaction.user.id)
+        if interaction.guild is None:
+            return await interaction.response.send_message(
+                "❌ This reward can only be used inside a server.",
+                ephemeral=True,
+            )
+        guild_id = int(interaction.guild.id)
+        async with self.bot.db.lock:
+            user = await self.bot.db.get_profile(guild_id, interaction.user.id)
             xp = random.randint(15, 30)
             user["xp"] = max(0, int(user.get("xp", 0))) + xp
-            await db_manager.save()
+            self.bot.db.mark_profile_dirty(guild_id, interaction.user.id)
         await interaction.response.send_message(
             f"😮‍💨 **{random.choice(SESH_QUOTES)}** (+{xp} XP)",
             ephemeral=True,
@@ -437,7 +458,7 @@ class SeshView(discord.ui.View):
         if interaction.user.id != self.host_id:
             return await interaction.response.send_message("❌ Only the host can end this sesh.", ephemeral=True)
         session = _ACTIVE_SESHES.pop(interaction.message.id, None)
-        if session and session.get("vc_id"):
+        if session and session.get("vc_id") and interaction.guild:
             voice_channel = interaction.guild.get_channel(session["vc_id"])
             if voice_channel:
                 await voice_channel.delete()
