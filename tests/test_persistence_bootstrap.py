@@ -53,26 +53,33 @@ def run(coro):
     return asyncio.run(coro)
 
 
-def test_bootstrap_requires_supabase_url():
-    with pytest.raises(PersistenceConfigurationError, match="SUPABASE_URL"):
+def test_bootstrap_requires_idle_supabase_url():
+    with pytest.raises(PersistenceConfigurationError, match="IDLE_SUPABASE_URL"):
         run(build_scoped_database(environ={}, create_client_fn=Factory()))
 
 
-def test_bootstrap_requires_service_role_key_not_generic_anon_key():
+def test_bootstrap_rejects_generic_or_legacy_keys():
     environment = {
-        "SUPABASE_URL": "https://example.supabase.co",
-        "SUPABASE_KEY": "public-anon-key",
+        "SUPABASE_URL": "https://dank-shield.supabase.co",
+        "SUPABASE_SERVICE_ROLE_KEY": "other-bot-secret",
+        "IDLE_SUPABASE_URL": "https://idle-grow.supabase.co",
+        "IDLE_SUPABASE_KEY": "public-or-legacy-key",
     }
 
-    with pytest.raises(PersistenceConfigurationError, match="SUPABASE_SERVICE_ROLE_KEY"):
+    with pytest.raises(
+        PersistenceConfigurationError,
+        match="IDLE_SUPABASE_SERVICE_ROLE_KEY",
+    ):
         run(build_scoped_database(environ=environment, create_client_fn=Factory()))
 
 
-def test_bootstrap_verifies_schema_and_starts_manager():
+def test_bootstrap_uses_only_idle_grow_credentials_and_starts_manager():
     factory = Factory()
     environment = {
-        "SUPABASE_URL": "https://example.supabase.co",
-        "SUPABASE_SERVICE_ROLE_KEY": "server-secret",
+        "SUPABASE_URL": "https://dank-shield.supabase.co",
+        "SUPABASE_SERVICE_ROLE_KEY": "other-bot-secret",
+        "IDLE_SUPABASE_URL": "https://idle-grow.supabase.co",
+        "IDLE_SUPABASE_SERVICE_ROLE_KEY": "idle-grow-server-secret",
     }
 
     async def scenario():
@@ -84,7 +91,7 @@ def test_bootstrap_verifies_schema_and_starts_manager():
         try:
             assert manager._flush_task is not None
             assert factory.calls == [
-                ("https://example.supabase.co", "server-secret")
+                ("https://idle-grow.supabase.co", "idle-grow-server-secret")
             ]
         finally:
             await manager.close()
