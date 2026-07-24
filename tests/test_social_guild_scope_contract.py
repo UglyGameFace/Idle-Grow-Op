@@ -19,13 +19,23 @@ def test_social_uses_only_guild_scoped_storage_paths():
     assert "db_manager" not in source
 
 
-def test_social_interaction_rewards_are_guild_scoped():
+def test_social_support_rewards_are_guild_scoped():
     source = (ROOT / "social.py").read_text(encoding="utf-8")
 
-    assert "if interaction.guild is None:" in source
-    assert "guild_id = int(interaction.guild.id)" in source
-    assert "await self.bot.db.get_profile(guild_id, interaction.user.id)" in source
-    assert "self.bot.db.mark_profile_dirty(guild_id, interaction.user.id)" in source
+    assert "if message.guild is None" in source
+    assert "guild_id = int(message.guild.id)" in source
+    assert "await self.bot.db.get_profile(guild_id, rewarded_user.id)" in source
+    assert "self.bot.db.mark_profile_dirty(guild_id, rewarded_user.id)" in source
+
+
+def test_social_no_longer_owns_daily_or_sesh_interactions():
+    source = (ROOT / "social.py").read_text(encoding="utf-8")
+
+    assert '@commands.hybrid_command(name="daily")' not in source
+    assert '@commands.hybrid_command(name="sesh")' not in source
+    assert '@commands.hybrid_command(name="movie")' not in source
+    assert "class SeshView" not in source
+    assert "_ACTIVE_SESHES" not in source
 
 
 def test_social_crew_and_district_state_live_in_the_guild_world():
