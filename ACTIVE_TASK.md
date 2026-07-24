@@ -51,23 +51,28 @@ Local assets stay local unless a future feature explicitly defines a cross-serve
 - Guild-isolation, routing, dirty-only write, failed-write retry, concurrency, leaderboard, background-task, and migration-tool tests pass.
 - AI runtime-contract tests pass.
 - Legacy persistence and image-generation regression contracts pass.
-- Latest complete CI before the guarded workflow: run 199, green on commit `978aabe6ca7b1f562a6f024bbdf3a51bde222613`.
+- Supabase migration `001_guild_scoped_persistence` executed successfully in production.
+- Legacy dry-run for home guild `1514374173517152418` reported 39 profiles to copy, 0 conflicts, 0 invalid IDs, and no world conflict.
+- Legacy data apply completed successfully.
+- Post-copy verification reported 39 legacy profiles, 39 scoped profiles, 0 profile mismatches, a scoped world present, and 0 world mismatches.
+- Legacy `users` and `world` tables remain untouched for rollback.
 
-## Production Rollout Order
-1. Stop the currently deployed bot so legacy data cannot change during migration.
-2. Back up the existing Supabase `users` and `world` tables.
-3. Run `migrations/001_guild_scoped_persistence.sql` in Supabase.
-4. Add GitHub repository secrets `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
-5. Run the `Migrate Legacy Game Data` workflow in `dry-run` mode.
-6. Use confirmed home guild ID `1514374173517152418`.
-7. Review counts and conflicts. Do not continue if conflicts are reported.
-8. Rerun the workflow in `apply` mode using exact confirmation `MIGRATE 1514374173517152418`.
-9. Rerun dry-run to confirm all records are identical/skipped and no conflicts remain.
-10. Configure Discloud with `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DISCORD_TOKEN`, and a valid funded `OPENROUTER_API_KEY`.
-11. Remove obsolete `SUPABASE_KEY` and `OPENAI_API_KEY` variables from the deployment configuration.
-12. Deploy the branch only after the migration is applied.
-13. Verify startup reports the scoped Supabase backend, all extensions load, and commands work in at least two servers with isolated balances/worlds.
-14. Keep legacy tables temporarily for rollback; do not delete them as part of this PR.
+## Production Rollout Status
+Completed:
+1. Stopped the deployed bot during migration.
+2. Installed `migrations/001_guild_scoped_persistence.sql`.
+3. Confirmed home guild ID `1514374173517152418`.
+4. Dry-ran the legacy copy with zero conflicts.
+5. Copied 39 profiles and the legacy world into scoped tables.
+6. Verified exact data parity with zero mismatches.
+
+Still required:
+1. Configure Discloud with `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DISCORD_TOKEN`, and a valid funded `OPENROUTER_API_KEY`.
+2. Remove obsolete `SUPABASE_KEY` and `OPENAI_API_KEY` deployment variables.
+3. Merge/deploy the scoped branch.
+4. Verify startup reports the scoped Supabase backend and every extension loads.
+5. Verify balances and worlds are isolated in at least two Discord servers.
+6. Keep legacy tables temporarily for rollback.
 
 ## Cleanup Status
 - No monkey patches.
@@ -78,12 +83,11 @@ Local assets stay local unless a future feature explicitly defines a cross-serve
 - No image generation.
 - Temporary pytest artifact logging remains intentionally in CI for diagnosable failures and is not production code.
 
-## Remaining Before Merge
-- Add the two Supabase repository secrets.
-- Execute the SQL migration.
-- Run and review the guarded dry-run for guild `1514374173517152418`.
-- Apply and verify the one-time legacy migration.
-- Verify the deployed bot in two servers.
+## Remaining Before Task Completion
+- Final CI on the migration-record commit.
+- Configure production environment variables.
+- Merge and deploy PR #3.
+- Verify the live bot in two servers.
 
 ## Backlog Locked Behind This Task
 - Player onboarding and Discord-native control panel.
