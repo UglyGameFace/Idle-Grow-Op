@@ -7,6 +7,8 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
+from persistence_bootstrap import build_scoped_database
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,14 +40,13 @@ bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 @bot.event
 async def on_ready():
-    database_backend = "Supabase" if getattr(bot.db, "supabase", None) else "memory-only fallback"
     logger.info("=" * 40)
     logger.info("Stoney Baloney v4.2.0 is ONLINE")
     logger.info("Logged in as: %s", bot.user)
     logger.info("Bot ID: %s", bot.user.id if bot.user else "unknown")
     logger.info("Python: %s", platform.python_version())
     logger.info("Discord.py: %s", discord.__version__)
-    logger.info("Database: %s", database_backend)
+    logger.info("Database: verified guild-scoped Supabase")
     logger.info("Loaded extensions: %s", ", ".join(sorted(bot.extensions)))
     logger.info("=" * 40)
 
@@ -73,15 +74,15 @@ async def main() -> None:
     if not TOKEN:
         raise RuntimeError("DISCORD_TOKEN is missing from the environment")
 
-    # Importing utils constructs the database manager and starts its background
-    # sync task. This must happen after asyncio.run() has created the event loop.
-    from utils import db_manager
+    database = await build_scoped_database()
+    bot.db = database
 
-    bot.db = db_manager
-
-    async with bot:
-        await load_extensions()
-        await bot.start(TOKEN)
+    try:
+        async with bot:
+            await load_extensions()
+            await bot.start(TOKEN)
+    finally:
+        await database.close()
 
 
 if __name__ == "__main__":
