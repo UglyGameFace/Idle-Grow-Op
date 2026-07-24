@@ -24,11 +24,13 @@ def test_apply_requires_exact_home_guild_and_confirmation():
     assert "args+=(--apply)" in source
 
 
-def test_workflow_uses_secret_service_role_and_never_anon_key():
+def test_workflow_uses_idle_grow_service_role_secrets_only():
     source = WORKFLOW.read_text(encoding="utf-8")
 
-    assert "secrets.SUPABASE_URL" in source
-    assert "secrets.SUPABASE_SERVICE_ROLE_KEY" in source
-    assert "SUPABASE_KEY" not in source
+    assert "secrets.IDLE_SUPABASE_URL" in source
+    assert "secrets.IDLE_SUPABASE_SERVICE_ROLE_KEY" in source
+    assert "secrets.SUPABASE_URL" not in source
+    assert "secrets.SUPABASE_SERVICE_ROLE_KEY" not in source
+    assert "IDLE_SUPABASE_KEY" not in source
     assert "permissions:\n  contents: read" in source
     assert "cancel-in-progress: false" in source
