@@ -5,6 +5,10 @@ from scoped_database import ScopedDatabaseManager
 from supabase_scoped_backend import SupabaseScopedBackend
 
 
+IDLE_SUPABASE_URL_ENV = "IDLE_SUPABASE_URL"
+IDLE_SUPABASE_SERVICE_ROLE_KEY_ENV = "IDLE_SUPABASE_SERVICE_ROLE_KEY"
+
+
 class PersistenceConfigurationError(RuntimeError):
     """Raised when required server-side persistence settings are missing."""
 
@@ -24,13 +28,15 @@ async def build_scoped_database(
 ) -> ScopedDatabaseManager:
     """Build, verify, and start the production scoped database manager.
 
-    The Discord bot is a trusted server process and therefore requires the
-    Supabase service-role key. Public anon keys are intentionally unsupported.
+    Idle Grow uses dedicated environment names so another bot hosted beside it
+    cannot accidentally supply a different Supabase project. The Discord bot is
+    a trusted server process and therefore requires the service-role key.
+    Public anon or publishable keys are intentionally unsupported.
     """
 
     env = environ if environ is not None else os.environ
-    url = _required_env(env, "SUPABASE_URL")
-    service_role_key = _required_env(env, "SUPABASE_SERVICE_ROLE_KEY")
+    url = _required_env(env, IDLE_SUPABASE_URL_ENV)
+    service_role_key = _required_env(env, IDLE_SUPABASE_SERVICE_ROLE_KEY_ENV)
 
     if create_client_fn is None:
         from supabase import create_client
