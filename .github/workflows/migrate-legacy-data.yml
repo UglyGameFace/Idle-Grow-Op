@@ -34,8 +34,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      IDLE_SUPABASE_URL: ${{ secrets.IDLE_SUPABASE_URL }}
+      IDLE_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.IDLE_SUPABASE_SERVICE_ROLE_KEY }}
       HOME_GUILD_ID: "1514374173517152418"
 
     steps:
@@ -51,8 +51,8 @@ jobs:
             echo "Apply requires the exact confirmation phrase."
             exit 1
           fi
-          if [[ -z "$SUPABASE_URL" || -z "$SUPABASE_SERVICE_ROLE_KEY" ]]; then
-            echo "GitHub Secrets SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required."
+          if [[ -z "$IDLE_SUPABASE_URL" || -z "$IDLE_SUPABASE_SERVICE_ROLE_KEY" ]]; then
+            echo "GitHub Secrets IDLE_SUPABASE_URL and IDLE_SUPABASE_SERVICE_ROLE_KEY are required."
             exit 1
           fi
 
