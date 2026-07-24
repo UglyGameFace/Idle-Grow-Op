@@ -12,7 +12,6 @@ def _source() -> str:
 
 def test_sesh_is_a_live_voice_session_not_only_a_ping():
     source = _source()
-
     assert "on_voice_state_update" in source
     assert "participants" in source
     assert "empty_since" in source
@@ -23,7 +22,6 @@ def test_sesh_is_a_live_voice_session_not_only_a_ping():
 
 def test_sesh_allows_one_active_session_per_voice_channel_not_per_guild():
     source = _source()
-
     assert "(guild_id, voice_channel_id)" in source or "(guild_id, vc_id)" in source
     assert "_session_key" in source
     assert "voice_channel_id" in source or "vc_id" in source
@@ -31,12 +29,13 @@ def test_sesh_allows_one_active_session_per_voice_channel_not_per_guild():
     assert "one active session per voice channel" in source.lower()
 
 
-def test_sesh_rewards_require_real_voice_presence_and_are_capped():
+def test_sesh_rewards_require_real_voice_presence_correct_cadence_and_caps():
     source = _source()
-
     assert "channel.members" in source or ".members" in source
     assert "member.bot" in source or "not member.bot" in source
     assert "XP_MIN_HUMANS" in source
+    assert "XP_INTERVAL_SECONDS" in source
+    assert "last_xp_award_at" in source
     assert "SESH_XP_MAX_PER_USER" in source
     assert "self_mute" in source
     assert "self_deaf" in source
@@ -47,7 +46,6 @@ def test_sesh_rewards_require_real_voice_presence_and_are_capped():
 
 def test_sesh_cleanup_has_normal_and_fallback_paths():
     source = _source()
-
     assert "cog_unload" in source
     assert "on_guild_channel_delete" in source
     assert "announcement_missing" in source
@@ -59,18 +57,19 @@ def test_sesh_cleanup_has_normal_and_fallback_paths():
     assert "reconcile" in source.lower()
 
 
-def test_sesh_handles_host_departure_without_killing_the_room():
+def test_sesh_handles_host_departure_and_room_switching():
     source = _source()
-
     assert "can_manage_session" in source
     assert "host_present" in source
     assert "member_present" in source
     assert "manage_channels" in source
+    assert "_switch_session_voice_channel" in source
+    assert 'name="seshmove"' in source
+    assert "Private room created and set active" in source
 
 
 def test_sesh_media_is_session_aware_and_keyword_validated():
     source = _source()
-
     assert "TENOR_API_KEY" in source
     assert "build_media_query" in source
     assert "session_type" in source
@@ -80,11 +79,11 @@ def test_sesh_media_is_session_aware_and_keyword_validated():
     assert "SESH" in source and "MOVIE" in source and "KARAOKE" in source
     assert "random.choice(results)" not in source
     assert "curated_media" in source
+    assert "wrong GIF is worse than no GIF" in source
 
 
 def test_sesh_configuration_and_restart_descriptors_are_guild_world_scoped():
     source = _source()
-
     assert "get_world" in source
     assert "mark_world_dirty" in source
     assert "get_profile" in source
@@ -98,7 +97,6 @@ def test_sesh_configuration_and_restart_descriptors_are_guild_world_scoped():
 
 def test_sesh_preserves_all_three_enterprise_session_types():
     source = _source()
-
     assert 'name="sesh"' in source
     assert 'name="movie"' in source
     assert 'name="karaoke"' in source
