@@ -110,9 +110,34 @@ class ScopedDatabaseManager:
         *,
         limit: int = 10,
     ) -> list[tuple[int, int]]:
-        query = getattr(self.backend, "list_guild_leaderboard", None)
+        return await self._run_backend_leaderboard(
+            "list_guild_leaderboard",
+            guild_id,
+            limit=limit,
+        )
+
+    async def list_guild_heist_leaderboard(
+        self,
+        guild_id: Any,
+        *,
+        limit: int = 10,
+    ) -> list[tuple[int, int]]:
+        return await self._run_backend_leaderboard(
+            "list_guild_heist_leaderboard",
+            guild_id,
+            limit=limit,
+        )
+
+    async def _run_backend_leaderboard(
+        self,
+        method_name: str,
+        guild_id: Any,
+        *,
+        limit: int,
+    ) -> list[tuple[int, int]]:
+        query = getattr(self.backend, method_name, None)
         if query is None:
-            raise RuntimeError("database backend does not support guild leaderboards")
+            raise RuntimeError(f"database backend does not support {method_name}")
         return await query(guild_id, limit=limit)
 
     def mark_account_dirty(self, user_id: Any) -> None:
