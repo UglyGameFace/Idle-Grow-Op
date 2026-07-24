@@ -8,11 +8,11 @@ from utils import (
     GROWTH_CYCLES,
     SHOP_ITEMS,
     _shop_price,
+    get_plant_grow_time,
     inv_get,
     inv_take,
     jail_guard,
     jail_left_seconds,
-    plant_is_ready,
 )
 
 QPLANT_MAX_PLANT_PER_CALL = 25
@@ -28,6 +28,11 @@ def _safe_int(value, default=0):
 def _seed_cost(seed_key: str) -> int:
     item = SHOP_ITEMS.get(seed_key)
     return int(_shop_price(item) or 0) if item else 0
+
+
+def _plant_is_ready(profile: dict, world: dict, plant: dict, now: float) -> bool:
+    planted_at = float(plant.get("planted_at", now) or now)
+    return now - planted_at >= get_plant_grow_time(profile, world, plant)
 
 
 class Quick(commands.Cog):
@@ -71,7 +76,7 @@ class Quick(commands.Cog):
         _, profile, world = await self._scope(ctx)
         plants = profile.get("plants", []) or []
         now = time.time()
-        ready = sum(1 for plant in plants if plant_is_ready(profile, world, plant, now))
+        ready = sum(1 for plant in plants if _plant_is_ready(profile, world, plant, now))
         heat = max(0, _safe_int(profile.get("heat")))
         jail_time = max(0, _safe_int(jail_left_seconds(profile)))
         status = "🟢"
@@ -117,7 +122,7 @@ class Quick(commands.Cog):
         ready_plants = [
             f"🌿 **{str(plant.get('strain', 'unknown')).title()}**"
             for plant in profile.get("plants", []) or []
-            if plant_is_ready(profile, world, plant, now)
+            if _plant_is_ready(profile, world, plant, now)
         ]
         if not ready_plants:
             return await ctx.send("⏳ No plants ready.")
