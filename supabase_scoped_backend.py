@@ -52,7 +52,7 @@ class SupabaseScopedBackend:
 
         required_columns = {
             "global_accounts": "data",
-            "guild_profiles": "data,balance",
+            "guild_profiles": "data,balance,heist_wins",
             "guild_worlds": "data",
         }
         for table_name, columns in required_columns.items():
@@ -82,33 +82,62 @@ class SupabaseScopedBackend:
         *,
         limit: int = 10,
     ) -> list[tuple[int, int]]:
+        return await self._list_guild_metric(
+            guild_id,
+            metric="balance",
+            limit=limit,
+        )
+
+    async def list_guild_heist_leaderboard(
+        self,
+        guild_id: Any,
+        *,
+        limit: int = 10,
+    ) -> list[tuple[int, int]]:
+        return await self._list_guild_metric(
+            guild_id,
+            metric="heist_wins",
+            limit=limit,
+        )
+
+    async def _list_guild_metric(
+        self,
+        guild_id: Any,
+        *,
+        metric: str,
+        limit: int,
+    ) -> list[tuple[int, int]]:
         guild_number = int(guild_id)
         if guild_number <= 0:
             raise ValueError("guild_id must be positive")
         if limit <= 0 or limit > 100:
             raise ValueError("limit must be between 1 and 100")
+        if metric not in {"balance", "heist_wins"}:
+            raise ValueError("unsupported leaderboard metric")
         return await asyncio.to_thread(
-            self._list_guild_leaderboard_sync,
+            self._list_guild_metric_sync,
             guild_number,
+            metric,
             int(limit),
         )
 
-    def _list_guild_leaderboard_sync(
+    def _list_guild_metric_sync(
         self,
         guild_id: int,
+        metric: str,
         limit: int,
     ) -> list[tuple[int, int]]:
         response = (
             self.client.table("guild_profiles")
-            .select("user_id,balance")
+            .select(f"user_id,{metric}")
             .eq("guild_id", guild_id)
-            .order("balance", desc=True)
+            .order(metric, desc=True)
             .order("user_id")
             .limit(limit)
             .execute()
         )
         return [
-            (int(row["user_id"]), max(0, int(row.get("balance", 0) or 0)))
+            (int(row["user_id"]), max(0, int(row.get(metric, 0) or 0)))
             for row in (response.data or [])
         ]
 
