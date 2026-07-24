@@ -39,7 +39,7 @@ jobs:
         env:
           DISCORD_TOKEN: ""
           SUPABASE_URL: ""
-          SUPABASE_KEY: ""
+          SUPABASE_SERVICE_ROLE_KEY: ""
         run: |
           set +e
           python -m pytest -q --tb=short -x > pytest.log 2>&1
@@ -66,26 +66,55 @@ jobs:
         env:
           DISCORD_TOKEN: ""
           SUPABASE_URL: ""
-          SUPABASE_KEY: ""
+          SUPABASE_SERVICE_ROLE_KEY: ""
         run: |
           python - <<'PY'
           import asyncio
 
+          from scoped_database import ScopedDatabaseManager
+
+
+          class SmokeBackend:
+              async def load(self, key):
+                  return None
+
+              async def save_many(self, records):
+                  return None
+
+              async def list_guild_leaderboard(self, guild_id, *, limit=10):
+                  return []
+
+              async def list_guild_heist_leaderboard(self, guild_id, *, limit=10):
+                  return []
+
+              async def list_guild_notification_candidates(self, guild_id, *, limit=500):
+                  return []
+
+
           async def smoke_test():
-              # Import utils only after asyncio.run() establishes the loop because
-              # the current database manager starts its background task on import.
-              import utils
               import main
 
-              main.bot.db = utils.db_manager
-              async with main.bot:
-                  await main.load_extensions()
+              database = ScopedDatabaseManager(SmokeBackend(), flush_interval=3600)
+              await database.start()
+              main.bot.db = database
 
-                  expected = set(main.GAME_EXTENSIONS)
-                  loaded = set(main.bot.extensions)
-                  assert loaded == expected, (
-                      f"loaded={sorted(loaded)} expected={sorted(expected)}"
-                  )
+              try:
+                  async with main.bot:
+                      await main.load_extensions()
+
+                      expected = set(main.GAME_EXTENSIONS)
+                      loaded = set(main.bot.extensions)
+                      assert loaded == expected, (
+                          f"loaded={sorted(loaded)} expected={sorted(expected)}"
+                      )
+              finally:
+                  await database.close()
+
 
           asyncio.run(smoke_test())
           PY
+
+      - name: Reject legacy persistence paths
+        run: |
+          ! grep -R -nE 'SUPABASE_KEY|db_manager|class Database|\.world_state|\.get_user\(|await .*\.save\(\)' \
+            main.py utils.py admin.py ai.py crime.py economy.py farming.py lab.py social.py tasks.py
