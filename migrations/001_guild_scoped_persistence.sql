@@ -23,6 +23,22 @@ create table if not exists public.guild_profiles (
     heist_wins bigint generated always as (
         greatest(0, coalesce((data #>> '{stats,heists_won}')::bigint, 0))
     ) stored,
+    has_notification_work boolean generated always as (
+        (
+            case
+                when jsonb_typeof(data -> 'plants') = 'array'
+                then jsonb_array_length(data -> 'plants')
+                else 0
+            end
+            +
+            case
+                when jsonb_typeof(data -> 'processing_queue') = 'array'
+                then jsonb_array_length(data -> 'processing_queue')
+                else 0
+            end
+        ) > 0
+        and coalesce((data #>> '{settings,notifications}')::boolean, true)
+    ) stored,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
     primary key (guild_id, user_id),
@@ -40,6 +56,24 @@ alter table public.guild_profiles
         greatest(0, coalesce((data #>> '{stats,heists_won}')::bigint, 0))
     ) stored;
 
+alter table public.guild_profiles
+    add column if not exists has_notification_work boolean generated always as (
+        (
+            case
+                when jsonb_typeof(data -> 'plants') = 'array'
+                then jsonb_array_length(data -> 'plants')
+                else 0
+            end
+            +
+            case
+                when jsonb_typeof(data -> 'processing_queue') = 'array'
+                then jsonb_array_length(data -> 'processing_queue')
+                else 0
+            end
+        ) > 0
+        and coalesce((data #>> '{settings,notifications}')::boolean, true)
+    ) stored;
+
 create index if not exists guild_profiles_user_id_idx
     on public.guild_profiles (user_id);
 
@@ -48,6 +82,10 @@ create index if not exists guild_profiles_guild_balance_idx
 
 create index if not exists guild_profiles_guild_heist_wins_idx
     on public.guild_profiles (guild_id, heist_wins desc, user_id);
+
+create index if not exists guild_profiles_notification_work_idx
+    on public.guild_profiles (guild_id, user_id)
+    where has_notification_work;
 
 create table if not exists public.guild_worlds (
     guild_id bigint primary key,
