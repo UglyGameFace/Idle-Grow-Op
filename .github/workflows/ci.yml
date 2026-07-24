@@ -62,7 +62,7 @@ jobs:
           cat pytest.log
           exit 1
 
-      - name: Load every game extension into the bot
+      - name: Load every Enterprise extension into the bot
         env:
           DISCORD_TOKEN: ""
           IDLE_SUPABASE_URL: ""
@@ -85,6 +85,9 @@ jobs:
                   return []
 
               async def list_guild_heist_leaderboard(self, guild_id, *, limit=10):
+                  return []
+
+              async def list_guild_casino_leaderboard(self, guild_id, *, metric="casino_total_profit", limit=10):
                   return []
 
               async def list_guild_notification_candidates(self, guild_id, *, limit=500):
@@ -114,7 +117,12 @@ jobs:
           asyncio.run(smoke_test())
           PY
 
-      - name: Reject legacy persistence paths
+      - name: Reject legacy persistence and backup artifacts
         run: |
-          ! grep -R -nE '(^|[^A-Z_])SUPABASE_(URL|KEY|SERVICE_ROLE_KEY)|IDLE_SUPABASE_KEY|db_manager|class Database|\.world_state|\.get_user\(|await .*\.save\(\)' \
-            main.py utils.py persistence_bootstrap.py tools/migrate_legacy_global_data.py admin.py ai.py crime.py economy.py farming.py lab.py social.py tasks.py
+          ! grep -R -nE '(^|[^A-Z_])SUPABASE_(URL|KEY|SERVICE_ROLE_KEY)|IDLE_SUPABASE_KEY|db_manager|class Database|\.world_state|\.get_user\(|await .*\.save\(\)|Local JSON|memory-only fallback' \
+            main.py utils.py persistence_bootstrap.py scoped_database.py supabase_scoped_backend.py \
+            admin.py ai.py crime.py economy.py farming.py gambling.py lab.py progression.py quick.py sesh.py social.py tasks.py
+          test ! -d cogs
+          test ! -f .env
+          test ! -f database.json
+          test ! -f database.json.bak
