@@ -151,10 +151,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    url = os.environ.get("SUPABASE_URL", "").strip()
-    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    url = os.environ.get("IDLE_SUPABASE_URL", "").strip()
+    key = os.environ.get("IDLE_SUPABASE_SERVICE_ROLE_KEY", "").strip()
     if not url or not key:
-        raise SystemExit("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required")
+        raise SystemExit(
+            "IDLE_SUPABASE_URL and IDLE_SUPABASE_SERVICE_ROLE_KEY are required"
+        )
 
     from supabase import create_client
 
