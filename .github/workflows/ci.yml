@@ -35,11 +35,32 @@ jobs:
         run: python -m compileall -q .
 
       - name: Run tests
+        id: pytest
         env:
           DISCORD_TOKEN: ""
           SUPABASE_URL: ""
           SUPABASE_KEY: ""
-        run: python -m pytest -q --tb=short -x
+        run: |
+          set +e
+          python -m pytest -q --tb=short -x > pytest.log 2>&1
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload pytest log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-log
+          path: pytest.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Fail when pytest failed
+        if: steps.pytest.outputs.exit_code != '0'
+        run: |
+          cat pytest.log
+          exit 1
 
       - name: Load every game extension into the bot
         env:
