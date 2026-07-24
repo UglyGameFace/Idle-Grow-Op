@@ -30,5 +30,8 @@ def test_scoped_manager_delegates_leaderboard_without_scanning_cache():
     source = (ROOT / "scoped_database.py").read_text(encoding="utf-8")
 
     assert "async def list_guild_leaderboard" in source
-    assert 'getattr(self.backend, "list_guild_leaderboard", None)' in source
+    assert 'self._run_backend_leaderboard(' in source
+    assert '"list_guild_leaderboard"' in source
+    assert "query = getattr(self.backend, method_name, None)" in source
+    assert "return await query(guild_id, limit=limit)" in source
     assert "self.store.cached_keys" not in source
