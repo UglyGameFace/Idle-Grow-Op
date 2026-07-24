@@ -12,6 +12,20 @@ from persistence_store import FlushResult, ScopedRecordStore
 
 
 FLUSH_INTERVAL_SECONDS = 10
+CASINO_PROFIT_METRICS = {
+    "casino_total_profit",
+    "coinflip_profit",
+    "slots_profit",
+    "blackjack_profit",
+    "dice_profit",
+    "roulette_profit",
+    "hilo_profit",
+    "rps_profit",
+    "crash_profit",
+    "wheel_profit",
+    "cups_profit",
+    "keno_profit",
+}
 
 
 def make_default_account() -> dict[str, Any]:
@@ -127,6 +141,20 @@ class ScopedDatabaseManager:
             guild_id,
             limit=limit,
         )
+
+    async def list_guild_casino_leaderboard(
+        self,
+        guild_id: Any,
+        *,
+        metric: str = "casino_total_profit",
+        limit: int = 10,
+    ) -> list[tuple[int, int]]:
+        if metric not in CASINO_PROFIT_METRICS:
+            raise ValueError("unsupported casino leaderboard metric")
+        query = getattr(self.backend, "list_guild_casino_leaderboard", None)
+        if query is None:
+            raise RuntimeError("database backend does not support list_guild_casino_leaderboard")
+        return await query(guild_id, metric=metric, limit=limit)
 
     async def list_guild_notification_candidates(
         self,
