@@ -11,7 +11,21 @@ from persistence_scope import (
 )
 
 
-REQUIRED_SCHEMA_VERSION = "001_guild_scoped_persistence"
+REQUIRED_SCHEMA_VERSION = "002_enterprise_casino_metrics"
+CASINO_PROFIT_METRICS = {
+    "casino_total_profit",
+    "coinflip_profit",
+    "slots_profit",
+    "blackjack_profit",
+    "dice_profit",
+    "roulette_profit",
+    "hilo_profit",
+    "rps_profit",
+    "crash_profit",
+    "wheel_profit",
+    "cups_profit",
+    "keno_profit",
+}
 
 
 class SupabaseSchemaError(RuntimeError):
@@ -40,19 +54,18 @@ class SupabaseScopedBackend:
             )
         except Exception as exc:
             raise SupabaseSchemaError(
-                "Scoped Supabase schema is unavailable. Run "
-                "migrations/001_guild_scoped_persistence.sql with the Supabase SQL editor."
+                "Enterprise scoped Supabase schema is unavailable. Run migrations/001_guild_scoped_persistence.sql and migrations/002_enterprise_casino_metrics.sql."
             ) from exc
 
-        versions = response.data or []
-        if not versions:
+        if not (response.data or []):
             raise SupabaseSchemaError(
                 f"Required Supabase migration is missing: {REQUIRED_SCHEMA_VERSION}"
             )
 
+        casino_columns = ",".join(sorted(CASINO_PROFIT_METRICS))
         required_columns = {
             "global_accounts": "data",
-            "guild_profiles": "data,balance,heist_wins,has_notification_work",
+            "guild_profiles": f"data,balance,heist_wins,has_notification_work,{casino_columns}",
             "guild_worlds": "data",
         }
         for table_name, columns in required_columns.items():
@@ -82,11 +95,7 @@ class SupabaseScopedBackend:
         *,
         limit: int = 10,
     ) -> list[tuple[int, int]]:
-        return await self._list_guild_metric(
-            guild_id,
-            metric="balance",
-            limit=limit,
-        )
+        return await self._list_guild_metric(guild_id, metric="balance", limit=limit)
 
     async def list_guild_heist_leaderboard(
         self,
@@ -94,10 +103,22 @@ class SupabaseScopedBackend:
         *,
         limit: int = 10,
     ) -> list[tuple[int, int]]:
+        return await self._list_guild_metric(guild_id, metric="heist_wins", limit=limit)
+
+    async def list_guild_casino_leaderboard(
+        self,
+        guild_id: Any,
+        *,
+        metric: str = "casino_total_profit",
+        limit: int = 10,
+    ) -> list[tuple[int, int]]:
+        if metric not in CASINO_PROFIT_METRICS:
+            raise ValueError("unsupported casino leaderboard metric")
         return await self._list_guild_metric(
             guild_id,
-            metric="heist_wins",
+            metric=metric,
             limit=limit,
+            clamp_nonnegative=False,
         )
 
     async def _list_guild_metric(
@@ -106,17 +127,20 @@ class SupabaseScopedBackend:
         *,
         metric: str,
         limit: int,
+        clamp_nonnegative: bool = True,
     ) -> list[tuple[int, int]]:
         guild_number = self._positive_int(guild_id, "guild_id")
         if limit <= 0 or limit > 100:
             raise ValueError("limit must be between 1 and 100")
-        if metric not in {"balance", "heist_wins"}:
+        allowed = {"balance", "heist_wins", *CASINO_PROFIT_METRICS}
+        if metric not in allowed:
             raise ValueError("unsupported leaderboard metric")
         return await asyncio.to_thread(
             self._list_guild_metric_sync,
             guild_number,
             metric,
             int(limit),
+            clamp_nonnegative,
         )
 
     def _list_guild_metric_sync(
@@ -124,6 +148,7 @@ class SupabaseScopedBackend:
         guild_id: int,
         metric: str,
         limit: int,
+        clamp_nonnegative: bool,
     ) -> list[tuple[int, int]]:
         response = (
             self.client.table("guild_profiles")
@@ -134,10 +159,11 @@ class SupabaseScopedBackend:
             .limit(limit)
             .execute()
         )
-        return [
-            (int(row["user_id"]), max(0, int(row.get(metric, 0) or 0)))
-            for row in (response.data or [])
-        ]
+        rows = []
+        for row in response.data or []:
+            value = int(row.get(metric, 0) or 0)
+            rows.append((int(row["user_id"]), max(0, value) if clamp_nonnegative else value))
+        return rows
 
     async def list_guild_notification_candidates(
         self,
