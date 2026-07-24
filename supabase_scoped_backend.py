@@ -52,7 +52,7 @@ class SupabaseScopedBackend:
 
         required_columns = {
             "global_accounts": "data",
-            "guild_profiles": "data,balance,heist_wins",
+            "guild_profiles": "data,balance,heist_wins,has_notification_work",
             "guild_worlds": "data",
         }
         for table_name, columns in required_columns.items():
@@ -107,9 +107,7 @@ class SupabaseScopedBackend:
         metric: str,
         limit: int,
     ) -> list[tuple[int, int]]:
-        guild_number = int(guild_id)
-        if guild_number <= 0:
-            raise ValueError("guild_id must be positive")
+        guild_number = self._positive_int(guild_id, "guild_id")
         if limit <= 0 or limit > 100:
             raise ValueError("limit must be between 1 and 100")
         if metric not in {"balance", "heist_wins"}:
@@ -141,6 +139,37 @@ class SupabaseScopedBackend:
             for row in (response.data or [])
         ]
 
+    async def list_guild_notification_candidates(
+        self,
+        guild_id: Any,
+        *,
+        limit: int = 500,
+    ) -> list[int]:
+        guild_number = self._positive_int(guild_id, "guild_id")
+        if limit <= 0 or limit > 1000:
+            raise ValueError("limit must be between 1 and 1000")
+        return await asyncio.to_thread(
+            self._list_guild_notification_candidates_sync,
+            guild_number,
+            int(limit),
+        )
+
+    def _list_guild_notification_candidates_sync(
+        self,
+        guild_id: int,
+        limit: int,
+    ) -> list[int]:
+        response = (
+            self.client.table("guild_profiles")
+            .select("user_id")
+            .eq("guild_id", guild_id)
+            .eq("has_notification_work", True)
+            .order("user_id")
+            .limit(limit)
+            .execute()
+        )
+        return [int(row["user_id"]) for row in (response.data or [])]
+
     async def save_many(self, records: Mapping[RecordKey, Mapping[str, Any]]) -> None:
         if not records:
             return
@@ -154,6 +183,13 @@ class SupabaseScopedBackend:
 
         for table_name, payload in grouped.items():
             self.client.table(table_name).upsert(payload).execute()
+
+    @staticmethod
+    def _positive_int(value: Any, name: str) -> int:
+        number = int(value)
+        if number <= 0:
+            raise ValueError(f"{name} must be positive")
+        return number
 
     @staticmethod
     def _table_and_filters(key: RecordKey) -> tuple[str, dict[str, int]]:
