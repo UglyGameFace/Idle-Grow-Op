@@ -31,8 +31,9 @@ def test_sesh_allows_one_active_session_per_voice_channel_not_per_guild():
 
 def test_sesh_rewards_require_real_voice_presence_correct_cadence_and_caps():
     source = _source()
-    assert "channel.members" in source or ".members" in source
-    assert "member.bot" in source or "not member.bot" in source
+    assert "def _humans(" in source
+    assert 'getattr(ch, "members", [])' in source
+    assert "not m.bot" in source or "not member.bot" in source
     assert "XP_MIN_HUMANS" in source
     assert "XP_INTERVAL_SECONDS" in source
     assert "last_xp_award_at" in source
