@@ -22,6 +22,16 @@ def test_sesh_is_a_live_voice_session_not_only_a_ping():
     assert "Switch Room" in source or "switch_session" in source
 
 
+def test_sesh_allows_one_active_session_per_voice_channel_not_per_guild():
+    source = _source()
+
+    assert "(guild_id, voice_channel_id)" in source or "(guild_id, vc_id)" in source
+    assert "_session_key" in source
+    assert "voice_channel_id" in source or "vc_id" in source
+    assert "_active_session_for_guild" not in source
+    assert "one active session per voice channel" in source.lower()
+
+
 def test_sesh_rewards_require_real_voice_presence_and_are_capped():
     source = _source()
 
@@ -32,6 +42,31 @@ def test_sesh_rewards_require_real_voice_presence_and_are_capped():
     assert "self_deaf" in source
     assert "STREAK" in source
     assert "ROTATION" in source
+
+
+def test_sesh_cleanup_has_normal_and_fallback_paths():
+    source = _source()
+
+    assert "cog_unload" in source
+    assert "on_guild_channel_delete" in source
+    assert "empty_since" in source
+    assert "stale" in source.lower()
+    assert "private" in source.lower() and "delete" in source.lower()
+    assert "finally" in source
+    assert "cancel" in source
+    assert "prune" in source.lower() or "reconcile" in source.lower()
+
+
+def test_sesh_media_is_session_aware_and_keyword_validated():
+    source = _source()
+
+    assert "TENOR_API_KEY" in source
+    assert "media_query" in source or "build_media_query" in source
+    assert "session_type" in source
+    assert "keywords" in source or "note_tokens" in source
+    assert "score" in source.lower()
+    assert "SESH" in source and "MOVIE" in source and "KARAOKE" in source
+    assert "random.choice(results)" not in source
 
 
 def test_sesh_configuration_is_guild_world_scoped():
