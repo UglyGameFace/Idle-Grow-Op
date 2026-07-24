@@ -1,0 +1,79 @@
+name: Migrate Legacy Game Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Run a safe dry-run or apply the migration"
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - apply
+      guild_id:
+        description: "Home Discord guild receiving legacy progress"
+        required: true
+        default: "1514374173517152418"
+        type: string
+      confirmation:
+        description: "For apply only, enter: MIGRATE 1514374173517152418"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: legacy-data-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      HOME_GUILD_ID: "1514374173517152418"
+
+    steps:
+      - name: Validate guarded inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ inputs.guild_id }}" != "$HOME_GUILD_ID" ]]; then
+            echo "Refusing unexpected guild ID. Expected $HOME_GUILD_ID."
+            exit 1
+          fi
+          if [[ "${{ inputs.mode }}" == "apply" && "${{ inputs.confirmation }}" != "MIGRATE $HOME_GUILD_ID" ]]; then
+            echo "Apply requires the exact confirmation phrase."
+            exit 1
+          fi
+          if [[ -z "$SUPABASE_URL" || -z "$SUPABASE_SERVICE_ROLE_KEY" ]]; then
+            echo "GitHub Secrets SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required."
+            exit 1
+          fi
+
+      - name: Check out migration branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install migration dependency
+        run: python -m pip install -q -r requirements.txt
+
+      - name: Run migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--guild-id "$HOME_GUILD_ID")
+          if [[ "${{ inputs.mode }}" == "apply" ]]; then
+            args+=(--apply)
+          fi
+          python tools/migrate_legacy_global_data.py "${args[@]}"
