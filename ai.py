@@ -1,19 +1,16 @@
-import discord
-import aiohttp
 import os
-import json
-import asyncio
-from discord.ext import commands
-from utils import db_manager, jail_guard, _env_str
 
-# ==========================================================
-# 🧠 AI CONFIGURATION
-# ==========================================================
+import aiohttp
+import discord
+from discord.ext import commands
+
+from persistence_context import GuildContextRequired, require_guild_id
+
+
 AI_BASE_URL = "https://openrouter.ai/api/v1"
 AI_MODEL_CHAT = "openai/gpt-4o-mini"
-AI_MODEL_IMAGE = "stabilityai/stable-diffusion-xl-base-1.0"
+AI_IMAGE_COST = 500
 
-# The Persona
 SYSTEM_PROMPT = """
 You are 'The Plug', a street-smart, helpful, and chill Discord bot assistant for a Weed Tycoon game called 'Stoney Baloney'.
 - You speak in mild slang (bruh, fam, bet, say less), but you are intelligent and clear.
@@ -27,15 +24,12 @@ You are 'The Plug', a street-smart, helpful, and chill Discord bot assistant for
   - !process to make hash/wax.
 """
 
+
 class AI(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # Support both env var names
         self.api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
 
-    # ==========================================================
-    # 💬 CHAT COMMAND
-    # ==========================================================
     @commands.hybrid_command(name="chat", aliases=["ask", "plug", "yo"])
     @commands.cooldown(1, 5, commands.BucketType.user)
     async def chat(self, ctx, *, message: str):
@@ -43,110 +37,110 @@ class AI(commands.Cog):
         if not self.api_key:
             return await ctx.send("❌ **AI Error:** API Key is missing.")
 
+        payload = {
+            "model": AI_MODEL_CHAT,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": message},
+            ],
+            "temperature": 0.8,
+            "max_tokens": 600,
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://discord.com",
+            "X-Title": "Stoney Baloney",
+        }
+
         async with ctx.typing():
             try:
-                # payload setup
-                payload = {
-                    "model": AI_MODEL_CHAT,
-                    "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": message}
-                    ],
-                    "temperature": 0.8,
-                    "max_tokens": 600
-                }
-
-                headers = {
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://discord.com",
-                    "X-Title": "Stoney Baloney"
-                }
-
                 async with aiohttp.ClientSession() as session:
-                    async with session.post(f"{AI_BASE_URL}/chat/completions", json=payload, headers=headers) as resp:
-                        if resp.status != 200:
-                            text = await resp.text()
-                            print(f"⚠️ AI Error: {text}")
+                    async with session.post(
+                        f"{AI_BASE_URL}/chat/completions",
+                        json=payload,
+                        headers=headers,
+                    ) as response:
+                        if response.status != 200:
+                            error_text = await response.text()
+                            print(f"⚠️ AI Error: {error_text}")
                             return await ctx.send("🔌 **The Plug is sleeping.** (API Error)")
-                        
-                        data = await resp.json()
-                        reply = data["choices"][0]["message"]["content"]
-                        
-                        if len(reply) > 2000:
-                            reply = reply[:1990] + "..."
-                            
-                        await ctx.send(reply)
+                        data = await response.json()
+            except (aiohttp.ClientError, KeyError, TypeError, ValueError) as exc:
+                print(f"AI Exception: {exc}")
+                return await ctx.send("❌ **Connection Failed.** The Plug is offline.")
 
-            except Exception as e:
-                print(f"AI Exception: {e}")
-                await ctx.send("❌ **Connection Failed.** The Plug is offline.")
+        reply = str(data["choices"][0]["message"]["content"])
+        if len(reply) > 2000:
+            reply = reply[:1990] + "..."
+        await ctx.send(reply)
 
-    # ==========================================================
-    # 🎨 IMAGE GENERATION
-    # ==========================================================
     @commands.hybrid_command(name="imagine", aliases=["draw", "img"])
     @commands.cooldown(1, 30, commands.BucketType.user)
     async def imagine(self, ctx, *, prompt: str):
-        """Generate an image (Costs $500)."""
+        """Generate an image using the current server's local balance."""
         if not self.api_key:
             return await ctx.send("❌ API Key missing.")
 
-        user = self.bot.db.get_user(ctx.author.id)
-        
-        # 1. Cost Check
-        cost = 500
-        if user.get("grams", 0) < cost:
-            return await ctx.send(f"💸 **Art costs money.** You need ${cost}.")
-        
-        # 2. Deduct
-        user["grams"] -= cost
-        await self.bot.db.save()
-
-        msg = await ctx.send(f"🎨 **Painting:** `{prompt}`... (Cost: ${cost})")
-
         try:
-            # Note: For OpenRouter, image gen support varies.
-            # If using direct OpenAI, URL is https://api.openai.com/v1/images/generations
-            # If using OpenRouter, it passes through to providers like Stability AI
-            
-            # This payload targets OpenRouter's standard interface (or OpenAI's)
-            url = f"{AI_BASE_URL}/images/generations" if "openrouter" not in AI_BASE_URL else "https://api.openai.com/v1/images/generations"
-            
-            # Adjust payload for model support
-            payload = {
-                "model": "dall-e-3", # or "stabilityai/stable-diffusion-xl-base-1.0"
-                "prompt": f"Cool digital art, {prompt}",
-                "n": 1,
-                "size": "1024x1024"
-            }
-            
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
+            guild_id = require_guild_id(ctx)
+        except GuildContextRequired as exc:
+            return await ctx.send(f"❌ {exc}.")
 
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, headers=headers) as resp:
-                    if resp.status != 200:
-                        # Refund
-                        user["grams"] += cost
-                        await self.bot.db.save()
-                        return await msg.edit(content="❌ **Generation Failed.** Refunded.")
-                    
-                    data = await resp.json()
-                    image_url = data["data"][0]["url"]
-                    
-                    embed = discord.Embed(title="🎨 Generated Art", description=prompt, color=discord.Color.purple())
-                    embed.set_image(url=image_url)
-                    embed.set_footer(text=f"Generated by {ctx.author.name}")
-                    
-                    await msg.edit(content=None, embed=embed)
+        async with self.bot.db.lock:
+            profile = await self.bot.db.get_profile(guild_id, ctx.author.id)
+            balance = max(0, int(profile.get("grams", 0)))
+            if balance < AI_IMAGE_COST:
+                return await ctx.send(
+                    f"💸 **Art costs money.** You need ${AI_IMAGE_COST}."
+                )
+            profile["grams"] = balance - AI_IMAGE_COST
+            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
 
-        except Exception as e:
-            user["grams"] += cost
-            await self.bot.db.save()
-            await msg.edit(content=f"❌ **Error:** {e}")
+        message = await ctx.send(
+            f"🎨 **Painting:** `{prompt}`... (Cost: ${AI_IMAGE_COST})"
+        )
+        try:
+            image_url = await self._generate_image(prompt)
+        except (aiohttp.ClientError, KeyError, TypeError, ValueError) as exc:
+            await self._refund_image_cost(guild_id, ctx.author.id)
+            return await message.edit(content=f"❌ **Generation Failed. Refunded.** {exc}")
+
+        embed = discord.Embed(
+            title="🎨 Generated Art",
+            description=prompt,
+            color=discord.Color.purple(),
+        )
+        embed.set_image(url=image_url)
+        embed.set_footer(text=f"Generated by {ctx.author.name}")
+        await message.edit(content=None, embed=embed)
+
+    async def _generate_image(self, prompt: str) -> str:
+        url = "https://api.openai.com/v1/images/generations"
+        payload = {
+            "model": "dall-e-3",
+            "prompt": f"Cool digital art, {prompt}",
+            "n": 1,
+            "size": "1024x1024",
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, headers=headers) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise ValueError(f"image API returned {response.status}: {error_text[:200]}")
+                data = await response.json()
+        return str(data["data"][0]["url"])
+
+    async def _refund_image_cost(self, guild_id: int, user_id: int) -> None:
+        async with self.bot.db.lock:
+            profile = await self.bot.db.get_profile(guild_id, user_id)
+            profile["grams"] = max(0, int(profile.get("grams", 0))) + AI_IMAGE_COST
+            self.bot.db.mark_profile_dirty(guild_id, user_id)
+
 
 async def setup(bot):
     await bot.add_cog(AI(bot))
