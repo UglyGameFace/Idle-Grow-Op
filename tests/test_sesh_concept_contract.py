@@ -22,9 +22,9 @@ def test_sesh_is_a_live_voice_session_not_only_a_ping():
 
 def test_sesh_allows_one_active_session_per_voice_channel_not_per_guild():
     source = _source()
-    assert "(guild_id, voice_channel_id)" in source or "(guild_id, vc_id)" in source
-    assert "_session_key" in source
-    assert "voice_channel_id" in source or "vc_id" in source
+    assert "dict[tuple[int, int], SeshSession]" in source
+    assert "def _session_key(self, guild_id, voice_channel_id)" in source
+    assert "return int(guild_id), int(voice_channel_id)" in source
     assert "_active_session_for_guild" not in source
     assert "one active session per voice channel" in source.lower()
 
