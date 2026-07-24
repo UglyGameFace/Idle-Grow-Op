@@ -1,4 +1,3 @@
-import random
 import time
 
 import discord
@@ -16,8 +15,6 @@ from utils import (
     GROWTH_CYCLES,
     POT_UPGRADE_LIMITS,
     SHOP_ITEMS,
-    SLOTS_PAYOUTS,
-    SLOTS_SYMBOLS,
     _shop_price,
     inv_add,
     inv_get,
@@ -27,6 +24,8 @@ from utils import (
 
 
 class Economy(commands.Cog):
+    """Server-local economy, inventory, shop, sales, and auctions."""
+
     def __init__(self, bot):
         self.bot = bot
 
@@ -40,7 +39,7 @@ class Economy(commands.Cog):
 
     async def _profile(self, ctx, user_id=None):
         guild_id = require_guild_id(ctx)
-        resolved_user_id = ctx.author.id if user_id is None else user_id
+        resolved_user_id = ctx.author.id if user_id is None else int(user_id)
         return guild_id, await self.bot.db.get_profile(guild_id, resolved_user_id)
 
     async def _world(self, ctx):
@@ -53,7 +52,6 @@ class Economy(commands.Cog):
         _, user = await self._profile(ctx, target.id)
         clean_cash = max(0, int(user.get("grams", 0)))
         dirty_cash = max(0, int(user.get("dirty_cash", 0)))
-
         embed = discord.Embed(color=discord.Color.green())
         embed.set_author(name=f"{target.name}'s Wallet", icon_url=target.display_avatar.url)
         embed.add_field(name="💸 Clean Cash", value=f"${clean_cash:,}", inline=True)
@@ -73,7 +71,6 @@ class Economy(commands.Cog):
         guild_id, sender = await self._profile(ctx)
         if await jail_guard(ctx, sender, "trade"):
             return
-
         async with self.bot.db.lock:
             receiver = await self.bot.db.get_profile(guild_id, target.id)
             sender_balance = max(0, int(sender.get("grams", 0)))
@@ -83,7 +80,6 @@ class Economy(commands.Cog):
             receiver["grams"] = max(0, int(receiver.get("grams", 0))) + transfer_amount
             self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
             self.bot.db.mark_profile_dirty(guild_id, target.id)
-
         await ctx.send(f"💸 **Transferred:** ${transfer_amount:,} to {target.mention}.")
 
     @commands.hybrid_command(name="leaderboard", aliases=["lb", "top", "rich"])
@@ -92,13 +88,12 @@ class Economy(commands.Cog):
         rows = await self.bot.db.list_guild_leaderboard(guild_id, limit=10)
         lines = []
         for index, row in enumerate(rows):
-            uid = int(row["user_id"])
+            user_id = int(row["user_id"])
             amount = max(0, int(row.get("balance", 0)))
-            member = ctx.guild.get_member(uid)
-            name = member.display_name if member else f"User {uid}"
+            member = ctx.guild.get_member(user_id)
+            name = member.display_name if member else f"User {user_id}"
             rank = "🥇" if index == 0 else "🥈" if index == 1 else "🥉" if index == 2 else f"#{index + 1}"
             lines.append(f"{rank} **{name}**: ${amount:,}")
-
         embed = discord.Embed(
             title="🏆 Server Leaderboard",
             description="\n".join(lines) or "No players yet.",
@@ -112,23 +107,17 @@ class Economy(commands.Cog):
         items = user.get("items", {})
         flower = user.get("flower_stash", {})
         concentrates = user.get("concentrates", {})
-
         items_desc = "\n".join(
-            f"**{name.title()}**: x{count}"
-            for name, count in sorted(items.items())
-            if int(count) > 0
+            f"**{name.title()}**: x{count}" for name, count in sorted(items.items()) if int(count) > 0
         ) or "Nothing."
         flower_desc = "\n".join(
-            f"🌿 **{name.title()}**: {count}g"
-            for name, count in sorted(flower.items())
-            if int(count) > 0
+            f"🌿 **{name.title()}**: {count}g" for name, count in sorted(flower.items()) if int(count) > 0
         ) or "Empty."
         concentrate_desc = "\n".join(
             f"🍯 **{name.title()}**: {count}g"
             for name, count in sorted(concentrates.items())
             if int(count) > 0
         ) or "Empty."
-
         embed = discord.Embed(title=f"🎒 {ctx.author.name}'s Inventory", color=discord.Color.blue())
         embed.add_field(name="💳 Wallet", value=f"${max(0, int(user.get('grams', 0))):,}", inline=False)
         embed.add_field(name="📦 Items", value=items_desc, inline=True)
@@ -138,25 +127,23 @@ class Economy(commands.Cog):
 
     @commands.hybrid_command(name="shop", aliases=["store"])
     async def shop(self, ctx, category: str = "all"):
+        category = str(category or "all").lower().strip()
         embed = discord.Embed(title="🛒 Shop", color=discord.Color.gold())
         content = {"seeds": "", "equipment": "", "misc": ""}
-        for name, data in SHOP_ITEMS.items():
-            item_type = data.get("type", "misc")
+        for name, item in SHOP_ITEMS.items():
+            item_type = item.get("type", "misc")
             if "seed" in item_type:
-                item_category = "seeds"
-            elif "equipment" in item_type or "pot" in item_type or "tool" in item_type:
-                item_category = "equipment"
+                section = "seeds"
+            elif any(token in item_type for token in ("equipment", "pot", "tool")):
+                section = "equipment"
             else:
-                item_category = "misc"
-            if category != "all" and category != item_category:
+                section = "misc"
+            if category not in {"all", section}:
                 continue
-            content[item_category] += f"• **{name.title()}** — ${_shop_price(data):,}\n"
-        if content["seeds"]:
-            embed.add_field(name="🌱 Seeds", value=content["seeds"], inline=False)
-        if content["equipment"]:
-            embed.add_field(name="💡 Equipment", value=content["equipment"], inline=False)
-        if content["misc"]:
-            embed.add_field(name="🔧 Misc", value=content["misc"], inline=False)
+            content[section] += f"• **{name.title()}** — ${_shop_price(item):,}\n"
+        for section, title in (("seeds", "🌱 Seeds"), ("equipment", "💡 Equipment"), ("misc", "🔧 Misc")):
+            if content[section]:
+                embed.add_field(name=title, value=content[section], inline=False)
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="buy")
@@ -173,7 +160,6 @@ class Economy(commands.Cog):
             return await ctx.send("❌ This item is currently unavailable.")
         if int(user.get("level", 1)) < int(item.get("level_req", 1)):
             return await ctx.send("🔒 Level locked.")
-
         async with self.bot.db.lock:
             balance = max(0, int(user.get("grams", 0)))
             if balance < cost:
@@ -200,7 +186,6 @@ class Economy(commands.Cog):
         market_multiplier = max(0.0, float(world.get("market_multiplier", 1.0)))
         sold_log = []
         total_earnings = 0
-
         async with self.bot.db.lock:
             stash = user.setdefault("flower_stash", {})
             if amount.lower() == "all":
@@ -218,7 +203,6 @@ class Economy(commands.Cog):
                 if max(0, int(stash.get(clean_name, 0))) < quantity:
                     return await ctx.send(f"❌ You don't have {quantity}g of {clean_name}.")
                 sale_items = [(clean_name, quantity)]
-
             skill_multiplier = 1.0 + max(0, int(user.get("skills", {}).get("dealmaker", 0))) * 0.05
             for name, quantity in sale_items:
                 base_value = max(0, int(GROWTH_CYCLES.get(name, {"base_value": 10}).get("base_value", 10)))
@@ -232,10 +216,13 @@ class Economy(commands.Cog):
             stats = user.setdefault("stats", {})
             stats["total_earned"] = max(0, int(stats.get("total_earned", 0))) + total_earnings
             self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
-
         embed = discord.Embed(title="🤝 Market Sale", color=discord.Color.green())
         embed.add_field(name="Sold", value="\n".join(sold_log), inline=False)
-        embed.add_field(name="Earnings", value=f"**${total_earnings:,}** (Market: {int(market_multiplier * 100)}%)", inline=False)
+        embed.add_field(
+            name="Earnings",
+            value=f"**${total_earnings:,}** (Market: {int(market_multiplier * 100)}%)",
+            inline=False,
+        )
         await ctx.send(embed=embed)
 
     @commands.command(name="sellconc")
@@ -247,7 +234,6 @@ class Economy(commands.Cog):
         market_multiplier = max(0.0, float(world.get("market_multiplier", 1.0)))
         sold_log = []
         total_earnings = 0
-
         async with self.bot.db.lock:
             stash = user.setdefault("concentrates", {})
             if amount.lower() == "all":
@@ -266,8 +252,8 @@ class Economy(commands.Cog):
                     return await ctx.send("❌ Not enough.")
                 sale_items = [(clean_name, quantity)]
             for concentrate_type, quantity in sale_items:
-                value_multiplier = max(0.0, float(CONCENTRATE_TYPES.get(concentrate_type, {}).get("value_mult", 2.0)))
-                unit_price = max(0, int(50 * value_multiplier * market_multiplier))
+                multiplier = max(0.0, float(CONCENTRATE_TYPES.get(concentrate_type, {}).get("value_mult", 2.0)))
+                unit_price = max(0, int(50 * multiplier * market_multiplier))
                 total_earnings += unit_price * quantity
                 stash[concentrate_type] = max(0, int(stash.get(concentrate_type, 0))) - quantity
                 if stash[concentrate_type] <= 0:
@@ -319,10 +305,8 @@ class Economy(commands.Cog):
             minutes, seconds = divmod(max(0, int(float(auction["end_time"]) - now)), 60)
             buyout = int(auction.get("buyout", 0))
             description = (
-                f"Seller: {auction['seller_name']}\n"
-                f"Bid: ${int(auction['current_bid']):,}\n"
-                f"Buyout: {f'${buyout:,}' if buyout else 'N/A'}\n"
-                f"Ends in: {minutes}m {seconds}s"
+                f"Seller: {auction['seller_name']}\nBid: ${int(auction['current_bid']):,}\n"
+                f"Buyout: {f'${buyout:,}' if buyout else 'N/A'}\nEnds in: {minutes}m {seconds}s"
             )
             embed.add_field(name=f"ID: {auction_id} | {auction['item_name']}", value=description, inline=True)
         embed.set_footer(text="Use !bid <id> <amount> or !auction list <item> <price> <buyout>")
@@ -373,7 +357,12 @@ class Economy(commands.Cog):
             buyout = max(0, int(auction.get("buyout", 0)))
             requested = buyout if buyout and amount >= buyout else amount
             try:
-                valid_bid = validate_bid_amount(requested, current_bid=auction["current_bid"], end_time=auction["end_time"], now=time.time())
+                valid_bid = validate_bid_amount(
+                    requested,
+                    current_bid=auction["current_bid"],
+                    end_time=auction["end_time"],
+                    now=time.time(),
+                )
             except ValueError as exc:
                 return await ctx.send(f"❌ {exc}.")
             previous_bidder_id = auction.get("highest_bidder")
@@ -404,53 +393,6 @@ class Economy(commands.Cog):
             await ctx.send(f"🔨 **BOOM!** You bought out the item for ${valid_bid:,}!")
         else:
             await ctx.send(f"✅ **Bid Placed!** You are leading with ${valid_bid:,}.")
-
-    @commands.hybrid_command(name="slots")
-    async def slots(self, ctx, amount: int = 100):
-        guild_id, user = await self._profile(ctx)
-        if await jail_guard(ctx, user, "gamble"):
-            return
-        try:
-            bet = require_positive_amount(amount, minimum=10)
-        except ValueError:
-            return await ctx.send("❌ Minimum bet is $10.")
-        async with self.bot.db.lock:
-            balance = max(0, int(user.get("grams", 0)))
-            if balance < bet:
-                return await ctx.send("💸 Broke.")
-            user["grams"] = balance - bet
-            row = [random.choice(SLOTS_SYMBOLS) for _ in range(3)]
-            winnings = 0
-            if row[0] == row[1] == row[2]:
-                winnings = max(0, int(bet * SLOTS_PAYOUTS.get(row[0], 2) * 3))
-            elif row[0] == row[1] or row[1] == row[2]:
-                winnings = max(0, int(bet * 1.5))
-            user["grams"] += winnings
-            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
-        await ctx.send(f"🎰 | {' '.join(row)} | **{'WIN' if winnings else 'LOSE'}** (${winnings:,})")
-
-    @commands.hybrid_command(name="dice")
-    async def dice(self, ctx, bet: int = 100):
-        guild_id, user = await self._profile(ctx)
-        if await jail_guard(ctx, user, "gamble"):
-            return
-        try:
-            valid_bet = require_positive_amount(bet, minimum=10)
-        except ValueError:
-            return await ctx.send("❌ Minimum bet is $10.")
-        async with self.bot.db.lock:
-            balance = max(0, int(user.get("grams", 0)))
-            if balance < valid_bet:
-                return await ctx.send("💸 Broke.")
-            user["grams"] = balance - valid_bet
-            roll = random.randint(1, 100)
-            winnings = max(0, int(valid_bet * 1.9)) if roll > 50 else 0
-            user["grams"] += winnings
-            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
-        if winnings:
-            await ctx.send(f"🎲 Rolled **{roll}**. You won ${winnings:,}!")
-        else:
-            await ctx.send(f"🎲 Rolled **{roll}**. You lost.")
 
 
 async def setup(bot):
