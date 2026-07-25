@@ -256,19 +256,43 @@ jobs:
 
       - name: Run complete pre-background regression suite
         if: steps.patch.outputs.exit_code == '0'
-        run: python -m pytest -q --tb=short -x --ignore=tests/test_world_mode_integration_contract.py
+        id: regressions
+        run: |
+          set +e
+          python -m pytest -q --tb=short -x \
+            --ignore=tests/test_world_mode_integration_contract.py \
+            > phase4-regression.log 2>&1
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload Phase 4 regression log
+        if: steps.patch.outputs.exit_code == '0' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-regression-log
+          path: phase4-regression.log
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Fail when regressions fail
+        if: steps.patch.outputs.exit_code == '0' && steps.regressions.outputs.exit_code != '0'
+        run: |
+          cat phase4-regression.log
+          exit 1
 
       - name: Inspect cleanup and whitespace
-        if: steps.patch.outputs.exit_code == '0'
+        if: steps.patch.outputs.exit_code == '0' && steps.regressions.outputs.exit_code == '0'
         run: |
           find . -type d -name __pycache__ -prune -exec rm -rf {} +
           find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+          rm -f phase4-regression.log
           git diff --check
           test ! -f tools/apply_world_mode_phase4.py
           test ! -f PHASE4_PATCH_FAILURE.log
 
       - name: Commit and push validated Phase 4 source
-        if: steps.patch.outputs.exit_code == '0'
+        if: steps.patch.outputs.exit_code == '0' && steps.regressions.outputs.exit_code == '0'
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
