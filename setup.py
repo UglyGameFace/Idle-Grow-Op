@@ -8,9 +8,15 @@ from discord.ext import commands
 
 
 SETTINGS_KEY = "settings"
+SESH_CONFIG_KEY = "sesh_config"
 ERROR_LOG_CHANNEL_KEY = "error_log_channel_id"
 GAME_CHANNEL_KEY = "game_channel_id"
 ANNOUNCEMENT_CHANNEL_KEY = "announcement_channel_id"
+SESH_ENABLED_KEY = "enabled"
+SESH_ALLOW_ALL_KEY = "allow_all_voice_rooms"
+SESH_VOICE_CHANNELS_KEY = "voice_channels"
+SESH_PING_ROLE_KEY = "ping_role_id"
+SESH_PRIVATE_CATEGORY_KEY = "private_category_id"
 REQUIRED_CHANNEL_PERMISSIONS = (
     "view_channel",
     "send_messages",
@@ -85,12 +91,13 @@ class ErrorLogChannelSelect(discord.ui.ChannelSelect):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        channel = self.values[0]
-        resolved = interaction.guild.get_channel(channel.id) if interaction.guild else None
+        selected = self.values[0]
+        resolved = interaction.guild.get_channel(selected.id) if interaction.guild else None
         if not isinstance(resolved, discord.TextChannel):
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 "❌ Choose a text or announcement channel.", ephemeral=True
             )
+            return
         await self.setup_view.save_error_channel(interaction, resolved)
 
 
@@ -109,9 +116,10 @@ class ConfiguredChannelSelect(discord.ui.ChannelSelect):
         selected = self.values[0]
         channel = interaction.guild.get_channel(selected.id) if interaction.guild else None
         if not isinstance(channel, discord.TextChannel):
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 "❌ Choose a text or announcement channel.", ephemeral=True
             )
+            return
         await self.config_view.save(interaction, channel)
 
 
@@ -120,12 +128,15 @@ class OwnedSetupView(discord.ui.View):
         super().__init__(timeout=timeout)
         self.owner_id = int(owner_id)
         self.guild_id = int(guild_id)
-        self.message: discord.InteractionMessage | discord.WebhookMessage | discord.Message | None = None
+        self.message: (
+            discord.InteractionMessage | discord.WebhookMessage | discord.Message | None
+        ) = None
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message(
-                "❌ Only the person who opened this setup panel can use it.", ephemeral=True
+                "❌ Only the person who opened this setup panel can use it.",
+                ephemeral=True,
             )
             return False
         if interaction.guild_id != self.guild_id:
@@ -165,15 +176,19 @@ class ChannelConfigView(OwnedSetupView):
     ) -> None:
         guild = interaction.guild
         if guild is None or guild.me is None:
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 "❌ Server context is unavailable.", ephemeral=True
             )
+            return
         healthy, missing = _permission_health(channel, guild.me)
         if not healthy:
-            return await interaction.response.send_message(
-                "❌ I cannot use that channel yet. Missing: **" + ", ".join(missing) + "**.",
+            await interaction.response.send_message(
+                "❌ I cannot use that channel yet. Missing: **"
+                + ", ".join(missing)
+                + "**.",
                 ephemeral=True,
             )
+            return
         await self.cog.set_channel_setting(guild.id, self.purpose.key, channel.id)
         await interaction.response.edit_message(
             embed=await self.cog.build_channel_panel(guild, self.purpose),
@@ -193,9 +208,11 @@ class ChannelConfigView(OwnedSetupView):
     ) -> None:
         channel = interaction.channel
         if not isinstance(channel, discord.TextChannel):
-            return await interaction.response.send_message(
-                "❌ Open this panel in a server text or announcement channel.", ephemeral=True
+            await interaction.response.send_message(
+                "❌ Open this panel in a server text or announcement channel.",
+                ephemeral=True,
             )
+            return
         await self.save(interaction, channel)
 
     @discord.ui.button(
@@ -211,14 +228,16 @@ class ChannelConfigView(OwnedSetupView):
     ) -> None:
         guild = interaction.guild
         if guild is None or guild.me is None:
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 "❌ Server context is unavailable.", ephemeral=True
             )
+            return
         if not guild.me.guild_permissions.manage_channels:
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 f"❌ I need **Manage Channels** to create `{self.purpose.create_name}`.",
                 ephemeral=True,
             )
+            return
         channel = discord.utils.get(guild.text_channels, name=self.purpose.create_name)
         if channel is None:
             overwrites = {
@@ -236,9 +255,10 @@ class ChannelConfigView(OwnedSetupView):
                     reason=f"Idle Grow setup by {interaction.user}",
                 )
             except discord.HTTPException as exc:
-                return await interaction.response.send_message(
+                await interaction.response.send_message(
                     f"❌ I could not create the channel: {exc}", ephemeral=True
                 )
+                return
         await self.save(interaction, channel)
 
     @discord.ui.button(
@@ -259,9 +279,11 @@ class ChannelConfigView(OwnedSetupView):
             else None
         )
         if channel is None:
-            return await interaction.response.send_message(
-                f"❌ Choose a healthy {self.purpose.label.lower()} first.", ephemeral=True
+            await interaction.response.send_message(
+                f"❌ Choose a healthy {self.purpose.label.lower()} first.",
+                ephemeral=True,
             )
+            return
         try:
             await channel.send(
                 embed=discord.Embed(
@@ -271,9 +293,10 @@ class ChannelConfigView(OwnedSetupView):
                 )
             )
         except discord.HTTPException as exc:
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 f"❌ The test failed: {exc}", ephemeral=True
             )
+            return
         await interaction.response.send_message(
             f"✅ Test sent to {channel.mention}.", ephemeral=True
         )
@@ -291,14 +314,257 @@ class ChannelConfigView(OwnedSetupView):
     ) -> None:
         guild = interaction.guild
         if guild is None:
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 "❌ Server context is unavailable.", ephemeral=True
             )
+            return
         await self.cog.set_channel_setting(guild.id, self.purpose.key, None)
         await interaction.response.edit_message(
             embed=await self.cog.build_channel_panel(guild, self.purpose),
             view=self,
         )
+
+
+class SeshVoiceSelect(discord.ui.ChannelSelect):
+    def __init__(self, view: "SeshSetupView") -> None:
+        self.sesh_view = view
+        super().__init__(
+            placeholder="Choose specific Sesh voice rooms…",
+            channel_types=[discord.ChannelType.voice, discord.ChannelType.stage_voice],
+            min_values=1,
+            max_values=25,
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+            return
+        channel_ids = []
+        for selected in self.values:
+            channel = guild.get_channel(selected.id)
+            if isinstance(channel, (discord.VoiceChannel, discord.StageChannel)):
+                channel_ids.append(channel.id)
+        if not channel_ids:
+            await interaction.response.send_message(
+                "❌ Choose at least one usable voice or stage channel.", ephemeral=True
+            )
+            return
+        await self.sesh_view.cog.update_sesh_config(
+            guild.id,
+            **{
+                SESH_VOICE_CHANNELS_KEY: channel_ids,
+                SESH_ALLOW_ALL_KEY: False,
+            },
+        )
+        await self.sesh_view.refresh(interaction)
+
+
+class SeshRoleSelect(discord.ui.RoleSelect):
+    def __init__(self, view: "SeshSetupView") -> None:
+        self.sesh_view = view
+        super().__init__(
+            placeholder="Optional role to ping when a Sesh starts…",
+            min_values=1,
+            max_values=1,
+            row=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        guild = interaction.guild
+        role = self.values[0]
+        if guild is None or role.is_default():
+            await interaction.response.send_message(
+                "❌ Choose a normal server role, not @everyone.", ephemeral=True
+            )
+            return
+        await self.sesh_view.cog.update_sesh_config(
+            guild.id,
+            **{SESH_PING_ROLE_KEY: role.id},
+        )
+        await self.sesh_view.refresh(interaction)
+
+
+class SeshCategorySelect(discord.ui.ChannelSelect):
+    def __init__(self, view: "SeshSetupView") -> None:
+        self.sesh_view = view
+        super().__init__(
+            placeholder="Optional category for temporary private rooms…",
+            channel_types=[discord.ChannelType.category],
+            min_values=1,
+            max_values=1,
+            row=2,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        guild = interaction.guild
+        selected = self.values[0]
+        category = guild.get_channel(selected.id) if guild else None
+        if not isinstance(category, discord.CategoryChannel):
+            await interaction.response.send_message(
+                "❌ Choose a server category.", ephemeral=True
+            )
+            return
+        await self.sesh_view.cog.update_sesh_config(
+            guild.id,
+            **{SESH_PRIVATE_CATEGORY_KEY: category.id},
+        )
+        await self.sesh_view.refresh(interaction)
+
+
+class SeshSetupView(OwnedSetupView):
+    def __init__(self, cog: "Setup", owner_id: int, guild_id: int) -> None:
+        super().__init__(owner_id, guild_id)
+        self.cog = cog
+        self.add_item(SeshVoiceSelect(self))
+        self.add_item(SeshRoleSelect(self))
+        self.add_item(SeshCategorySelect(self))
+
+    async def refresh(self, interaction: discord.Interaction) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+            return
+        await interaction.response.edit_message(
+            embed=await self.cog.build_sesh_panel(guild),
+            view=self,
+        )
+
+    @discord.ui.button(
+        label="Enable Sesh",
+        emoji="🌿",
+        style=discord.ButtonStyle.success,
+        row=3,
+    )
+    async def enable_sesh(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+            return
+        config = await self.cog.get_sesh_config(guild.id)
+        if not config.get(SESH_ALLOW_ALL_KEY) and not config.get(SESH_VOICE_CHANNELS_KEY):
+            await interaction.response.send_message(
+                "❌ Choose specific voice rooms or press **Allow All Voice Rooms** first.",
+                ephemeral=True,
+            )
+            return
+        await self.cog.update_sesh_config(guild.id, **{SESH_ENABLED_KEY: True})
+        await self.refresh(interaction)
+
+    @discord.ui.button(
+        label="Allow All Voice Rooms",
+        emoji="🔊",
+        style=discord.ButtonStyle.primary,
+        row=3,
+    )
+    async def allow_all_voice_rooms(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+            return
+        await self.cog.update_sesh_config(
+            guild.id,
+            **{
+                SESH_ALLOW_ALL_KEY: True,
+                SESH_VOICE_CHANNELS_KEY: [],
+            },
+        )
+        await self.refresh(interaction)
+
+    @discord.ui.button(
+        label="Disable Sesh",
+        emoji="🛑",
+        style=discord.ButtonStyle.danger,
+        row=3,
+    )
+    async def disable_sesh(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        await self.cog.update_sesh_config(guild.id, **{SESH_ENABLED_KEY: False})
+        sesh_cog = self.cog.bot.get_cog("Sesh")
+        ended = 0
+        if sesh_cog is not None and hasattr(sesh_cog, "end_guild_sessions"):
+            ended = await sesh_cog.end_guild_sessions(
+                guild.id,
+                reason="disabled_by_server_manager",
+            )
+        await interaction.edit_original_response(
+            embed=await self.cog.build_sesh_panel(guild),
+            view=self,
+        )
+        await interaction.followup.send(
+            f"✅ Sesh disabled. Cleaned up {ended} active session(s).",
+            ephemeral=True,
+        )
+
+    @discord.ui.button(
+        label="Clear Ping Role",
+        emoji="🔕",
+        style=discord.ButtonStyle.secondary,
+        row=4,
+    )
+    async def clear_ping_role(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+            return
+        await self.cog.update_sesh_config(guild.id, **{SESH_PING_ROLE_KEY: None})
+        await self.refresh(interaction)
+
+    @discord.ui.button(
+        label="Disable Private Rooms",
+        emoji="🔓",
+        style=discord.ButtonStyle.secondary,
+        row=4,
+    )
+    async def clear_private_category(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+            return
+        await self.cog.update_sesh_config(
+            guild.id,
+            **{SESH_PRIVATE_CATEGORY_KEY: None},
+        )
+        await self.refresh(interaction)
 
 
 class SetupView(OwnedSetupView):
@@ -314,15 +580,19 @@ class SetupView(OwnedSetupView):
     ) -> None:
         guild = interaction.guild
         if guild is None or guild.me is None:
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 "❌ Server context is unavailable.", ephemeral=True
             )
+            return
         healthy, missing = _permission_health(channel, guild.me)
         if not healthy:
-            return await interaction.response.send_message(
-                "❌ I cannot use that channel yet. Missing: **" + ", ".join(missing) + "**.",
+            await interaction.response.send_message(
+                "❌ I cannot use that channel yet. Missing: **"
+                + ", ".join(missing)
+                + "**.",
                 ephemeral=True,
             )
+            return
         await self.cog.set_channel_setting(guild.id, ERROR_LOG_CHANNEL_KEY, channel.id)
         await interaction.response.edit_message(
             embed=await self.cog.build_panel(guild),
@@ -342,10 +612,11 @@ class SetupView(OwnedSetupView):
     ) -> None:
         channel = interaction.channel
         if not isinstance(channel, discord.TextChannel):
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 "❌ Open `/setup` in a server text or announcement channel to use this option.",
                 ephemeral=True,
             )
+            return
         await self.save_error_channel(interaction, channel)
 
     @discord.ui.button(
@@ -361,14 +632,16 @@ class SetupView(OwnedSetupView):
     ) -> None:
         guild = interaction.guild
         if guild is None or guild.me is None:
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 "❌ Server context is unavailable.", ephemeral=True
             )
+            return
         if not guild.me.guild_permissions.manage_channels:
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 "❌ I need **Manage Channels** to create `idle-grow-logs`.",
                 ephemeral=True,
             )
+            return
         channel = discord.utils.get(guild.text_channels, name="idle-grow-logs")
         if channel is None:
             overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {
@@ -393,9 +666,10 @@ class SetupView(OwnedSetupView):
                     reason=f"Idle Grow setup by {interaction.user}",
                 )
             except discord.HTTPException as exc:
-                return await interaction.response.send_message(
+                await interaction.response.send_message(
                     f"❌ I could not create the channel: {exc}", ephemeral=True
                 )
+                return
         await self.save_error_channel(interaction, channel)
 
     @discord.ui.button(
@@ -416,9 +690,10 @@ class SetupView(OwnedSetupView):
             else None
         )
         if channel is None:
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 "❌ Choose a healthy error logging channel first.", ephemeral=True
             )
+            return
         try:
             await channel.send(
                 embed=discord.Embed(
@@ -428,9 +703,10 @@ class SetupView(OwnedSetupView):
                 )
             )
         except discord.HTTPException as exc:
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 f"❌ The test failed: {exc}", ephemeral=True
             )
+            return
         await interaction.response.send_message(
             f"✅ Test sent to {channel.mention}.", ephemeral=True
         )
@@ -448,9 +724,10 @@ class SetupView(OwnedSetupView):
     ) -> None:
         guild = interaction.guild
         if guild is None:
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 "❌ Server context is unavailable.", ephemeral=True
             )
+            return
         await self.cog.set_channel_setting(guild.id, ERROR_LOG_CHANNEL_KEY, None)
         await interaction.response.edit_message(
             embed=await self.cog.build_panel(guild),
@@ -464,9 +741,10 @@ class SetupView(OwnedSetupView):
     ) -> None:
         guild = interaction.guild
         if guild is None:
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 "❌ Server context is unavailable.", ephemeral=True
             )
+            return
         view = ChannelConfigView(self.cog, interaction.user.id, guild.id, purpose)
         await interaction.response.send_message(
             embed=await self.cog.build_channel_panel(guild, purpose),
@@ -500,6 +778,31 @@ class SetupView(OwnedSetupView):
         _button: discord.ui.Button,
     ) -> None:
         await self.open_channel_panel(interaction, ANNOUNCEMENT_CHANNEL)
+
+    @discord.ui.button(
+        label="Optional Sesh",
+        emoji="🔥",
+        style=discord.ButtonStyle.secondary,
+        row=4,
+    )
+    async def sesh_setup(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+            return
+        view = SeshSetupView(self.cog, interaction.user.id, guild.id)
+        await interaction.response.send_message(
+            embed=await self.cog.build_sesh_panel(guild),
+            view=view,
+            ephemeral=True,
+        )
+        view.message = await interaction.original_response()
 
 
 class Setup(commands.Cog):
@@ -554,6 +857,104 @@ class Setup(commands.Cog):
             return f"🟢 **Healthy** — {channel.mention}"
         return f"🟠 **Needs attention** — {channel.mention}\nMissing: {', '.join(missing)}"
 
+    async def update_sesh_config(self, guild_id: int, **changes: object) -> None:
+        async with self.bot.db.lock:
+            world = await self.bot.db.get_world(int(guild_id))
+            config = world.setdefault(SESH_CONFIG_KEY, {})
+            for key, value in changes.items():
+                if value is None:
+                    config.pop(key, None)
+                else:
+                    config[key] = value
+            self.bot.db.mark_world_dirty(int(guild_id))
+
+    async def get_sesh_config(self, guild_id: int) -> dict:
+        world = await self.bot.db.get_world(int(guild_id))
+        return dict(world.get(SESH_CONFIG_KEY, {}))
+
+    async def sesh_status(self, guild: discord.Guild) -> str:
+        config = await self.get_sesh_config(guild.id)
+        if not config.get(SESH_ENABLED_KEY, False):
+            return "⚪ **Optional and disabled**"
+        if config.get(SESH_ALLOW_ALL_KEY, False):
+            room_status = "all voice rooms"
+        else:
+            valid_rooms = [
+                guild.get_channel(int(channel_id))
+                for channel_id in config.get(SESH_VOICE_CHANNELS_KEY, [])
+                if str(channel_id).isdigit()
+            ]
+            valid_rooms = [
+                channel
+                for channel in valid_rooms
+                if isinstance(channel, (discord.VoiceChannel, discord.StageChannel))
+            ]
+            if not valid_rooms:
+                return "🟠 **Needs attention** — enabled without usable voice rooms"
+            room_status = f"{len(valid_rooms)} selected voice room(s)"
+        return f"🟢 **Enabled** — {room_status}"
+
+    async def build_sesh_panel(self, guild: discord.Guild) -> discord.Embed:
+        config = await self.get_sesh_config(guild.id)
+        role_id = config.get(SESH_PING_ROLE_KEY)
+        role = guild.get_role(int(role_id)) if role_id else None
+        role_status = role.mention if role else "No ping role — starts silently"
+
+        category_id = config.get(SESH_PRIVATE_CATEGORY_KEY)
+        category = guild.get_channel(int(category_id)) if category_id else None
+        if category_id and not isinstance(category, discord.CategoryChannel):
+            category_status = "🟠 Saved category was deleted"
+        elif isinstance(category, discord.CategoryChannel):
+            category_status = f"{category.name} — temporary rooms auto-delete"
+        else:
+            category_status = "Disabled — no temporary private rooms"
+
+        if config.get(SESH_ALLOW_ALL_KEY, False):
+            voice_status = "All server voice rooms"
+        else:
+            channels = [
+                guild.get_channel(int(channel_id))
+                for channel_id in config.get(SESH_VOICE_CHANNELS_KEY, [])
+                if str(channel_id).isdigit()
+            ]
+            channels = [
+                channel
+                for channel in channels
+                if isinstance(channel, (discord.VoiceChannel, discord.StageChannel))
+            ]
+            voice_status = ", ".join(channel.mention for channel in channels[:10]) or "None selected"
+
+        embed = discord.Embed(
+            title="🔥 Optional Sesh Setup",
+            description=(
+                "Sesh is an optional Idle Grow community feature. Nothing is created or "
+                "pinged unless a server manager deliberately configures it. Presence-based "
+                "XP and Puff & Pass keep it connected to the game."
+            ),
+            color=discord.Color.green(),
+        )
+        embed.add_field(
+            name="Status",
+            value=await self.sesh_status(guild),
+            inline=False,
+        )
+        embed.add_field(name="Allowed voice rooms", value=voice_status, inline=False)
+        embed.add_field(name="Start ping", value=role_status, inline=False)
+        embed.add_field(name="Private rooms", value=category_status, inline=False)
+        embed.add_field(
+            name="Automatic cleanup",
+            value=(
+                "Only temporary `idle-grow-temp-sesh-*` rooms are deleted. They are cleaned "
+                "after ending, expiry, empty timeout, disable, failed activation, or restart. "
+                "Permanent server channels, categories, roles, and permissions are never changed."
+            ),
+            inline=False,
+        )
+        embed.set_footer(
+            text="Select rooms first, then enable. The ping role and private category are optional."
+        )
+        return embed
+
     async def build_channel_panel(
         self,
         guild: discord.Guild,
@@ -569,7 +970,9 @@ class Setup(commands.Cog):
             value=await self.channel_status(guild, purpose.key),
             inline=False,
         )
-        embed.set_footer(text="Choose a channel, use this channel, create one, test, or disable.")
+        embed.set_footer(
+            text="Choose a channel, use this channel, create one, test, or disable."
+        )
         return embed
 
     async def build_panel(self, guild: discord.Guild) -> discord.Embed:
@@ -591,9 +994,10 @@ class Setup(commands.Cog):
         embed.add_field(name="🌿 Main Game Channel", value=game_status, inline=False)
         embed.add_field(name="📢 Announcements", value=announcement_status, inline=False)
         embed.add_field(name="🚨 Error Logging", value=error_status, inline=False)
+        embed.add_field(name="🔥 Optional Sesh", value=await self.sesh_status(guild), inline=False)
         embed.add_field(
             name="Coming next",
-            value="Sesh rooms • AI • Multiplayer • Notifications",
+            value="AI • Multiplayer • Notifications",
             inline=False,
         )
         embed.set_footer(
@@ -606,9 +1010,10 @@ class Setup(commands.Cog):
     @app_commands.default_permissions(manage_guild=True)
     async def setup_command(self, ctx: commands.Context) -> None:
         if not isinstance(ctx.author, discord.Member) or not _can_manage_guild(ctx.author):
-            return await ctx.send(
+            await ctx.send(
                 "❌ You need **Manage Server** to configure Idle Grow.", ephemeral=True
             )
+            return
         view = SetupView(self, ctx.author.id, ctx.guild.id)
         message = await ctx.send(
             embed=await self.build_panel(ctx.guild),
