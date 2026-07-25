@@ -45,7 +45,7 @@ Completed in the feature branch:
 - Qodo identified an in-flight cooldown/privacy race; the corrected hardening rebuilds from current config/privacy after cooldown and uses channel locks plus generation invalidation during cleanup.
 
 Still required:
-- Complete the pull-request-visible corrected privacy hardening gate and inspect its exact result.
+- Complete the rerun of the pull-request-visible corrected privacy hardening gate.
 - Run a fresh human-triggered complete repository CI gate after the generated hardening commit.
 - Inspect final review state, diff, mergeability, and cleanup before declaring the pull request ready to merge.
 
@@ -57,8 +57,8 @@ Still required:
 - Repository CI run 358 passed compilation, the complete test suite, all 14 canonical extensions loading, and legacy-artifact guards before the final hardening commits.
 - Repository CI run 371 passed after the URL, setup, and emoji hardening commits.
 - Newest-speaker generation hardening passed its focused and complete workflow test gates.
-- Repository CI runs 384 and 390 passed on the human-authored branch states before the corrected Qodo remediation.
-- A fresh final repository CI run is pending after corrected privacy-race hardening.
+- Repository CI runs 384, 390, and 394 passed on the human-authored branch states before the corrected Qodo remediation.
+- The first visible remediation run proved the patch applied and isolated one outdated source-contract assertion; that contract migration is corrected in the rerun.
 
 ## Cleanup Status
 - Earlier temporary integration scripts and workflows removed themselves.
