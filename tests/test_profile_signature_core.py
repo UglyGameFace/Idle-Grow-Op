@@ -1,6 +1,7 @@
 import pytest
 
 from profile_signatures import (
+    _configured_platform_emoji,
     DEFAULT_VISIBLE_FIELDS,
     effective_visible_fields,
     normalize_platform_entry,
@@ -39,6 +40,7 @@ def test_safe_platform_urls_are_normalized_to_official_hosts():
         ("steam", "http://steamcommunity.com/id/UglyGameFace"),
         ("steam", "https://steamcommunity.com.evil.example/id/UglyGameFace"),
         ("steam", "https://steamcommunity.com/id/UglyGameFace?redirect=evil"),
+        ("steam", "https://steamcommunity.com:bad/id/UglyGameFace"),
         ("twitch", "https://twitch.tv/UglyGameFace/extra"),
         ("youtube", "https://youtube.com/watch?v=abc"),
         ("roblox", "https://roblox.com/games/123"),
@@ -116,3 +118,14 @@ def test_signature_opt_out_hides_every_field():
         }
     }
     assert effective_visible_fields({}, profile) == set()
+
+
+def test_custom_application_emoji_override_requires_a_real_discord_emoji(monkeypatch):
+    monkeypatch.setenv("PROFILE_PLATFORM_EMOJI_STEAM", "<:steam:123456789012345678>")
+    assert (
+        _configured_platform_emoji("steam", "🎮")
+        == "<:steam:123456789012345678>"
+    )
+
+    monkeypatch.setenv("PROFILE_PLATFORM_EMOJI_STEAM", "https://evil.example/logo.png")
+    assert _configured_platform_emoji("steam", "🎮") == "🎮"
