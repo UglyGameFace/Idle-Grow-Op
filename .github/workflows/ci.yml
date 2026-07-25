@@ -207,9 +207,33 @@ jobs:
           if converted < 10:
               raise RuntimeError(f'Expected generated source blocks; converted only {converted}')
           rewritten = tokenize.untokenize(rewritten_tokens)
+
+          cached_user_block = '''            cached_user = self.bot.get_user(user_id)
+            name = member.display_name if member else cached_user.name if cached_user else f"User {user_id}"
+'''
+          direct_user_fallback = '''            name = member.display_name if member else f"User {user_id}"
+'''
+          cached_count = rewritten.count(cached_user_block)
+          if cached_count != 2:
+              raise RuntimeError(f'Expected two generated cached-user blocks; found {cached_count}')
+          rewritten = rewritten.replace(cached_user_block, direct_user_fallback)
+
+          cached_owner_block = '''        cached_owner = self.bot.get_user(owner_id)
+        owner_label = owner.mention if owner else cached_owner.name if cached_owner else f"User {owner_id}"
+'''
+          direct_owner_fallback = '''        owner_label = owner.mention if owner else f"User {owner_id}"
+'''
+          owner_count = rewritten.count(cached_owner_block)
+          if owner_count != 1:
+              raise RuntimeError(f'Expected one generated cached-owner block; found {owner_count}')
+          rewritten = rewritten.replace(cached_owner_block, direct_owner_fallback)
+
           compile(rewritten, str(path), 'exec')
           path.write_text(rewritten, encoding='utf-8')
-          print(f'Converted {converted} generated blocks to raw strings')
+          print(
+              f'Converted {converted} generated blocks to raw strings and removed '
+              f'{cached_count + owner_count} Discord cache lookups'
+          )
           PY
           code=$?
           if [ "$code" -eq 0 ]; then
