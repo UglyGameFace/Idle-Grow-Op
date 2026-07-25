@@ -18,6 +18,7 @@ CANONICAL_EXTENSIONS = (
     "sesh",
     "social",
     "tasks",
+    "world_modes",
 )
 TOP_LEVEL_DECORATORS = {"command", "hybrid_command", "group", "hybrid_group"}
 

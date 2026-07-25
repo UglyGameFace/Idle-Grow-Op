@@ -92,6 +92,13 @@ def make_default_world() -> dict[str, Any]:
         "auctions": {},
         "auction_counter": 0,
         "settings": {},
+        "world_mode_config": {
+            "policy": "solo",
+            "default_player_mode": "solo",
+            "switch_cooldown_seconds": 604800,
+            "configured": False,
+            "updated_at": 0,
+        },
         "profile_signature_config": {
             "enabled": False,
             "channel_ids": [],

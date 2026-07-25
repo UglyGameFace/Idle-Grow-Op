@@ -36,6 +36,7 @@ GAME_EXTENSIONS = (
     "setup",
     "social",
     "tasks",
+    "world_modes",
 )
 
 intents = discord.Intents.default()
