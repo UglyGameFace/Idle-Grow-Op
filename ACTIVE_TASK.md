@@ -42,33 +42,32 @@ Completed in the feature branch:
 - Added global privacy, stricter per-server privacy, full signature opt-out, immediate stale-card cleanup after privacy changes, and immediate card invalidation after server field restrictions change.
 - Preserved the existing `/profile` command and aliases through the canonical privacy-aware renderer.
 - Added focused URL safety, privacy, setup, persistence, anti-repetition, cancellation, and cleanup tests.
-- Qodo identified an in-flight cooldown/privacy race; the corrected hardening rebuilds from current config/privacy after cooldown and uses channel locks plus generation invalidation during cleanup.
+- Remediated Qodo's cooldown/privacy race by invalidating in-flight generations, serializing cleanup with channel locks, re-reading guild configuration and permissions after cooldowns, and rebuilding cards from current privacy before sending.
+- Added fallback discovery of bot-owned signature cards when persisted state is missing and delete-on-persistence-failure cleanup.
 
 Still required:
-- Complete the rerun of the pull-request-visible corrected privacy hardening gate.
-- Run a fresh human-triggered complete repository CI gate after the generated hardening commit.
-- Inspect final review state, diff, mergeability, and cleanup before declaring the pull request ready to merge.
+- Run the final human-triggered repository CI gate on the remediated branch head.
+- Inspect final review state, changed-file set, mergeability, and cleanup before declaring the pull request ready to merge.
 
 ## Validation Status
 - Integration compilation passed.
 - Focused profile-signature tests passed.
-- Complete pytest passed inside the integration workflows completed so far.
+- Complete pytest passed inside the integration workflows.
 - Canonical command uniqueness passed.
-- Repository CI run 358 passed compilation, the complete test suite, all 14 canonical extensions loading, and legacy-artifact guards before the final hardening commits.
-- Repository CI run 371 passed after the URL, setup, and emoji hardening commits.
-- Newest-speaker generation hardening passed its focused and complete workflow test gates.
-- Repository CI runs 384, 390, and 394 passed on the human-authored branch states before the corrected Qodo remediation.
-- The first visible remediation run proved the patch applied and isolated one outdated source-contract assertion; that contract migration is corrected in the rerun.
+- Repository CI runs 358, 371, 384, 390, and 394 passed during the implementation and hardening sequence.
+- The corrected pull-request-visible remediation workflow passed every step: patch application, focused tests, complete pytest, temporary-file cleanup, and commit/push.
+- Qodo's only actionable review thread is resolved.
+- A final repository CI run is now being triggered by this human-authored status commit.
 
 ## Cleanup Status
-- Earlier temporary integration scripts and workflows removed themselves.
-- Failed temporary privacy patch paths are explicitly removed by the corrected self-cleaning visible workflow.
+- All temporary integration scripts and workflows removed themselves.
 - Generated `__pycache__`, `.pyc`, and `.pyo` artifacts were removed.
-- Permanent ignore rules now prevent compiled/test cache artifacts from being staged again.
+- Permanent ignore rules prevent compiled/test cache artifacts from being staged again.
+- The final branch diff contains only the intended implementation, setup, persistence, startup, documentation, and test files.
 - No webhook impersonation, user-message deletion/reposting, guessed third-party platform links, or duplicate setup/profile command path exists.
 
 ## Blockers
-- None currently.
+- Final repository CI and conflict/review inspection only.
 
 ## Backlog Locked Behind This Task
 - Multiplayer/open-world versus solo-world controls.
