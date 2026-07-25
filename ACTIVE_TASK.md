@@ -49,7 +49,7 @@ Add simple, active-save-aware player DM preferences and one optional server anno
 ## Implementation Status
 - Corrected persistence design established.
 - Canonical player module and focused regression files added.
-- Trusted PR #18 integration is applying the runtime, setup, extension-list, and startup-contract changes.
+- Trusted PR #18 integration is retrying with patch-script output captured as an artifact.
 
 ## Validation Requirements
 - Preference normalization and legacy-boolean compatibility tests.
