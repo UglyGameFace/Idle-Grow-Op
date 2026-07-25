@@ -24,6 +24,8 @@ def test_live_signatures_have_one_persisted_bot_owned_card_per_channel():
 def test_repeated_messages_are_debounced_and_same_speaker_is_suppressed():
     assert "SIGNATURE_DEBOUNCE_SECONDS" in SOURCE
     assert "previous.cancel()" in SOURCE
+    assert "if self._pending.get(key) is task:" in SOURCE
+    assert "self._pending.pop(key, None)" in SOURCE
     assert "SIGNATURE_CHANNEL_COOLDOWN_SECONDS" in SOURCE
     assert "SIGNATURE_USER_COOLDOWN_SECONDS" in SOURCE
     assert "SIGNATURE_SAME_SPEAKER_REFRESH_SECONDS" in SOURCE
@@ -70,11 +72,12 @@ def test_platform_registry_covers_requested_services_without_arbitrary_links():
         '"custom"',
     ):
         assert key in SOURCE
-    assert "parsed.scheme.lower() != \"https\"" in SOURCE
+    assert 'parsed.scheme.lower() != "https"' in SOURCE
     assert "host not in spec.hosts" in SOURCE
     assert "parsed.query" in SOURCE
     assert "parsed.fragment" in SOURCE
     assert "Custom platforms are username-only for safety." in SOURCE
+    assert "PROFILE_PLATFORM_EMOJI_" in SOURCE
 
 
 def test_user_controls_are_private_without_breaking_existing_profile_command():
@@ -92,6 +95,7 @@ def test_setup_is_optional_disabled_by_default_and_channel_selected():
     assert 'label="Enable Signatures"' in SETUP_SOURCE
     assert 'label="Disable Signatures"' in SETUP_SOURCE
     assert "async def build_signature_panel" in SETUP_SOURCE
+    assert "invalidate_guild_cards" in SETUP_SOURCE
     assert '"profile_signatures"' in MAIN_SOURCE
     assert '"profile_signature_config": {' in DB_SOURCE
     assert '"enabled": False' in DB_SOURCE
