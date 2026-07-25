@@ -31,7 +31,8 @@ def test_ai_identity_and_game_guidance_are_current():
     assert '`/plant`' in AI_SOURCE
     assert '`/harvest`' in AI_SOURCE
     assert '`/shop`' in AI_SOURCE
-    assert 'create images' in AI_SOURCE
+    compact = " ".join(AI_SOURCE.split())
+    assert 'or create images' in compact
 
 
 def test_ai_request_path_supports_model_fallback_and_health_tests():
