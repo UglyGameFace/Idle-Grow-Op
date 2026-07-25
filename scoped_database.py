@@ -34,6 +34,11 @@ def make_default_account() -> dict[str, Any]:
         "cosmetics": {},
         "collection": {},
         "global_achievements": [],
+        "profile_identity": {"platforms": {}},
+        "profile_privacy": {
+            "signature_enabled": True,
+            "visible_fields": ["level", "crew", "grow_status"],
+        },
     }
 
 
@@ -62,6 +67,10 @@ def make_default_profile() -> dict[str, Any]:
         "created_at": 0,
         "daily_streak": 0,
         "settings": {"notifications": True},
+        "profile_signature_privacy": {
+            "signature_disabled": False,
+            "hidden_fields": [],
+        },
         "daily_quests": [],
         "last_daily": 0,
         "last_login": 0,
@@ -83,6 +92,19 @@ def make_default_world() -> dict[str, Any]:
         "auctions": {},
         "auction_counter": 0,
         "settings": {},
+        "profile_signature_config": {
+            "enabled": False,
+            "channel_ids": [],
+            "allowed_fields": [
+                "level",
+                "crew",
+                "grow_status",
+                "rank",
+                "achievements",
+                "platforms",
+            ],
+        },
+        "profile_signature_state": {},
     }
 
 

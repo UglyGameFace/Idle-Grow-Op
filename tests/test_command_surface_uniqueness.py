@@ -14,6 +14,7 @@ CANONICAL_EXTENSIONS = (
     "lab",
     "progression",
     "quick",
+    "profile_signatures",
     "sesh",
     "social",
     "tasks",
