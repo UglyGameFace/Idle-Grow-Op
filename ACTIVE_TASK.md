@@ -41,10 +41,10 @@ Route and gate all shared multiplayer value paths:
 
 Solo-safe personal systems remain usable: shops, production, solo heists, laundering, personal stats, and private progression.
 
-The current-method AST patch applies, compiles, and passes every focused Phase 4 contract. The broader regression gate now writes and uploads its exact first failure before stopping. This commit triggers that diagnostic run.
+The Phase 4 implementation applies, compiles, and passes its focused contracts. The first broader regression was an overbroad legacy guard matching Discord cache calls; generated leaderboard and crew-owner fallbacks now use the current guild member or a stable `User <id>` label instead.
 
 ## Still Required
-- Resolve the exact broader Phase 4 regression and publish the validated source.
+- Pass the complete pre-background regression suite and publish/clean Phase 4.
 - Deduplicate Open World background cycles, auction settlement, announcements, and notifications.
 - Filter notification candidates by each player's active save and resolve Open World members across participating guilds.
 - Remove all remaining temporary workflows, scripts, triggers, diagnostics, and markers.
@@ -55,7 +55,8 @@ The current-method AST patch applies, compiles, and passes every focused Phase 4
 - Phase 4 patch application: passed.
 - Phase 4 source compilation: passed.
 - Focused Phase 4 contracts: passed.
-- Complete pre-background regression suite: exact first failure being captured.
+- Legacy persistence cache-call regression: corrected.
+- Complete pre-background regression suite: rerunning now.
 
 ## Blockers
 - None.
