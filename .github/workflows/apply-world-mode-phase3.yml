@@ -6,6 +6,7 @@ on:
       - feature/world-mode-controls
     types:
       - opened
+      - reopened
 
 permissions:
   contents: write
