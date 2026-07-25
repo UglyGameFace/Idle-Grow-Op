@@ -37,6 +37,20 @@ jobs:
       - name: Apply corrected privacy hardening
         run: python tools/apply_final_privacy_hardening.py
 
+      - name: Migrate the debounce contract to the generation helper
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/test_profile_signature_contract.py')
+          source = path.read_text(encoding='utf-8')
+          old = '    assert "previous.cancel()" in SOURCE\n'
+          new = '    assert "pending.cancel()" in SOURCE\n'
+          if source.count(old) != 1:
+              raise RuntimeError(f'Expected one old cancellation contract, found {source.count(old)}')
+          path.write_text(source.replace(old, new, 1), encoding='utf-8')
+          PY
+
       - name: Remove every temporary hardening path
         run: |
           rm -f tools/apply_final_privacy_hardening.py
