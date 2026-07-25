@@ -22,6 +22,29 @@ def patch(path_name: str, replacements: list[tuple[str, str, str]]) -> None:
 
 def main() -> None:
     patch(
+        "onboarding.py",
+        [
+            (
+                '        planted_at = float(plant.get("planted_at", now) or now)\n',
+                '        raw_planted_at = plant.get("planted_at")\n'
+                '        planted_at = now if raw_planted_at is None else float(raw_planted_at)\n',
+                "preserve zero planted timestamp",
+            )
+        ],
+    )
+
+    patch(
+        "tests/test_onboarding_runtime.py",
+        [
+            (
+                '                "strain": "schwag",\n                "planted_at": 900,\n',
+                '                "strain": "mexican brick",\n                "planted_at": 900,\n',
+                "watering scenario uses longer grow",
+            )
+        ],
+    )
+
+    patch(
         "main.py",
         [
             (
