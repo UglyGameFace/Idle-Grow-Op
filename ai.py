@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from dataclasses import dataclass
 from typing import Any
 
 import aiohttp
@@ -17,19 +16,51 @@ logger = logging.getLogger(__name__)
 AI_BASE_URL = "https://openrouter.ai/api/v1"
 AI_CONFIG_KEY = "ai_config"
 AI_ENABLED_KEY = "enabled"
-AI_REQUEST_TIMEOUT_SECONDS = max(
-    5,
-    min(60, int(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "30") or 30)),
-)
-AI_COOLDOWN_SECONDS = max(
-    3,
-    min(60, int(os.getenv("AI_COOLDOWN_SECONDS", "5") or 5)),
-)
-AI_MAX_TOKENS = max(
-    100,
-    min(1200, int(os.getenv("OPENROUTER_MAX_TOKENS", "350") or 350)),
-)
 DEFAULT_AI_MODEL = "openrouter/free"
+
+
+def _int_env(
+    name: str,
+    default: int,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None or not raw_value.strip():
+        value = default
+    else:
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid integer configuration %s=%r; using default %s",
+                name,
+                raw_value,
+                default,
+            )
+            value = default
+    return max(minimum, min(maximum, value))
+
+
+AI_REQUEST_TIMEOUT_SECONDS = _int_env(
+    "OPENROUTER_TIMEOUT_SECONDS",
+    30,
+    minimum=5,
+    maximum=60,
+)
+AI_COOLDOWN_SECONDS = _int_env(
+    "AI_COOLDOWN_SECONDS",
+    5,
+    minimum=3,
+    maximum=60,
+)
+AI_MAX_TOKENS = _int_env(
+    "OPENROUTER_MAX_TOKENS",
+    350,
+    minimum=100,
+    maximum=1200,
+)
 
 SYSTEM_PROMPT = """
 You are The Plug, the concise and helpful in-game assistant for Idle Grow Op.
@@ -44,11 +75,17 @@ images. Keep replies clear, friendly, and under Discord's 2,000-character limit.
 """.strip()
 
 
-@dataclass(frozen=True)
 class AIServiceError(Exception):
-    public_message: str
-    log_message: str
-    status: int | None = None
+    def __init__(
+        self,
+        public_message: str,
+        log_message: str,
+        status: int | None = None,
+    ) -> None:
+        super().__init__(public_message)
+        self.public_message = public_message
+        self.log_message = log_message
+        self.status = status
 
 
 def _extract_reply(payload: Any) -> str:
@@ -109,7 +146,8 @@ class AI(commands.Cog):
 
     async def _guild_config(self, guild_id: int) -> dict:
         world = await self.bot.db.get_world(int(guild_id))
-        return world.setdefault(AI_CONFIG_KEY, {})
+        config = world.get(AI_CONFIG_KEY)
+        return dict(config) if isinstance(config, dict) else {}
 
     async def is_enabled(self, guild_id: int) -> bool:
         config = await self._guild_config(guild_id)
@@ -139,20 +177,20 @@ class AI(commands.Cog):
             safe_detail[:500],
         )
         reporter = getattr(self.bot, "report_command_error", None)
-        if callable(reporter):
-            try:
-                result = reporter(
-                    guild_id=guild_id,
-                    title="Idle Grow AI provider error",
-                    description=(
-                        f"Category: {category}\nStatus: {status or 'n/a'}\n"
-                        "No user prompt, response, or API key was included."
-                    ),
-                )
-                if hasattr(result, "__await__"):
-                    await result
-            except Exception:
-                logger.exception("Could not route AI failure for guild %s", guild_id)
+        if not callable(reporter):
+            logger.error("Guild error reporter is unavailable for guild %s", guild_id)
+            return
+        try:
+            await reporter(
+                guild_id=guild_id,
+                title="Idle Grow AI provider error",
+                description=(
+                    f"Category: {category}\nStatus: {status or 'n/a'}\n"
+                    "No user prompt, response, or API key was included."
+                ),
+            )
+        except Exception:
+            logger.exception("Could not route AI failure for guild %s", guild_id)
 
     async def request_reply(
         self,
@@ -202,10 +240,9 @@ class AI(commands.Cog):
                         headers=headers,
                     ) as response:
                         if response.status != 200:
-                            provider_text = (await response.text())[:500]
                             last_error = AIServiceError(
                                 _public_api_error(response.status),
-                                f"model={model} provider={provider_text}",
+                                f"model={model} provider_status={response.status}",
                                 response.status,
                             )
                             if response.status in {401, 402, 403, 429}:
