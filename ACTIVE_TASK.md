@@ -11,11 +11,11 @@ Add simple, active-save-aware player DM preferences and one optional server anno
 - Notification flags are committed only after a successful DM.
 - World-event and major-market announcements already use `/setup` channel configuration with the game channel as a safe fallback.
 - Open World copies one participating server's announcement route into the shared world so the shared tick runs and announces once.
-- `/profile-settings` is dedicated to public profile identity/privacy and must not become a mixed general-settings panel.
+- `/profile-settings` remains dedicated to public profile identity and privacy.
 
 ## Architecture Decision
-- Add one canonical `notification_preferences.py` extension for preference normalization, private player UI, active-save persistence, and safe allowed-mention construction.
-- Add `/notifications` as a private, guild-only player panel for the currently active save.
+- Use one canonical `notification_preferences.py` extension for preference normalization, private player UI, active-save persistence, and safe allowed-mention construction.
+- Expose `/notifications` as a private, guild-only player panel for the currently active save.
 - Preserve `settings.notifications` as the master boolean for database compatibility.
 - Store category choices in sibling `settings.notification_categories` with `plant_ready` and `lab_ready` booleans.
 - Legacy `true` means both categories enabled; legacy `false` means both disabled.
@@ -27,43 +27,37 @@ Add simple, active-save-aware player DM preferences and one optional server anno
 - Send Test never pings the announcement role.
 - Open World routing synchronizes the selected server's announcement channel, game-channel fallback, and optional announcement role into the shared world once.
 
-## Required Behavior
-- Player controls:
-  - Toggle all DM alerts.
-  - Toggle plant-ready alerts.
-  - Toggle lab-batch-ready alerts.
-  - Clearly show the active save being configured.
-  - All responses and controls remain private.
-- Server controls:
-  - Select or clear one optional announcement role in the existing Announcements panel.
-  - Show missing, deleted, or unmentionable role health plainly.
-  - Default to silent announcements when no role is configured.
-  - Never ping `@everyone` or `@here`.
-- Runtime:
-  - Filter each notification category before composing the DM.
-  - Do not mark disabled categories as notified.
-  - Commit only categories actually delivered.
-  - Preserve active-save and one-shared-Open-World behavior.
-  - Ping the configured role only for real event or major-market announcements.
-
 ## Implementation Status
-- Corrected persistence design established.
-- Canonical player module and focused regression files added.
-- Runtime, setup, extension-list, and CI integration are being applied.
+Completed:
+- Added active-save-aware `/notifications` controls for all, plant-ready, and lab-ready DMs.
+- Kept the legacy notification boolean intact and added sibling category preferences without a migration.
+- Filtered disabled categories before DM composition and preserved their undelivered flags.
+- Kept notification flags committing only after successful DM delivery.
+- Added optional announcement-role selection and clearing inside the existing Announcements setup panel.
+- Added deleted and unmentionable role health reporting.
+- Added strict selected-role-only mention delivery with silent fallback.
+- Prevented setup test messages from pinging any role.
+- Synchronized the optional role through the one-per-tick Open World announcement route.
+- Loaded the new extension through the canonical startup list.
+- Kept the private preference view stable across button presses so an older timeout cannot replace newer controls.
 
-## Validation Requirements
-- Preference normalization and legacy-boolean compatibility tests.
-- Active-save persistence and private `/notifications` UI contracts.
-- Category-specific notification snapshot and commit runtime tests.
-- Announcement role selection, clearing, health, and `@everyone` rejection tests.
-- Strict allowed-mention tests proving no broad or user pings.
-- Open World routing tests including the role ID.
-- Python compilation, complete pytest, extension loading, command uniqueness, cleanup, and conflict inspection.
+## Validation Status
+Completed:
+- Legacy boolean normalization and category-toggle runtime coverage.
+- Active Open World save persistence coverage.
+- Category-specific snapshot and post-delivery flag coverage.
+- Selected-role and silent-fallback `AllowedMentions` coverage.
+- Static contracts for setup integration, database compatibility, Open World routing, and no broad pings.
+- Focused integration gate: 13 tests passed.
+- Full read-only CI runs 604 and 606 passed, including compilation, complete pytest, command uniqueness, cleanup checks, and every Enterprise extension loading together.
+- The exact-head CI rerun on this status commit remains the final merge gate.
 
-## Cleanup Requirements
-- No temporary patch scripts or write-enabled workflows in the final diff.
-- No duplicate notification preference or announcement-role config path.
-- No database migration or destructive rewrite of existing profile settings.
+## Cleanup Status
+- Temporary patch script removed from the PR branch.
+- Temporary write-enabled integrator removed from `main`.
+- Accidental focused-test log removed from the PR branch.
+- Permanent CI is read-only and includes the new module in legacy-persistence checks.
+- No duplicate setup path, migration, hardcoded role, `@here` fallback, or destructive profile rewrite.
 
 ## Blockers
 - None.
