@@ -51,7 +51,17 @@ Still required:
 - None beyond the final full CI and conflict inspection.
 
 ## Backlog Locked Behind This Task
-- Optional per-server **Live Profile Signature** channels: after a human message, replace the previous bot-owned sticky card with a compact Idle Grow player profile for the latest speaker. Keep it disabled by default, selectable in `/setup`, debounced to prevent spam, persistent across restarts, and never delete/repost user messages or impersonate users through webhooks.
+- Optional per-server **Live Profile Signature** channels:
+  - After a human message, replace the previous bot-owned sticky card with a compact Idle Grow player profile for the latest speaker.
+  - Keep the feature disabled by default, selectable in `/setup`, debounced to prevent spam, persistent across restarts, and restricted to deleting/replacing only the bot's own card.
+  - Never delete/repost user messages or impersonate users through webhooks.
+  - Add self-managed gaming/social identities such as Steam, Epic Games, Xbox, PlayStation, Nintendo, Riot, Battle.net, Roblox, Twitch, YouTube, Kick, and a limited custom-platform option.
+  - When a platform has a safe canonical profile URL, show its platform logo as a Discord link button; show the saved username in the card. When no reliable link format exists, display the platform logo and username without making up a URL.
+  - Validate and normalize recognized platform URLs against an allowlist so cards cannot be used for disguised phishing links. Treat all accounts as user-supplied unless a future OAuth verification flow explicitly verifies ownership.
+  - Store cross-server platform identities and default privacy choices on the global account, while allowing a user to hide an identity or profile field in a specific server.
+  - Provide private `/profile edit` and `/profile privacy` controls. Users can disable their signature entirely or independently hide platform accounts, balance/net worth, inventory summary, current grow status, crew, level/XP, rank, achievements, and activity details.
+  - External platform identities remain hidden until the user explicitly chooses to share them. Missing or private fields must be omitted cleanly rather than shown as `N/A`.
+  - Server managers may choose which fields are permitted in signature cards, but cannot override a user's stricter privacy choice.
 - Multiplayer/open-world versus solo-world controls.
 - Notification preferences and announcement-role controls.
 - Broader onboarding and first-run guidance.
