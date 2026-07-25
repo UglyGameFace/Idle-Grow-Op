@@ -41,8 +41,41 @@ jobs:
         id: patch
         run: |
           set +e
-          python tools/apply_world_mode_phase4.py > phase4-diagnostic.log 2>&1
+          python - <<'PY' > phase4-diagnostic.log 2>&1
+          from __future__ import annotations
+
+          import io
+          import token
+          import tokenize
+          from pathlib import Path
+
+          path = Path('tools/apply_world_mode_phase4.py')
+          source = path.read_text(encoding='utf-8')
+          rewritten_tokens = []
+          converted = 0
+          for item in tokenize.generate_tokens(io.StringIO(source).readline):
+              if item.type == token.STRING and item.string.startswith(("'''", '"""')):
+                  item = tokenize.TokenInfo(
+                      item.type,
+                      'r' + item.string,
+                      item.start,
+                      item.end,
+                      item.line,
+                  )
+                  converted += 1
+              rewritten_tokens.append(item)
+          if converted < 10:
+              raise RuntimeError(f'Expected generated source blocks; converted only {converted}')
+          rewritten = tokenize.untokenize(rewritten_tokens)
+          compile(rewritten, str(path), 'exec')
+          path.write_text(rewritten, encoding='utf-8')
+          print(f'Converted {converted} generated blocks to raw strings')
+          PY
           code=$?
+          if [ "$code" -eq 0 ]; then
+            python tools/apply_world_mode_phase4.py >> phase4-diagnostic.log 2>&1
+            code=$?
+          fi
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           exit 0
 
