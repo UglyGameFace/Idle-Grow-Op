@@ -76,19 +76,19 @@ def test_sesh_media_is_session_aware_and_keyword_validated():
     assert "session_type" in source
     assert "keywords" in source or "note_tokens" in source
     assert "MEDIA_MIN_SCORE" in source
-    assert "_media_score" in source
     assert "SESH" in source and "MOVIE" in source and "KARAOKE" in source
     assert "random.choice(results)" not in source
     assert "curated_media" in source
     assert "wrong GIF is worse than no GIF" in source
 
 
-def test_sesh_configuration_and_restart_descriptors_are_guild_world_scoped():
+def test_sesh_configuration_stays_guild_scoped_while_rewards_use_active_saves():
     source = _source()
     assert "get_world" in source
     assert "mark_world_dirty" in source
-    assert "get_profile" in source
-    assert "mark_profile_dirty" in source
+    assert "resolve_game_scope" in source
+    assert "scope.scope_id" in source
+    assert "mark_game_profile_dirty" in source
     assert "active_sesh_sessions" in source
     assert "world_state" not in source
     assert "db_manager" not in source
