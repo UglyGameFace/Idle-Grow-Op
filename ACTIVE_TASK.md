@@ -41,7 +41,7 @@ Route and gate all shared multiplayer value paths:
 
 Solo-safe personal systems remain usable: shops, production, solo heists, laundering, personal stats, and private progression.
 
-A clean one-shot Phase 4 workflow now runs from this non-workflow trigger. It either commits compiled and regression-tested source or publishes only `PHASE4_PATCH_FAILURE.log` after resetting partial changes.
+The Phase 4 patcher now targets the current AST method boundaries instead of historical string anchors. Its generated code blocks are raw-string preprocessed so embedded newline escapes remain valid Python source. This non-workflow commit triggers the corrected one-shot gate.
 
 ## Still Required
 - Complete and clean Phase 4.
@@ -52,8 +52,8 @@ A clean one-shot Phase 4 workflow now runs from this non-workflow trigger. It ei
 - Run complete pytest, extension loading, command uniqueness, static compilation, whitespace checks, cleanup inspection, conflict inspection, and final review.
 
 ## Validation Status
-- Current ordinary CI correctly fails because Phase 4 has not landed yet; the first failing contract requires multiplayer scope gates in `economy.py`.
-- Phase 4 clean integration is now triggered.
+- Ordinary CI is expected to remain red until Phase 4 source lands.
+- The corrected Phase 4 integration either commits compiled and regression-tested source or publishes only an exact diagnostic after resetting partial changes.
 
 ## Blockers
 - None.
