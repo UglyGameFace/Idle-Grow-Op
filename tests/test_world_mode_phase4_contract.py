@@ -22,6 +22,7 @@ def test_economy_routes_value_and_world_state_through_active_scope():
     assert '"leaderboard"' in text
     assert "mark_profile_dirty(guild_id" not in text
     assert ".get_user(" not in text
+    assert "cached_user" not in text
 
 
 def test_social_routes_crews_districts_and_support_rewards_to_active_scope():
@@ -35,6 +36,7 @@ def test_social_routes_crews_districts_and_support_rewards_to_active_scope():
     assert "await self.bot.db.get_profile(guild_id" not in text
     assert "mark_profile_dirty(guild_id" not in text
     assert ".get_user(" not in text
+    assert "cached_owner" not in text
 
 
 def test_crime_keeps_solo_jobs_but_gates_shared_crime_to_matching_scopes():
@@ -49,6 +51,7 @@ def test_crime_keeps_solo_jobs_but_gates_shared_crime_to_matching_scopes():
     assert "list_guild_heist_leaderboard(scope.scope_id" in text
     assert "mark_profile_dirty(guild_id" not in text
     assert ".get_user(" not in text
+    assert "cached_user" not in text
 
 
 def test_server_only_heist_channel_configuration_remains_on_the_real_guild():
