@@ -66,12 +66,35 @@ jobs:
           exit 1
 
       - name: Commit only permanent implementation
+        id: permanent_commit
+        shell: bash
         run: |
-          rm tools/apply_onboarding_integration.py onboarding-focused.log
-          git diff --check
-          git status --short
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Add first-run onboarding and real help"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          set +e
+          {
+            rm -f tools/apply_onboarding_integration.py onboarding-focused.log
+            git diff --check
+            git status --short
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "Add first-run onboarding and real help"
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          } > /tmp/onboarding-commit.log 2>&1
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload commit log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr23-onboarding-commit-log
+          path: /tmp/onboarding-commit.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Fail when permanent commit failed
+        if: steps.permanent_commit.outputs.exit_code != '0'
+        run: |
+          cat /tmp/onboarding-commit.log
+          exit 1
