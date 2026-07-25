@@ -8,6 +8,10 @@ def source(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
+def compact(path: str) -> str:
+    return "".join(source(path).split())
+
+
 def test_world_modes_are_loaded_and_visible_in_setup():
     main = source("main.py")
     setup = source("setup.py")
@@ -52,12 +56,9 @@ def test_every_player_value_exchange_has_a_multiplayer_scope_gate():
 
 
 def test_leaderboards_and_world_interactions_use_the_resolved_scope():
-    economy = source("economy.py")
-    gambling = source("gambling.py")
-    crime = source("crime.py")
-    assert "list_guild_leaderboard(scope.scope_id" in economy
-    assert "list_guild_casino_leaderboard(scope.scope_id" in gambling
-    assert "list_guild_heist_leaderboard(scope.scope_id" in crime
+    assert "list_guild_leaderboard(scope.scope_id" in compact("economy.py")
+    assert "list_guild_casino_leaderboard(scope.scope_id" in compact("gambling.py")
+    assert "list_guild_heist_leaderboard(scope.scope_id" in compact("crime.py")
 
 
 def test_profile_and_live_signatures_show_the_targets_active_save():
