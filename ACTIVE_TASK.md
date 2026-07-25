@@ -45,7 +45,7 @@ Completed in the feature branch:
 - Qodo identified an in-flight cooldown/privacy race; the corrected hardening rebuilds from current config/privacy after cooldown and uses channel locks plus generation invalidation during cleanup.
 
 Still required:
-- Complete the corrected privacy-race validation workflow.
+- Complete the pull-request-visible corrected privacy hardening gate and inspect its exact result.
 - Run a fresh human-triggered complete repository CI gate after the generated hardening commit.
 - Inspect final review state, diff, mergeability, and cleanup before declaring the pull request ready to merge.
 
@@ -57,12 +57,12 @@ Still required:
 - Repository CI run 358 passed compilation, the complete test suite, all 14 canonical extensions loading, and legacy-artifact guards before the final hardening commits.
 - Repository CI run 371 passed after the URL, setup, and emoji hardening commits.
 - Newest-speaker generation hardening passed its focused and complete workflow test gates.
-- Repository CI run 384 passed on the human-authored branch state before the corrected Qodo remediation.
+- Repository CI runs 384 and 390 passed on the human-authored branch states before the corrected Qodo remediation.
 - A fresh final repository CI run is pending after corrected privacy-race hardening.
 
 ## Cleanup Status
 - Earlier temporary integration scripts and workflows removed themselves.
-- A failed temporary privacy patch path is explicitly removed by the corrected self-cleaning workflow.
+- Failed temporary privacy patch paths are explicitly removed by the corrected self-cleaning visible workflow.
 - Generated `__pycache__`, `.pyc`, and `.pyo` artifacts were removed.
 - Permanent ignore rules now prevent compiled/test cache artifacts from being staged again.
 - No webhook impersonation, user-message deletion/reposting, guessed third-party platform links, or duplicate setup/profile command path exists.
