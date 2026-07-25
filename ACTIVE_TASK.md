@@ -1,61 +1,55 @@
-# Active Task: Public Server Setup — Game and Announcement Channels
+# Active Task: Optional Guild-Scoped AI Setup
 
 ## Scope
-Expand the existing Discord-native `/setup` wizard so every server owner can configure a main game channel and announcement channel without copying IDs or editing deployment variables.
+Integrate optional Idle Grow AI controls into the existing Discord-native `/setup` wizard and make the real `/chat` execution path reliable, current, secret-safe, and disabled by default per server.
 
 ## Root Cause and Confirmed Findings
-- Error logging was already moved to per-guild setup, but game and announcement destinations were still absent.
-- A saved setting without a real consumer would be misleading, so announcement routing must be connected to the live world-cycle execution path.
-- Hard-locking gameplay commands to one channel would make the bot fragile and could lock users out after permission or channel changes.
-- The 15-minute world cycle changes weather frequently; announcing every routine roll would create spam.
-- Discord component rows become cluttered quickly on mobile, so focused sub-panels are preferable to three simultaneous channel pickers.
+- The old AI path was branded for Stoney Baloney and documented outdated prefix commands.
+- The model, timeout, token limit, and cooldown were hardcoded instead of using host configuration.
+- Every server could use AI automatically with no guild opt-in.
+- Provider errors were printed to stdout without guild-scoped error routing.
+- Server owners must never enter or see the host OpenRouter key.
+- AI image generation must remain absent.
 
 ## Architecture Decision
-- Keep one canonical `setup.py` system.
-- Store `game_channel_id` and `announcement_channel_id` in each guild world's `settings` map.
-- Treat the game channel as the recommended play hub, not a command restriction.
-- Route special-event and major-market announcements to the explicit announcement channel.
-- Use the configured game channel only when no announcement channel was selected.
-- Never fall back to a random writable channel.
-- If an explicitly configured announcement channel is deleted or unhealthy, show it as unhealthy and do not silently reroute.
+- Keep one canonical `setup.py` wizard.
+- Store AI enablement in each guild world's `ai_config` map.
+- Keep OpenRouter secrets and model configuration at the bot-host level.
+- Use one `request_reply()` path for `/chat` and private setup health tests.
+- Route only secret-safe provider metadata to the configured guild error log.
+- Never log prompts, replies, API keys, or provider secrets.
 
 ## Implementation Status
 Completed:
-- Created `feature/setup-game-announcement-channels` from current `main`.
-- Added Game Channel and Announcements buttons to the existing `/setup` panel.
-- Added focused private channel-selection sub-panels.
-- Added existing-channel selection, current-channel selection, automatic channel creation, test delivery, and disable actions.
-- Added permission-health checks and deleted-channel detection.
-- Added guild-world persistence with exact dirty tracking.
-- Added game-channel fallback presentation in the main setup panel.
-- Connected the Tasks world cycle to configured announcement routing.
-- Added event-start, event-end, and major-market-change announcement generation.
-- Kept routine weather rolls silent to prevent channel spam.
+- Rebuilt `ai.py` around a guild-aware canonical request service.
+- Added current Idle Grow Op prompt and slash-command guidance.
+- Added host-configured model fallback, timeout, cooldown, and token limits.
+- Added clear provider error classes and secret-safe error routing.
+- Added disabled-by-default guild checks for `/chat`.
+- Added regression contracts for the AI runtime and setup surface.
 
 Still required:
-- Add direct runtime tests for event and market announcement generation.
-- Run full pytest, compilation, command uniqueness, and all-extension load checks.
-- Inspect the final diff for duplicate configuration paths or temporary code.
-- Merge only after CI is green.
+- Integrate the Optional AI panel into the canonical `/setup` wizard.
+- Validate private health testing and enable/disable persistence.
+- Remove all temporary integration helpers.
+- Run full pytest, compilation, command uniqueness, and all-extension loading.
+- Inspect the final diff and merge only after every gate passes.
 
 ## Validation Status
-- Static setup contracts updated for all three guild channel settings.
-- Full CI has not yet run on this branch.
+- Initial AI service tests reached the user-facing 401 error contract.
+- Full CI remains intentionally blocked until canonical setup integration lands.
 
 ## Cleanup Status
-- No hardcoded channel IDs.
-- No new environment variables.
 - No second setup command or compatibility layer.
-- No command-channel lock.
-- No random-channel fallback.
-- No routine weather announcement spam.
+- No AI image generation.
+- No server-owned API key storage.
+- No prompt or response logging.
+- Temporary integration tooling must be absent before merge.
 
 ## Blockers
-- None currently.
+- Canonical `setup.py` integration is the current active implementation step.
 
 ## Backlog Locked Behind This Task
-- Sesh voice-room selection and private-category setup.
-- AI enable/disable and model controls.
 - Multiplayer/open-world versus solo-world controls.
 - Notification preferences and announcement-role controls.
 - Broader onboarding and first-run guidance.
