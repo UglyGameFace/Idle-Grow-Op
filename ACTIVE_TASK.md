@@ -42,12 +42,12 @@ Completed in the feature branch:
 - Added global privacy, stricter per-server privacy, full signature opt-out, immediate stale-card cleanup after privacy changes, and immediate card invalidation after server field restrictions change.
 - Preserved the existing `/profile` command and aliases through the canonical privacy-aware renderer.
 - Added focused URL safety, privacy, setup, persistence, anti-repetition, cancellation, and cleanup tests.
-- Staged channel-lock and generation invalidation around privacy/config cleanup so an in-flight refresh cannot re-expose a hidden field.
+- Qodo identified an in-flight cooldown/privacy race; the corrected hardening rebuilds from current config/privacy after cooldown and uses channel locks plus generation invalidation during cleanup.
 
 Still required:
-- Complete the privacy-race validation workflow.
+- Complete the corrected privacy-race validation workflow.
 - Run a fresh human-triggered complete repository CI gate after the generated hardening commit.
-- Inspect automated review findings, final diff, mergeability, and cleanup before declaring the pull request ready to merge.
+- Inspect final review state, diff, mergeability, and cleanup before declaring the pull request ready to merge.
 
 ## Validation Status
 - Integration compilation passed.
@@ -57,11 +57,12 @@ Still required:
 - Repository CI run 358 passed compilation, the complete test suite, all 14 canonical extensions loading, and legacy-artifact guards before the final hardening commits.
 - Repository CI run 371 passed after the URL, setup, and emoji hardening commits.
 - Newest-speaker generation hardening passed its focused and complete workflow test gates.
-- A fresh final repository CI run is pending after privacy-race hardening.
+- Repository CI run 384 passed on the human-authored branch state before the corrected Qodo remediation.
+- A fresh final repository CI run is pending after corrected privacy-race hardening.
 
 ## Cleanup Status
 - Earlier temporary integration scripts and workflows removed themselves.
-- The privacy-race patch workflow is required to remove itself before committing.
+- A failed temporary privacy patch path is explicitly removed by the corrected self-cleaning workflow.
 - Generated `__pycache__`, `.pyc`, and `.pyo` artifacts were removed.
 - Permanent ignore rules now prevent compiled/test cache artifacts from being staged again.
 - No webhook impersonation, user-message deletion/reposting, guessed third-party platform links, or duplicate setup/profile command path exists.
