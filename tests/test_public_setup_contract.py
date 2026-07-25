@@ -116,9 +116,11 @@ def test_world_announcements_are_major_events_not_every_weather_roll():
 def test_error_reporting_uses_current_guild_configuration_only():
     assert "ERROR_LOG_CHANNEL_ID" not in MAIN_SOURCE
     assert "os.getenv(\"ERROR_LOG_CHANNEL_ID\"" not in MAIN_SOURCE
-    assert "await bot.db.get_world(int(guild_id))" in MAIN_SOURCE
+    assert "resolved_guild_id = int(guild_id)" in MAIN_SOURCE
+    assert "await bot.db.get_world(resolved_guild_id)" in MAIN_SOURCE
     assert 'world.get("settings", {}).get("error_log_channel_id")' in MAIN_SOURCE
-    assert "guild.get_channel(int(channel_id))" in MAIN_SOURCE
+    assert "resolved_channel_id = int(channel_id)" in MAIN_SOURCE
+    assert "guild.get_channel(resolved_channel_id)" in MAIN_SOURCE
     assert "guild_id=interaction.guild_id" in MAIN_SOURCE
     assert "guild_id=guild_id" in MAIN_SOURCE
 
