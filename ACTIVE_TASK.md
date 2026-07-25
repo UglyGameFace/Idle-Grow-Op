@@ -46,7 +46,9 @@ Give brand-new players a simple, truthful path into Idle Grow and give returning
 - `/start` and `/help` interactive surfaces added.
 - Runtime next-step and read-only coverage added.
 - Static startup, privacy, command-map, setup, and stale-guidance contracts added.
-- Trusted PR #23 integration is applying startup registration and high-traffic message cleanup.
+- Readiness handling now preserves valid zero timestamps and keeps harvest ahead of watering when a plant is ready.
+- Focused onboarding gate passes all 15 tests.
+- Trusted PR #23 integration is retrying with permanent commit/push output captured separately.
 
 ## Validation Requirements
 - Runtime tests for next-step selection across empty, seed-owned, growing, ready, harvested, lab-ready, broke, and Player Choice states.
