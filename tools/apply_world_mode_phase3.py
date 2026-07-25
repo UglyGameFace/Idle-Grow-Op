@@ -183,8 +183,8 @@ replace_once(
 )
 replace_once(
     "profile_signatures.py",
-    "        _account, profile, world, visible, platforms = await self._profile_components(\n",
-    "        _account, profile, world, visible, platforms, game_scope = await self._profile_components(\n",
+    "        _account, profile, world, visible, platforms = await self._profile_components(\n            guild,\n            member,\n        )\n        embed = discord.Embed(\n",
+    "        _account, profile, world, visible, platforms, game_scope = await self._profile_components(\n            guild,\n            member,\n        )\n        embed = discord.Embed(\n",
 )
 replace_once(
     "profile_signatures.py",
@@ -198,8 +198,8 @@ replace_once(
 )
 replace_once(
     "profile_signatures.py",
-    "        _account, profile, world, visible, platforms = await self._profile_components(\n",
-    "        _account, profile, world, visible, platforms, game_scope = await self._profile_components(\n",
+    "        _account, profile, world, visible, platforms = await self._profile_components(\n            guild,\n            member,\n            server_allowed=server_allowed,\n        )\n",
+    "        _account, profile, world, visible, platforms, game_scope = await self._profile_components(\n            guild,\n            member,\n            server_allowed=server_allowed,\n        )\n",
 )
 replace_once(
     "profile_signatures.py",
