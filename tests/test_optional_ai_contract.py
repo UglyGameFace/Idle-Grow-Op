@@ -3,6 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 AI_SOURCE = (ROOT / "ai.py").read_text(encoding="utf-8")
+MAIN_SOURCE = (ROOT / "main.py").read_text(encoding="utf-8")
 SETUP_SOURCE = (ROOT / "setup.py").read_text(encoding="utf-8")
 
 
@@ -14,14 +15,30 @@ def test_ai_is_guild_scoped_and_disabled_by_default():
     assert 'Idle Grow AI is optional and disabled for this server' in AI_SOURCE
 
 
+def test_ai_config_reads_do_not_mutate_world_state():
+    assert 'config = world.get(AI_CONFIG_KEY)' in AI_SOURCE
+    assert 'world.setdefault(AI_CONFIG_KEY' not in AI_SOURCE
+
+
 def test_ai_uses_host_configuration_without_exposing_secrets():
     assert 'OPENROUTER_API_KEY' in AI_SOURCE
     assert 'OPENROUTER_CHAT_MODEL' in AI_SOURCE
     assert 'OPENROUTER_CHAT_MODELS' in AI_SOURCE
     assert 'OPENROUTER_MAX_TOKENS' in AI_SOURCE
     assert 'AI_COOLDOWN_SECONDS' in AI_SOURCE
+    assert 'def _int_env(' in AI_SOURCE
+    assert 'except (TypeError, ValueError)' in AI_SOURCE
     assert 'replace(self.api_key, "[redacted]")' in AI_SOURCE
     assert 'No user prompt, response, or API key was included.' in AI_SOURCE
+    assert 'await response.text()' not in AI_SOURCE
+    assert 'provider_text' not in AI_SOURCE
+
+
+def test_ai_provider_failures_use_real_guild_error_reporter():
+    assert 'async def _report_command_error(' in MAIN_SOURCE
+    assert 'bot.report_command_error = _report_command_error' in MAIN_SOURCE
+    assert 'reporter = getattr(self.bot, "report_command_error", None)' in AI_SOURCE
+    assert 'await reporter(' in AI_SOURCE
 
 
 def test_ai_identity_and_game_guidance_are_current():
