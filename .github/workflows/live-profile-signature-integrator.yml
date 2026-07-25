@@ -1,0 +1,78 @@
+name: Live Profile Signature Integrator
+
+on:
+  push:
+    branches:
+      - feature/live-profile-signatures
+
+permissions:
+  contents: write
+
+concurrency:
+  group: live-profile-signature-integrator
+  cancel-in-progress: false
+
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/live-profile-signatures
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -q --upgrade pip
+          python -m pip install -q -r requirements.txt pytest
+
+      - name: Apply implementation
+        run: python tools/apply_live_profile_signatures.py
+
+      - name: Remove temporary integration files
+        run: |
+          rm tools/apply_live_profile_signatures.py
+          rm .github/workflows/live-profile-signature-integrator.yml
+
+      - name: Compile Python sources
+        run: python -m compileall -q .
+
+      - name: Run profile signature tests
+        run: |
+          python -m pytest -q \
+            tests/test_profile_signature_core.py \
+            tests/test_profile_signature_contract.py \
+            tests/test_command_surface_uniqueness.py \
+            tests/test_startup_contract.py
+
+      - name: Run complete regression suite
+        env:
+          DISCORD_TOKEN: ''
+          IDLE_SUPABASE_URL: ''
+          IDLE_SUPABASE_SERVICE_ROLE_KEY: ''
+        run: python -m pytest -q
+
+      - name: Inspect patch cleanliness
+        run: |
+          git diff --check
+          test ! -f tools/apply_live_profile_signatures.py
+          test ! -f .github/workflows/live-profile-signature-integrator.yml
+          git status --short
+
+      - name: Commit implementation
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Add live profile signatures and privacy controls'
+          git push origin HEAD:feature/live-profile-signatures
