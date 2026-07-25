@@ -48,18 +48,33 @@ bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 async def _configured_error_channel(guild_id: int | None):
     if guild_id is None or not hasattr(bot, "db"):
         return None
-    guild = bot.get_guild(int(guild_id))
+    try:
+        resolved_guild_id = int(guild_id)
+    except (TypeError, ValueError):
+        logger.warning("Invalid guild ID supplied to error reporter: %r", guild_id)
+        return None
+
+    guild = bot.get_guild(resolved_guild_id)
     if guild is None:
         return None
     try:
-        world = await bot.db.get_world(int(guild_id))
+        world = await bot.db.get_world(resolved_guild_id)
         channel_id = world.get("settings", {}).get("error_log_channel_id")
     except Exception:
-        logger.exception("Failed to resolve error channel for guild %s", guild_id)
+        logger.exception("Failed to resolve error channel for guild %s", resolved_guild_id)
         return None
     if not channel_id:
         return None
-    channel = guild.get_channel(int(channel_id))
+    try:
+        resolved_channel_id = int(channel_id)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Configured error channel ID is invalid for guild %s: %r",
+            resolved_guild_id,
+            channel_id,
+        )
+        return None
+    channel = guild.get_channel(resolved_channel_id)
     return channel if isinstance(channel, discord.TextChannel) else None
 
 
@@ -84,8 +99,22 @@ async def _report_error(title: str, detail: str, *, guild_id: int | None) -> Non
                 color=discord.Color.red(),
             )
         )
-    except discord.HTTPException:
+    except discord.DiscordException:
         logger.exception("Failed to send command error to guild %s", guild.id)
+    except Exception:
+        logger.exception("Unexpected failure in guild error reporter for guild %s", guild.id)
+
+
+async def _report_command_error(
+    *,
+    guild_id: int | None,
+    title: str,
+    description: str,
+) -> None:
+    await _report_error(title, description, guild_id=guild_id)
+
+
+bot.report_command_error = _report_command_error
 
 
 @bot.event
