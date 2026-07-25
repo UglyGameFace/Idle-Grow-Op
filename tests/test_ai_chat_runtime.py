@@ -67,7 +67,9 @@ def test_chat_source_matches_openrouter_contract_and_has_timeout():
     source = (ROOT / "ai.py").read_text(encoding="utf-8")
 
     assert 'AI_BASE_URL = "https://openrouter.ai/api/v1"' in source
-    assert 'AI_MODEL_CHAT = "openai/gpt-4o-mini"' in source
+    assert 'DEFAULT_AI_MODEL = "openrouter/free"' in source
+    assert 'os.getenv("OPENROUTER_CHAT_MODEL", DEFAULT_AI_MODEL)' in source
+    assert 'os.getenv("OPENROUTER_CHAT_MODELS", "")' in source
     assert 'os.getenv("OPENROUTER_API_KEY", "")' in source
     assert "OPENAI_API_KEY" not in source
     assert "aiohttp.ClientTimeout" in source
