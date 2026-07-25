@@ -33,28 +33,27 @@ Add safe server-owner controls for Solo Grow, shared Open World, Player Choice, 
 - Open World member lookup spans participating guilds while sending each shared notification only once.
 - One participating guild supplies safe announcement routing for the shared world.
 
-## Completed Validation
-- Phase 1 through Phase 3 compilation, focused tests, applicable full regressions, cleanup, and source pushes passed.
-- Phase 4 patching, compilation, focused multiplayer contracts, 203 applicable regressions, cleanup, whitespace inspection, and source push passed.
-- Phase 5 static contracts now verify full-world policy normalization, deduplicated scope construction, active-save filtering order, and one shared tick.
-- Phase 5 runtime tests cover local/open policy partitioning, active Player Choice resolution, and shared routing synchronization.
-
-## Final Validation In Progress
-- Complete pytest suite, including Phase 5 and all previous regressions.
-- Every Enterprise extension loading into the bot.
-- Python compilation.
+## Validation Status
+Completed:
+- Phase 1 through Phase 5 focused contracts and runtime tests.
+- Complete pytest regression suite.
+- Every Enterprise extension loaded together.
+- Python compilation and startup contracts.
+- Command uniqueness checks.
 - Legacy persistence and backup-artifact rejection.
-- Command uniqueness and startup contracts through pytest.
 - Final changed-file cleanup and conflict inspection against `main`.
+- Final PR head CI run 569 passed.
+- Branch is 99 commits ahead and 0 behind `main`, with `main` at the exact merge base.
 
 ## Cleanup Status
 - Temporary Phase 1 through Phase 5 patch scripts, wrappers, helper copies, diagnostics, shadow modules, trigger markers, and one-shot workflows are removed.
 - Permanent CI is restored to read-only contents permission.
 - Temporary PR #17 is closed and was not merged.
 - No database migration, economy copy, profile merge, or destructive conversion exists.
+- No duplicate world-mode policy or persistence path remains.
 
 ## Blockers
-- None currently; final validation results are pending.
+- None.
 
 ## Backlog Locked Behind This Task
 - Notification preferences and announcement-role controls.
