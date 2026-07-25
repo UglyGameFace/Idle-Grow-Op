@@ -29,45 +29,43 @@ Add an optional per-server Live Profile Signature system that keeps one compact 
 - Server managers may reduce the fields available in signatures, but user privacy always wins.
 
 ## Implementation Status
-Completed in the feature branch:
+Completed:
 - Added the live profile-signature extension and startup registration.
 - Added compact signature rendering using existing guild-scoped game data.
-- Added one-card-per-channel persistence, ownership checks, debouncing, cooldowns, same-speaker suppression, newest-speaker generation guards, and restart duplicate reconciliation.
+- Added one-card-per-channel persistence, bot ownership checks, message-burst debouncing, same-speaker suppression, per-channel/per-user cooldowns, newest-speaker generation guards, and restart duplicate reconciliation.
+- Added fallback discovery of bot-owned cards when persisted state is missing and delete-on-persistence-failure cleanup.
 - Added setup channel selection, field restrictions, enable/disable controls, health presentation, and cleanup behavior.
 - Added private `/profile-settings` controls and owner-only profile editing access.
 - Added Steam, Epic Games, Xbox, PlayStation, Nintendo, Riot, Battle.net, Roblox, Twitch, YouTube, Kick, and limited custom-platform identities.
 - Added allowlisted HTTPS validation and username-only fallback for platforms without dependable canonical profile links.
 - Added optional host-configured application emoji for exact platform logos with safe Unicode fallbacks.
 - Added platform-specific icons in compact cards and automatic platform visibility after an explicit share choice.
-- Added global privacy, stricter per-server privacy, full signature opt-out, immediate stale-card cleanup after privacy changes, and immediate card invalidation after server field restrictions change.
+- Added global privacy, stricter per-server privacy, complete signature opt-out, immediate stale-card cleanup after privacy changes, and immediate card invalidation after server field restrictions change.
 - Preserved the existing `/profile` command and aliases through the canonical privacy-aware renderer.
-- Added focused URL safety, privacy, setup, persistence, anti-repetition, cancellation, and cleanup tests.
+- Added focused URL safety, privacy, setup, persistence, anti-repetition, cancellation, restart reconciliation, and cleanup tests.
 - Remediated Qodo's cooldown/privacy race by invalidating in-flight generations, serializing cleanup with channel locks, re-reading guild configuration and permissions after cooldowns, and rebuilding cards from current privacy before sending.
-- Added fallback discovery of bot-owned signature cards when persisted state is missing and delete-on-persistence-failure cleanup.
-
-Still required:
-- Run the final human-triggered repository CI gate on the remediated branch head.
-- Inspect final review state, changed-file set, mergeability, and cleanup before declaring the pull request ready to merge.
 
 ## Validation Status
-- Integration compilation passed.
-- Focused profile-signature tests passed.
-- Complete pytest passed inside the integration workflows.
-- Canonical command uniqueness passed.
-- Repository CI runs 358, 371, 384, 390, and 394 passed during the implementation and hardening sequence.
-- The corrected pull-request-visible remediation workflow passed every step: patch application, focused tests, complete pytest, temporary-file cleanup, and commit/push.
-- Qodo's only actionable review thread is resolved.
-- A final repository CI run is now being triggered by this human-authored status commit.
+Passed:
+- Python compilation.
+- Focused profile-signature test suite.
+- Complete pytest regression suite.
+- Canonical command uniqueness checks.
+- All 14 canonical Enterprise extensions loading.
+- Legacy persistence and backup-artifact guards.
+- Corrected pull-request-visible remediation workflow, including full tests and self-cleanup.
+- Final human-triggered repository CI run 401.
+- Qodo review with its only actionable thread resolved.
+- Mergeability and conflict inspection: branch is ahead of `main`, behind by zero, and mergeable.
 
 ## Cleanup Status
-- All temporary integration scripts and workflows removed themselves.
-- Generated `__pycache__`, `.pyc`, and `.pyo` artifacts were removed.
-- Permanent ignore rules prevent compiled/test cache artifacts from being staged again.
-- The final branch diff contains only the intended implementation, setup, persistence, startup, documentation, and test files.
-- No webhook impersonation, user-message deletion/reposting, guessed third-party platform links, or duplicate setup/profile command path exists.
+- All temporary integration scripts and workflows removed.
+- Generated `__pycache__`, `.pyc`, `.pyo`, and pytest-cache artifacts removed and ignored.
+- Final diff contains only 11 intended implementation, setup, persistence, startup, documentation, and test files.
+- No webhook impersonation, user-message deletion/reposting, arbitrary disguised links, guessed third-party platform links, or duplicate setup/profile command path exists.
 
 ## Blockers
-- Final repository CI and conflict/review inspection only.
+- None. Pull request #14 is ready to merge.
 
 ## Backlog Locked Behind This Task
 - Multiplayer/open-world versus solo-world controls.
