@@ -47,10 +47,10 @@ Completed on the feature branch:
 In progress:
 - Phase 3 routes lab queues/valuation, all casino settlements, Sesh participant XP, and profile/signature rendering through each target player’s active save.
 - The first Phase 3 run stopped before editing because the lab file contains six—not five—profile dirty writes. No failed-run production edits landed.
-- The corrected Phase 3 workflow is installed as a branch-push, self-reporting runner. This task-record commit is the clean post-install trigger; on failure it publishes only an exact diagnostic log, never partial source.
+- GitHub ignored newly introduced standalone workflow triggers, so the exact Phase 3 integration job is temporarily attached to the repository’s proven CI workflow. This commit is the clean trigger; source changes are committed only after compilation, focused tests, and the full pre-integration regression suite pass.
 
 Still required:
-- Complete Phase 3 and remove its temporary workflow.
+- Complete Phase 3 and restore the normal CI workflow/remove temporary Phase 3 files.
 - Route and gate economy transfers, auctions, and leaderboards.
 - Route and gate crews, crew banking, district wars, crew heists, raids, stealing, and their leaderboards.
 - Deduplicate Open World cycles, auction settlement, announcements, and notifications in background jobs.
@@ -62,13 +62,13 @@ Still required:
 - Canonical resolver and isolation unit tests passed.
 - Phase 1 foundation compile, focused tests, and complete existing regression suite passed.
 - Phase 2 routed-source compile, focused tests, complete existing regression suite, cleanup, commit, and push passed.
-- Phase 3 self-reporting validation is running from the clean post-install trigger.
+- Phase 3 validation is running through the existing repository CI workflow with separate patch diagnostics and regression artifacts.
 - Final whole-task validation is pending.
 
 ## Cleanup Status
 - Completed Phase 1 and Phase 2 temporary patch scripts/workflows were removed.
 - No database migration, economy copy, profile merge, or destructive conversion exists.
-- The Phase 3 patch script and workflow are temporary and must remove themselves or be deleted after a successful validated push.
+- The Phase 3 patch script, standalone workflow, and temporary CI integration job must be removed after a successful validated push.
 
 ## Blockers
 - None currently.
