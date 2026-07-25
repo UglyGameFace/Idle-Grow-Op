@@ -12,6 +12,7 @@ EXPECTED_EXTENSIONS = {
     "gambling",
     "lab",
     "notification_preferences",
+    "onboarding",
     "progression",
     "quick",
     "profile_signatures",

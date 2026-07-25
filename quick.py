@@ -62,10 +62,10 @@ class Quick(commands.Cog):
     @commands.hybrid_command(name="qhelp", aliases=["quickhelp"])
     async def qhelp(self, ctx):
         embed = discord.Embed(title="⚡ Quick Commands", color=discord.Color.blurple())
-        embed.add_field(name="Status", value="`!q`  | `!cd`  | `!ready`", inline=False)
-        embed.add_field(name="Progression", value="`!daily`  | `!quests`  | `!achievements`", inline=False)
-        embed.add_field(name="Calculator", value="`!calc <strain>`", inline=False)
-        embed.add_field(name="Smart Plant", value="`!qplant` or `!qplant <count>`", inline=False)
+        embed.add_field(name="Status", value="`/quick` • `/cooldowns` • `/ready`", inline=False)
+        embed.add_field(name="Progression", value="`/growdaily` • `/growquests` • `/growachievements`", inline=False)
+        embed.add_field(name="Calculator", value="`/calc strain:<strain>`", inline=False)
+        embed.add_field(name="Smart Plant", value="`/qplant` or `/qplant count:<number>`", inline=False)
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="quick", aliases=["q"])
@@ -74,10 +74,10 @@ class Quick(commands.Cog):
             option = option.lower().strip()
             if option in {"grow", "plants", "garden"}:
                 command = self.bot.get_command("ready")
-                return await ctx.invoke(command) if command else await ctx.send("⚠️ `!ready` is unavailable.")
+                return await ctx.invoke(command) if command else await ctx.send("⚠️ `/ready` is unavailable.")
             if option in {"all", "full", "stats", "profile"}:
                 command = self.bot.get_command("profile")
-                return await ctx.invoke(command) if command else await ctx.send("⚠️ `!profile` is unavailable.")
+                return await ctx.invoke(command) if command else await ctx.send("⚠️ `/profile` is unavailable.")
 
         _, profile, world = await self._scope(ctx)
         plants = profile.get("plants", []) or []

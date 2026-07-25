@@ -516,7 +516,7 @@ class Tasks(commands.Cog):
         statuses = [
             f"Growing in {server_count:,} servers 🌿",
             "Solo Grow + Open World 🌍",
-            "!help | Build your empire",
+            "/help • /start • Build your empire",
         ]
         await self.bot.change_presence(activity=discord.Game(name=random.choice(statuses)))
 

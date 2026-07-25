@@ -127,7 +127,7 @@ class Lab(commands.Cog):
                     ),
                     inline=True,
                 )
-            embed.set_footer(text="Use: !process [type] [amount] (e.g. !process wax 10)")
+            embed.set_footer(text="Use /process concentrate_type:<type> amount:<amount> (example: wax, 10)")
             return await ctx.send(embed=embed)
 
         c_type = concentrate_type.lower().strip()
@@ -190,7 +190,7 @@ class Lab(commands.Cog):
             color=0xE67E22,
         )
         embed.add_field(name="⏳ Time", value=f"{int(duration / 60)} minutes", inline=True)
-        embed.set_footer(text="Use !collect when the batch is ready.")
+        embed.set_footer(text="Use /collect when the batch is ready.")
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="collect", aliases=["collectlab"])
@@ -250,7 +250,7 @@ class Lab(commands.Cog):
 
         if not concentrates and not queue:
             if target == ctx.author:
-                return await ctx.send("🧪 **No concentrates yet!** Use `!process` to make some.")
+                return await ctx.send("🧪 **No concentrates yet!** Use `/process` to make some.")
             return await ctx.send(f"🧪 **{target.display_name}** has no concentrates.")
 
         embed = discord.Embed(title=f"🧪 {target.display_name}'s Concentrates", color=0x9B59B6)

@@ -46,13 +46,13 @@ class Farming(commands.Cog):
             return
 
         if not strain_name:
-            return await ctx.send("🌱 **Usage:** `!plant <strain name>` (e.g., `!plant og kush`)")
+            return await ctx.send("🌱 **Usage:** `/plant strain_name:<strain>` (example: `/plant strain_name:schwag`)")
 
         clean_name = strain_name.lower().replace(" seed", "").strip()
         seed_item_name = f"{clean_name} seed"
 
         if clean_name not in GROWTH_CYCLES:
-            return await ctx.send(f"❌ Unknown strain: **{clean_name}**. Check `!strains`.")
+            return await ctx.send(f"❌ Unknown strain: **{clean_name}**. Check `/strains`.")
 
         strain_info = GROWTH_CYCLES[clean_name]
         world = await self.bot.db.get_world(scope.scope_id)
@@ -63,7 +63,7 @@ class Farming(commands.Cog):
 
             if inv_get(user, seed_item_name) < 1:
                 return await ctx.send(
-                    f"❌ You don't have any **{clean_name.title()} Seeds**!\nBuy some in the `!shop`."
+                    f"❌ You don't have any **{clean_name.title()} Seeds**!\nUse `/shop`, then `/buy item_name:{seed_item_name}`."
                 )
 
             max_pots = effective_pot_capacity(user, scope)
@@ -153,7 +153,7 @@ class Farming(commands.Cog):
 
             if outcome["harvested_count"] == 0:
                 return await ctx.send(
-                    "⏳ **Nothing is ready to harvest yet.**\nUse `!status` to check remaining time."
+                    "⏳ **Nothing is ready to harvest yet.**\nUse `/status` to check remaining time."
                 )
 
             # Harvesting produces flower only. Cash is credited later by the sell command.
@@ -191,7 +191,7 @@ class Farming(commands.Cog):
         if not plants:
             embed = discord.Embed(
                 title="🌱 Your Garden",
-                description="Empty. Use `!plant` to start growing!",
+                description="Empty. Use `/start` for your next step or `/plant` after buying a seed.",
                 color=0x2F3136,
             )
             return await ctx.send(embed=embed)
@@ -222,7 +222,7 @@ class Farming(commands.Cog):
 
         embed.description = "\n\n".join(lines)
         if ready_count > 0:
-            embed.set_footer(text=f"{ready_count} plants ready! Type !harvest")
+            embed.set_footer(text=f"{ready_count} plants ready! Run /harvest")
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="strains", aliases=["seeds"])

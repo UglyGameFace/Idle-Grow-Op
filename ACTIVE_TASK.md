@@ -1,66 +1,62 @@
-# Active Task: Notification Preferences and Announcement Roles
+# Active Task: First-Run Onboarding and Help
 
 ## Scope
-Add simple, active-save-aware player DM preferences and one optional server announcement ping role without creating another server setup path, pinging broad audiences, or breaking existing notification data.
+Give brand-new players a simple, truthful path into Idle Grow and give returning players a useful command guide without unsolicited DMs, automatic channel posts, destructive profile changes, or another setup system.
 
 ## Root Cause and Confirmed Findings
-- Ready-plant and completed-lab notifications are sent by `tasks.py` as one combined DM after active-save filtering.
-- Existing profiles store `settings.notifications` as a boolean.
-- Supabase's generated `has_notification_work` column casts `settings.notifications` directly to boolean, so replacing it with an object would break profile writes.
-- The normalized notification-candidate query is already indexed by scope and does not require a database migration.
-- Notification flags are committed only after a successful DM.
-- World-event and major-market announcements already use `/setup` channel configuration with the game channel as a safe fallback.
-- Open World copies one participating server's announcement route into the shared world so the shared tick runs and announces once.
-- `/profile-settings` remains dedicated to public profile identity and privacy.
+- The built-in help command was disabled and no replacement `/help` command existed.
+- Startup presence and several error messages still directed players to `!help`, which did nothing.
+- New profiles start with **$500**, three empty pots, no seeds, no plants, and Level 1 access to Schwag and Mexican Brick.
+- The cheapest safe first action is buying a **Schwag Seed for $15**.
+- Schwag's base grow time is five minutes before weather and other modifiers.
+- The real starter loop is `/buy` → `/plant` → `/status` or `/water` → `/harvest` → `/sell`.
+- `/growdaily` and `/growquests` are useful early progression actions after the first grow begins.
+- Lab processing, crews, auctions, raids, and other multiplayer systems are later-stage or mode-dependent and should not clutter the first screen.
+- Player Choice servers may require `/world-mode` selection before the player knows which save they are using.
+- Existing high-traffic farming, lab, quick-command, and error messages still taught old prefix syntax.
 
 ## Architecture Decision
-- Use one canonical `notification_preferences.py` extension for preference normalization, private player UI, active-save persistence, and safe allowed-mention construction.
-- Expose `/notifications` as a private, guild-only player panel for the currently active save.
-- Preserve `settings.notifications` as the master boolean for database compatibility.
-- Store category choices in sibling `settings.notification_categories` with `plant_ready` and `lab_ready` booleans.
-- Legacy `true` means both categories enabled; legacy `false` means both disabled.
-- Keep notification flags unchanged for disabled categories. Re-enabling may alert for work that is still ready and has never been delivered.
-- Store the optional server role as `settings.announcement_role_id` in the real guild world.
-- Keep role selection inside `/setup → Announcements`; do not add a second server setup command.
-- A configured role must be a real non-`@everyone` role and mentionable by the bot.
-- Real announcement sends use strict `AllowedMentions`: only the selected role may be mentioned; user, broad, and replied-user mentions remain disabled.
-- Send Test never pings the announcement role.
-- Open World routing synchronizes the selected server's announcement channel, game-channel fallback, and optional announcement role into the shared world once.
+- Use one canonical `onboarding.py` extension.
+- Use `/start` as a private, guild-only, active-save-aware guide that calculates the player's next useful action from real profile and world state.
+- Use a real hybrid `/help` command because `help_command=None` intentionally disables discord.py's built-in help.
+- Keep `/help` available to both slash and legacy prefix entry points while displaying slash syntax first.
+- Use one owner-locked interactive view with focused pages: Next Step, Grow Loop, Progression, World Modes, and Server Setup.
+- Do not create rewards, starter items, channels, roles, or onboarding flags merely by opening the guide.
+- Do not send automatic DMs or post automatically when the bot joins a server.
+- Keep manager launch guidance inside the existing `/setup` panel.
+- Update only the highest-traffic stale starter messages so they point to real slash commands.
 
 ## Implementation Status
 Completed:
-- Added active-save-aware `/notifications` controls for all, plant-ready, and lab-ready DMs.
-- Kept the legacy notification boolean intact and added sibling category preferences without a migration.
-- Filtered disabled categories before DM composition and preserved their undelivered flags.
-- Kept notification flags committing only after successful DM delivery.
-- Added optional announcement-role selection and clearing inside the existing Announcements setup panel.
-- Added deleted and unmentionable role health reporting.
-- Added strict selected-role-only mention delivery with silent fallback.
-- Prevented setup test messages from pinging any role.
-- Synchronized the optional role through the one-per-tick Open World announcement route.
-- Loaded the new extension through the canonical startup list.
-- Kept the private preference view stable across button presses so an older timeout cannot replace newer controls.
+- Added state-aware `/start` and compact `/help` interactive surfaces.
+- Added next-step routing for Player Choice selection, ready flower, ready plants, completed lab work, growing/waterable plants, owned seeds, starter-seed purchase, and broke recovery.
+- Added exact starter examples based on the real $500 profile and $15 Schwag Seed.
+- Added active-save, wallet, plant, and flower context without mutating any record.
+- Added Grow Loop, Progression, World Modes, and Server Setup guide pages.
+- Registered the canonical onboarding extension through startup.
+- Replaced high-traffic obsolete prefix guidance in farming, lab, quick commands, startup errors, setup, and rotating presence.
+- Preserved zero timestamps and kept ready harvests ahead of watering.
+- Kept all slash starter commands truthful by verifying their hybrid-command decorators.
 
 ## Validation Status
 Completed:
-- Legacy boolean normalization and category-toggle runtime coverage.
-- Active Open World save persistence coverage.
-- Category-specific snapshot and post-delivery flag coverage.
-- Selected-role and silent-fallback `AllowedMentions` coverage.
-- Static contracts for setup integration, database compatibility, Open World routing, and no broad pings.
-- Focused integration gate: 13 tests passed.
-- Full read-only CI runs 604 and 606 passed, including compilation, complete pytest, command uniqueness, cleanup checks, and every Enterprise extension loading together.
-- The exact-head CI rerun on this status commit remains the final merge gate.
+- Focused onboarding gate: 15 tests passed.
+- Runtime coverage for empty, seed-owned, growing, waterable, ready, harvested, lab-ready, broke, and Player Choice states.
+- Read-only active Open World guide coverage with no dirty-profile or dirty-world writes.
+- Static privacy, owner-lock, startup, command-map, setup, and stale-guidance contracts.
+- Full read-only CI run 639 passed, including Python compilation, complete pytest, command uniqueness, startup contracts, cleanup checks, and every Enterprise extension loading together.
+- Final exact-head CI on this status commit remains the merge gate.
 
 ## Cleanup Status
-- Temporary patch script removed from the PR branch.
+- Temporary onboarding patch script removed from the PR branch.
 - Temporary write-enabled integrator removed from `main`.
-- Accidental focused-test log removed from the PR branch.
-- Permanent CI is read-only and includes the new module in legacy-persistence checks.
-- No duplicate setup path, migration, hardcoded role, `@here` fallback, or destructive profile rewrite.
+- No focused-test or commit logs remain in the PR diff.
+- Permanent CI remains read-only and includes `onboarding.py` in legacy-persistence inspection.
+- Final diff contains only the canonical extension, focused tests, task record, and intended message/startup integrations.
+- No duplicate help system, automatic join listener, migration, reward grant, or onboarding-only persistence field.
 
 ## Blockers
 - None.
 
 ## Backlog Locked Behind This Task
-- Broader onboarding and first-run guidance.
+- None. This completes the currently defined public setup and onboarding sequence.

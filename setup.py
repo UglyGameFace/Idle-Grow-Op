@@ -1835,8 +1835,11 @@ class Setup(commands.Cog):
             inline=False,
         )
         embed.add_field(
-            name="Coming next",
-            value="First-run onboarding",
+            name="Player Launch",
+            value=(
+                "Share `/start` for each player's tailored next move and `/help` for the "
+                "compact command guide. Neither command changes server settings."
+            ),
             inline=False,
         )
         embed.set_footer(
