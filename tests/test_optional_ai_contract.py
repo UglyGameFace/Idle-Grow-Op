@@ -31,7 +31,7 @@ def test_ai_identity_and_game_guidance_are_current():
     assert '`/plant`' in AI_SOURCE
     assert '`/harvest`' in AI_SOURCE
     assert '`/shop`' in AI_SOURCE
-    assert 'generate images' in AI_SOURCE
+    assert 'create images' in AI_SOURCE
 
 
 def test_ai_request_path_supports_model_fallback_and_health_tests():
@@ -44,8 +44,6 @@ def test_ai_request_path_supports_model_fallback_and_health_tests():
 
 
 def test_setup_integration_remains_required_for_completion():
-    # This contract intentionally keeps the active task open until the canonical
-    # /setup wizard exposes the optional AI panel and guild-scoped toggle.
     assert 'class AISetupView' in SETUP_SOURCE
     assert 'label="Optional AI"' in SETUP_SOURCE
     assert 'async def update_ai_config' in SETUP_SOURCE
