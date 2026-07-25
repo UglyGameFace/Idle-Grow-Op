@@ -216,6 +216,12 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _safe_display(value: Any, *, limit: int = 100) -> str:
+    text = discord.utils.escape_mentions(str(value))
+    text = discord.utils.escape_markdown(text)
+    return text[:limit]
+
+
 def normalize_platform_url(platform_key: str, raw_url: str) -> str:
     spec = PLATFORMS.get(platform_key)
     if spec is None:
@@ -843,6 +849,7 @@ class ProfileSignatures(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self._pending: dict[tuple[int, int], asyncio.Task] = {}
+        self._channel_generation: dict[tuple[int, int], int] = {}
         self._channel_locks: dict[tuple[int, int], asyncio.Lock] = {}
         self._channel_last_update: dict[tuple[int, int], float] = {}
         self._user_last_update: dict[tuple[int, int], float] = {}
@@ -853,6 +860,7 @@ class ProfileSignatures(commands.Cog):
         for task in list(self._pending.values()):
             task.cancel()
         self._pending.clear()
+        self._channel_generation.clear()
 
     def _lock_for(self, guild_id: int, channel_id: int) -> asyncio.Lock:
         key = (int(guild_id), int(channel_id))
@@ -909,6 +917,15 @@ class ProfileSignatures(commands.Cog):
             identity = account.setdefault(IDENTITY_KEY, {})
             platforms = identity.setdefault("platforms", {})
             platforms[str(key)] = dict(entry)
+            if entry.get("shared", False):
+                privacy = account.setdefault(GLOBAL_PRIVACY_KEY, {})
+                visible = {
+                    str(value)
+                    for value in privacy.get("visible_fields", DEFAULT_VISIBLE_FIELDS)
+                    if str(value) in FIELD_LABELS
+                }
+                visible.add("platforms")
+                privacy["visible_fields"] = sorted(visible)
             self.bot.db.mark_account_dirty(int(user_id))
         self._schedule_user_card_cleanup(int(user_id))
 
@@ -988,7 +1005,11 @@ class ProfileSignatures(commands.Cog):
                     continue
                 state = "🌐 Shared" if entry.get("shared", False) else "🔒 Private"
                 link_state = " • linked" if entry.get("url") else " • username only"
-                lines.append(f"{emoji} **{label}:** `{username}` — {state}{link_state}")
+                safe_label = _safe_display(label, limit=30)
+                safe_username = _safe_display(username, limit=80)
+                lines.append(
+                    f"{emoji} **{safe_label}:** `{safe_username}` — {state}{link_state}"
+                )
 
         embed = discord.Embed(
             title="🪪 Profile & Signature Settings",
@@ -1133,7 +1154,8 @@ class ProfileSignatures(commands.Cog):
             embed.add_field(
                 name="🎮 Platforms",
                 value="\n".join(
-                    f"{entry['emoji']} **{entry['label']}:** `{entry['username']}`"
+                    f"{entry['emoji']} **{_safe_display(entry['label'], limit=30)}:** "
+                    f"`{_safe_display(entry['username'], limit=80)}`"
                     for entry in platforms
                 )[:1024],
                 inline=False,
@@ -1176,7 +1198,7 @@ class ProfileSignatures(commands.Cog):
         if "crew" in visible:
             crew = _crew_name(profile, world)
             if crew:
-                lines.append(f"🧢 **Crew:** {crew}")
+                lines.append(f"🧢 **Crew:** {_safe_display(crew, limit=80)}")
         if "grow_status" in visible:
             lines.append(f"🌱 **Grow:** {_grow_summary(profile, world)}")
         if "wealth" in visible:
@@ -1200,9 +1222,9 @@ class ProfileSignatures(commands.Cog):
             )
         if platforms:
             lines.append(
-                "🎮 "
-                + " • ".join(
-                    f"**{entry['label']}:** `{entry['username']}`"
+                " • ".join(
+                    f"{entry['emoji']} **{_safe_display(entry['label'], limit=30)}:** "
+                    f"`{_safe_display(entry['username'], limit=80)}`"
                     for entry in platforms[:6]
                 )
             )
@@ -1284,11 +1306,13 @@ class ProfileSignatures(commands.Cog):
             return
 
         key = (message.guild.id, message.channel.id)
+        generation = self._channel_generation.get(key, 0) + 1
+        self._channel_generation[key] = generation
         previous = self._pending.get(key)
         if previous is not None and not previous.done():
             previous.cancel()
         task = asyncio.create_task(
-            self._debounced_refresh(message),
+            self._debounced_refresh(message, generation),
             name=f"profile-signature-{message.guild.id}-{message.channel.id}",
         )
         self._pending[key] = task
@@ -1299,14 +1323,20 @@ class ProfileSignatures(commands.Cog):
 
         task.add_done_callback(_remove)
 
-    async def _debounced_refresh(self, message: discord.Message) -> None:
+    async def _debounced_refresh(
+        self,
+        message: discord.Message,
+        generation: int,
+    ) -> None:
         key = (message.guild.id, message.channel.id)
         task = asyncio.current_task()
         try:
             await asyncio.sleep(SIGNATURE_DEBOUNCE_SECONDS)
+            if self._channel_generation.get(key) != generation:
+                return
             if self._pending.get(key) is task:
                 self._pending.pop(key, None)
-            await self._refresh_signature(message)
+            await self._refresh_signature(message, generation)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -1371,7 +1401,11 @@ class ProfileSignatures(commands.Cog):
             }
             self.bot.db.mark_world_dirty(int(guild_id))
 
-    async def _refresh_signature(self, trigger: discord.Message) -> None:
+    async def _refresh_signature(
+        self,
+        trigger: discord.Message,
+        generation: int,
+    ) -> None:
         guild = trigger.guild
         channel = trigger.channel
         member = trigger.author
@@ -1384,6 +1418,8 @@ class ProfileSignatures(commands.Cog):
 
         key = (guild.id, channel.id)
         async with self._lock_for(*key):
+            if self._channel_generation.get(key) != generation:
+                return
             config = await self._get_signature_config(guild.id)
             if not config.get(SIGNATURE_ENABLED_KEY, False):
                 return
@@ -1453,6 +1489,8 @@ class ProfileSignatures(commands.Cog):
             delay = max(0.0, channel_wait, user_wait)
             if delay:
                 await asyncio.sleep(delay)
+            if self._channel_generation.get(key) != generation:
+                return
 
             if old_message is not None:
                 try:
@@ -1549,6 +1587,9 @@ class ProfileSignatures(commands.Cog):
             if key[0] == guild.id:
                 task.cancel()
                 self._pending.pop(key, None)
+        for key in list(self._channel_generation):
+            if key[0] == guild.id:
+                self._channel_generation.pop(key, None)
         world = await self.bot.db.get_world(guild.id)
         raw_state = world.get(SIGNATURE_STATE_KEY)
         state = dict(raw_state) if isinstance(raw_state, dict) else {}

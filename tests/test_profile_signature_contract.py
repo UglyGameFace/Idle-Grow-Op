@@ -26,6 +26,8 @@ def test_repeated_messages_are_debounced_and_same_speaker_is_suppressed():
     assert "previous.cancel()" in SOURCE
     assert "if self._pending.get(key) is task:" in SOURCE
     assert "self._pending.pop(key, None)" in SOURCE
+    assert "self._channel_generation.get(key) != generation" in SOURCE
+    assert "self._debounced_refresh(message, generation)" in SOURCE
     assert "SIGNATURE_CHANNEL_COOLDOWN_SECONDS" in SOURCE
     assert "SIGNATURE_USER_COOLDOWN_SECONDS" in SOURCE
     assert "SIGNATURE_SAME_SPEAKER_REFRESH_SECONDS" in SOURCE

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from profile_signatures import (
@@ -129,3 +131,12 @@ def test_custom_application_emoji_override_requires_a_real_discord_emoji(monkeyp
 
     monkeypatch.setenv("PROFILE_PLATFORM_EMOJI_STEAM", "https://evil.example/logo.png")
     assert _configured_platform_emoji("steam", "🎮") == "🎮"
+
+
+def test_explicit_platform_sharing_enables_platform_visibility_in_source():
+    source = (Path(__file__).resolve().parents[1] / "profile_signatures.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'if entry.get("shared", False):' in source
+    assert 'visible.add("platforms")' in source
+    assert "_safe_display(entry['username'], limit=80)" in source
