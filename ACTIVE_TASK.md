@@ -1,60 +1,66 @@
-# Active Task: World Mode Controls
+# Active Task: Notification Preferences and Announcement Roles
 
 ## Scope
-Add safe server-owner controls for Solo Grow, shared Open World, Player Choice, and compatibility-safe Current Server World without copying, merging, resetting, or deleting existing progress.
+Add simple, active-save-aware player DM preferences and one optional server announcement ping role without creating another server setup path, pinging broad audiences, or breaking existing notification data.
 
-## Locked Requirements
-- Solo Grow is a real private server-local operation, not multiplayer with a different label.
-- Open World is one shared cross-server economy with trading, auctions, crews, raids, territory, and global competition.
-- Solo and Open World saves never mix balances, inventory, plants, crews, cooldowns, achievements, auctions, or progression.
-- Player Choice uses separate saves and a seven-day switch cooldown after the first free selection.
-- Existing guild-local multiplayer progress remains available through Current Server World compatibility mode.
-- Solo keeps lower active grow, lab, and positive-market ceilings so it does not become the easiest or richest route.
-- Setup remains simple for ordinary server owners and requires no copied IDs or environment edits.
+## Root Cause and Confirmed Findings
+- Ready-plant and completed-lab notifications are sent by `tasks.py` as one combined DM after active-save filtering.
+- Existing profiles store `settings.notifications` as a boolean.
+- Supabase's generated `has_notification_work` column casts `settings.notifications` directly to boolean, so replacing it with an object would break profile writes.
+- The normalized notification-candidate query is already indexed by scope and does not require a database migration.
+- Notification flags are committed only after a successful DM.
+- World-event and major-market announcements already use `/setup` channel configuration with the game channel as a safe fallback.
+- Open World copies one participating server's announcement route into the shared world so the shared tick runs and announces once.
+- `/profile-settings` remains dedicated to public profile identity and privacy.
 
-## Implemented Architecture
-- `world_modes.py` is the canonical policy, scope, feature-gate, mode-label, and dirty-record routing layer.
-- Reserved persistence scope `1` stores the shared Open World using the existing normalized profile and world tables.
-- Server policy remains in the real guild world; Player Choice metadata remains in the real guild profile.
-- Gameplay records resolve to either the real guild scope or the reserved Open World scope.
-- Mode changes never migrate gameplay data. Returning to a mode restores that mode's existing save.
-- Existing guild-local crews, auctions, and progress become dormant rather than being deleted when their policy changes.
+## Architecture Decision
+- Use one canonical `notification_preferences.py` extension for preference normalization, private player UI, active-save persistence, and safe allowed-mention construction.
+- Expose `/notifications` as a private, guild-only player panel for the currently active save.
+- Preserve `settings.notifications` as the master boolean for database compatibility.
+- Store category choices in sibling `settings.notification_categories` with `plant_ready` and `lab_ready` booleans.
+- Legacy `true` means both categories enabled; legacy `false` means both disabled.
+- Keep notification flags unchanged for disabled categories. Re-enabling may alert for work that is still ready and has never been delivered.
+- Store the optional server role as `settings.announcement_role_id` in the real guild world.
+- Keep role selection inside `/setup → Announcements`; do not add a second server setup command.
+- A configured role must be a real non-`@everyone` role and mentionable by the bot.
+- Real announcement sends use strict `AllowedMentions`: only the selected role may be mentioned; user, broad, and replied-user mentions remain disabled.
+- Send Test never pings the announcement role.
+- Open World routing synchronizes the selected server's announcement channel, game-channel fallback, and optional announcement role into the shared world once.
 
-## Implemented Behavior
-- Safe Solo default for new worlds and compatibility interpretation for pre-feature worlds.
-- `/world-mode` player controls and `/setup` server policy controls with confirmation and plain-language consequences.
-- First selection is free; later switches use a seven-day cooldown.
-- Progression, farming, quick actions, owner tools, lab, gambling, Sesh XP, profiles, signatures, active-save ranks, and stale-card invalidation use the active save.
-- Transfers, auctions, shared leaderboards, crews, crew banking, district wars, crew heists, raids, and theft require an eligible matching multiplayer scope.
-- Solo-safe personal systems remain available: shops, production, solo heists, laundering, personal stats, and private progression.
-- Shared Open World auctions, weather, market events, and world advancement run once per tick regardless of participating server count.
-- Local worlds continue once per active local scope.
-- Notification candidates are filtered against the player's active save before profile reads, DMs, or notification-flag writes.
-- Open World member lookup spans participating guilds while sending each shared notification only once.
-- One participating guild supplies safe announcement routing for the shared world.
+## Implementation Status
+Completed:
+- Added active-save-aware `/notifications` controls for all, plant-ready, and lab-ready DMs.
+- Kept the legacy notification boolean intact and added sibling category preferences without a migration.
+- Filtered disabled categories before DM composition and preserved their undelivered flags.
+- Kept notification flags committing only after successful DM delivery.
+- Added optional announcement-role selection and clearing inside the existing Announcements setup panel.
+- Added deleted and unmentionable role health reporting.
+- Added strict selected-role-only mention delivery with silent fallback.
+- Prevented setup test messages from pinging any role.
+- Synchronized the optional role through the one-per-tick Open World announcement route.
+- Loaded the new extension through the canonical startup list.
+- Kept the private preference view stable across button presses so an older timeout cannot replace newer controls.
 
 ## Validation Status
 Completed:
-- Phase 1 through Phase 5 focused contracts and runtime tests.
-- Complete pytest regression suite.
-- Every Enterprise extension loaded together.
-- Python compilation and startup contracts.
-- Command uniqueness checks.
-- Legacy persistence and backup-artifact rejection.
-- Final changed-file cleanup and conflict inspection against `main`.
-- Final PR head CI run 569 passed.
-- Branch is 99 commits ahead and 0 behind `main`, with `main` at the exact merge base.
+- Legacy boolean normalization and category-toggle runtime coverage.
+- Active Open World save persistence coverage.
+- Category-specific snapshot and post-delivery flag coverage.
+- Selected-role and silent-fallback `AllowedMentions` coverage.
+- Static contracts for setup integration, database compatibility, Open World routing, and no broad pings.
+- Focused integration gate: 13 tests passed.
+- Full read-only CI runs 604 and 606 passed, including compilation, complete pytest, command uniqueness, cleanup checks, and every Enterprise extension loading together.
+- The exact-head CI rerun on this status commit remains the final merge gate.
 
 ## Cleanup Status
-- Temporary Phase 1 through Phase 5 patch scripts, wrappers, helper copies, diagnostics, shadow modules, trigger markers, and one-shot workflows are removed.
-- Permanent CI is restored to read-only contents permission.
-- Temporary PR #17 is closed and was not merged.
-- No database migration, economy copy, profile merge, or destructive conversion exists.
-- No duplicate world-mode policy or persistence path remains.
+- Temporary patch script removed from the PR branch.
+- Temporary write-enabled integrator removed from `main`.
+- Accidental focused-test log removed from the PR branch.
+- Permanent CI is read-only and includes the new module in legacy-persistence checks.
+- No duplicate setup path, migration, hardcoded role, `@here` fallback, or destructive profile rewrite.
 
 ## Blockers
 - None.
 
 ## Backlog Locked Behind This Task
-- Notification preferences and announcement-role controls.
 - Broader onboarding and first-run guidance.

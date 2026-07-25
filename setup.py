@@ -6,6 +6,10 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from notification_preferences import (
+    ANNOUNCEMENT_ROLE_KEY,
+    role_is_mentionable_by_bot,
+)
 from profile_signatures import (
     ALL_PROFILE_FIELDS,
     DEFAULT_SERVER_ALLOWED_FIELDS,
@@ -173,6 +177,78 @@ class OwnedSetupView(discord.ui.View):
                 pass
 
 
+class AnnouncementRoleSelect(discord.ui.RoleSelect):
+    def __init__(self, view: "ChannelConfigView") -> None:
+        self.config_view = view
+        super().__init__(
+            placeholder="Optional role to ping for real announcements…",
+            min_values=1,
+            max_values=1,
+            row=3,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        guild = interaction.guild
+        role = self.values[0]
+        if guild is None or role.is_default():
+            await interaction.response.send_message(
+                "❌ Choose a normal server role, not @everyone.",
+                ephemeral=True,
+            )
+            return
+        if not role_is_mentionable_by_bot(guild, role):
+            await interaction.response.send_message(
+                "❌ I cannot mention that role. Make the role mentionable or update my "
+                "server permissions, then try again.",
+                ephemeral=True,
+            )
+            return
+        await self.config_view.cog.set_channel_setting(
+            guild.id,
+            ANNOUNCEMENT_ROLE_KEY,
+            role.id,
+        )
+        await interaction.response.edit_message(
+            embed=await self.config_view.cog.build_channel_panel(
+                guild,
+                self.config_view.purpose,
+            ),
+            view=self.config_view,
+        )
+
+
+class ClearAnnouncementRoleButton(discord.ui.Button):
+    def __init__(self, view: "ChannelConfigView") -> None:
+        super().__init__(
+            label="Clear Ping Role",
+            emoji="🔕",
+            style=discord.ButtonStyle.danger,
+            row=4,
+        )
+        self.config_view = view
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.",
+                ephemeral=True,
+            )
+            return
+        await self.config_view.cog.set_channel_setting(
+            guild.id,
+            ANNOUNCEMENT_ROLE_KEY,
+            None,
+        )
+        await interaction.response.edit_message(
+            embed=await self.config_view.cog.build_channel_panel(
+                guild,
+                self.config_view.purpose,
+            ),
+            view=self.config_view,
+        )
+
+
 class ChannelConfigView(OwnedSetupView):
     def __init__(
         self,
@@ -185,6 +261,9 @@ class ChannelConfigView(OwnedSetupView):
         self.cog = cog
         self.purpose = purpose
         self.add_item(ConfiguredChannelSelect(self))
+        if self.purpose.key == ANNOUNCEMENT_CHANNEL_KEY:
+            self.add_item(AnnouncementRoleSelect(self))
+            self.add_item(ClearAnnouncementRoleButton(self))
 
     async def save(
         self,
@@ -307,7 +386,8 @@ class ChannelConfigView(OwnedSetupView):
                     title=self.purpose.test_title,
                     description=self.purpose.test_description,
                     color=discord.Color.green(),
-                )
+                ),
+                allowed_mentions=discord.AllowedMentions.none(),
             )
         except discord.HTTPException as exc:
             await interaction.response.send_message(
@@ -1372,6 +1452,22 @@ class Setup(commands.Cog):
             return f"🟢 **Healthy** — {channel.mention}"
         return f"🟠 **Needs attention** — {channel.mention}\nMissing: {', '.join(missing)}"
 
+
+    async def announcement_role_status(self, guild: discord.Guild) -> str:
+        role_id = await self.get_channel_setting_id(guild.id, ANNOUNCEMENT_ROLE_KEY)
+        if role_id is None:
+            return "🔕 **Silent** — no ping role selected"
+        role = guild.get_role(role_id)
+        if not isinstance(role, discord.Role):
+            return "🟠 **Needs attention** — saved role was deleted"
+        if role.is_default():
+            return "🟠 **Needs attention** — @everyone cannot be used"
+        if role_is_mentionable_by_bot(guild, role):
+            return f"🟢 **Healthy** — {role.mention}"
+        return (
+            f"🟠 **Needs attention** — {role.mention} cannot be mentioned by the bot"
+        )
+
     async def update_sesh_config(self, guild_id: int, **changes: object) -> None:
         async with self.bot.db.lock:
             world = await self.bot.db.get_world(int(guild_id))
@@ -1685,9 +1781,18 @@ class Setup(commands.Cog):
             value=await self.channel_status(guild, purpose.key),
             inline=False,
         )
-        embed.set_footer(
-            text="Choose a channel, use this channel, create one, test, or disable."
-        )
+        if purpose.key == ANNOUNCEMENT_CHANNEL_KEY:
+            embed.add_field(
+                name="Optional announcement ping",
+                value=await self.announcement_role_status(guild),
+                inline=False,
+            )
+            footer = (
+                "Choose a channel and optional role. Test messages never ping the role."
+            )
+        else:
+            footer = "Choose a channel, use this channel, create one, test, or disable."
+        embed.set_footer(text=footer)
         return embed
 
     async def build_panel(self, guild: discord.Guild) -> discord.Embed:
@@ -1697,6 +1802,9 @@ class Setup(commands.Cog):
         if await self.get_channel_setting_id(guild.id, ANNOUNCEMENT_CHANNEL_KEY) is None:
             if await self.get_configured_channel(guild, GAME_CHANNEL_KEY) is not None:
                 announcement_status += "\n↪ Uses the game channel as fallback"
+        announcement_status += (
+            "\n" + await self.announcement_role_status(guild)
+        )
 
         embed = discord.Embed(
             title="🌿 Idle Grow Server Setup",
@@ -1722,8 +1830,13 @@ class Setup(commands.Cog):
             inline=False,
         )
         embed.add_field(
+            name="📟 Player Notifications",
+            value="Players manage private ready-work alerts with `/notifications`.",
+            inline=False,
+        )
+        embed.add_field(
             name="Coming next",
-            value="Notifications",
+            value="First-run onboarding",
             inline=False,
         )
         embed.set_footer(

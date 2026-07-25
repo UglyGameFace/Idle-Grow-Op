@@ -140,7 +140,7 @@ jobs:
         run: |
           ! grep -R -nE '(^|[^A-Z_])SUPABASE_(URL|KEY|SERVICE_ROLE_KEY)|IDLE_SUPABASE_KEY|db_manager|class Database|\.world_state|\.get_user\(|await .*\.save\(\)|Local JSON|memory-only fallback' \
             main.py utils.py persistence_bootstrap.py scoped_database.py supabase_scoped_backend.py \
-            admin.py ai.py crime.py economy.py farming.py gambling.py lab.py progression.py quick.py sesh.py social.py tasks.py world_modes.py
+            admin.py ai.py crime.py economy.py farming.py gambling.py lab.py notification_preferences.py progression.py quick.py sesh.py social.py tasks.py world_modes.py
           test ! -d cogs
           test ! -f .env
           test ! -f database.json
