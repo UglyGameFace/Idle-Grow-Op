@@ -33,22 +33,18 @@ In progress:
 - Verified PR #8 is merged into `main`.
 - Created `feature/live-profile-signatures` from current `main`.
 - Inspected the real message listener, profile command, scoped account/profile/world storage, setup UI, startup extension list, and command uniqueness guard.
+- Staged the one-shot integration and validation workflow for the production implementation.
 
 Still required:
-- Implement platform registry, safe URL normalization, identity persistence, and privacy resolution.
-- Implement private `/profile-settings` editing/privacy UI.
-- Implement compact signature rendering and link buttons.
-- Implement debounced one-card-per-channel runtime with restart-safe persisted state.
-- Add `/setup` channel, enable/disable, allowed-field, and health controls.
-- Integrate user-owned edit/privacy buttons without breaking `/profile` for normal viewing.
-- Add focused runtime, privacy, URL safety, setup, persistence, deduplication, and restart-cleanup tests.
-- Run compilation, complete pytest, command uniqueness, all-extension loading, cleanup, and conflict inspection.
+- Complete the integration workflow and inspect every generated change.
+- Run compilation, focused tests, complete pytest, command uniqueness, all-extension loading, cleanup, and conflict inspection.
+- Fix any review or validation findings before opening the final merge request.
 
 ## Validation Status
-- Not run for this task yet.
+- Integration validation is pending.
 
 ## Cleanup Status
-- No production code has been changed yet.
+- The temporary integration script and workflow are required to remove themselves in the generated implementation commit.
 - No webhook impersonation, user-message deletion, guessed third-party platform links, or duplicate setup/profile command path is planned.
 
 ## Blockers
