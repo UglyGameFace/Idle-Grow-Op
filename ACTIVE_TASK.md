@@ -41,10 +41,10 @@ Route and gate all shared multiplayer value paths:
 
 Solo-safe personal systems remain usable: shops, production, solo heists, laundering, personal stats, and private progression.
 
-The current-method AST patcher and raw-string source preflight are attached to PR #15's visible CI workflow. This task-record commit triggers the corrected patch, compile, focused-test, full-regression, cleanup, and source-publish sequence.
+The current-method AST patch applies, compiles, and passes every focused Phase 4 contract. The broader regression gate now writes and uploads its exact first failure before stopping. This commit triggers that diagnostic run.
 
 ## Still Required
-- Complete and clean Phase 4.
+- Resolve the exact broader Phase 4 regression and publish the validated source.
 - Deduplicate Open World background cycles, auction settlement, announcements, and notifications.
 - Filter notification candidates by each player's active save and resolve Open World members across participating guilds.
 - Remove all remaining temporary workflows, scripts, triggers, diagnostics, and markers.
@@ -52,8 +52,10 @@ The current-method AST patcher and raw-string source preflight are attached to P
 - Run complete pytest, extension loading, command uniqueness, static compilation, whitespace checks, cleanup inspection, conflict inspection, and final review.
 
 ## Validation Status
-- Ordinary CI is expected to remain red until Phase 4 source lands.
-- The visible corrected Phase 4 integration gate is now triggered and will not publish partial gameplay edits.
+- Phase 4 patch application: passed.
+- Phase 4 source compilation: passed.
+- Focused Phase 4 contracts: passed.
+- Complete pre-background regression suite: exact first failure being captured.
 
 ## Blockers
 - None.
