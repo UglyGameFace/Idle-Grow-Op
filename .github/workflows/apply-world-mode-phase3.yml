@@ -1,16 +1,16 @@
 name: Apply World Mode Phase 3
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
+      - feature/world-mode-controls
 
 permissions:
   contents: write
 
 jobs:
   integrate:
-    if: github.event.pull_request.head.ref == 'feature/world-mode-controls' && github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
