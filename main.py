@@ -29,6 +29,7 @@ GAME_EXTENSIONS = (
     "farming",
     "gambling",
     "lab",
+    "notification_preferences",
     "progression",
     "quick",
     "profile_signatures",

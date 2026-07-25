@@ -4,6 +4,12 @@ import time
 import discord
 from discord.ext import commands, tasks
 
+from notification_preferences import (
+    ANNOUNCEMENT_ROLE_KEY,
+    NOTIFICATION_CATEGORIES_KEY,
+    build_announcement_delivery,
+    normalize_notification_preferences,
+)
 from utils import SPECIAL_EVENTS, WEATHER_TYPES, get_plant_grow_time
 from world_modes import (
     OPEN_WORLD_SCOPE_ID,
@@ -103,7 +109,7 @@ class Tasks(commands.Cog):
             local_settings = local_world.get("settings", {}) if isinstance(local_world, dict) else {}
             shared_settings = shared_world.setdefault("settings", {})
             changed = False
-            for key in (ANNOUNCEMENT_CHANNEL_KEY, GAME_CHANNEL_KEY):
+            for key in (ANNOUNCEMENT_CHANNEL_KEY, GAME_CHANNEL_KEY, ANNOUNCEMENT_ROLE_KEY):
                 value = local_settings.get(key)
                 if value:
                     normalized = int(value)
@@ -251,8 +257,20 @@ class Tasks(commands.Cog):
         channel = await self._configured_announcement_channel(guild)
         if channel is None:
             return
+        role_id = None
         try:
-            await channel.send(embed=embed)
+            world = await self.bot.db.get_world(guild.id)
+            role_id = world.get("settings", {}).get(ANNOUNCEMENT_ROLE_KEY)
+        except Exception as exc:
+            print(f"❌ Announcement role lookup failed for scope {guild.id}: {exc}")
+
+        content, allowed_mentions = build_announcement_delivery(guild, role_id)
+        try:
+            await channel.send(
+                content=content,
+                embed=embed,
+                allowed_mentions=allowed_mentions,
+            )
         except discord.HTTPException as exc:
             print(f"❌ World announcement failed for scope {guild.id}: {exc}")
 
@@ -415,23 +433,32 @@ class Tasks(commands.Cog):
     ) -> tuple[list[int], list[int]] | None:
         async with self.bot.db.lock:
             profile = await self.bot.db.get_profile(scope_id, user_id)
-            if not profile.get("settings", {}).get("notifications", True):
+            settings = profile.get("settings", {})
+            if not isinstance(settings, dict):
+                settings = {}
+            preferences = normalize_notification_preferences(
+                settings.get("notifications", True),
+                settings.get(NOTIFICATION_CATEGORIES_KEY),
+            )
+            if not preferences.enabled:
                 return None
 
             plant_indexes = []
-            for index, plant in enumerate(profile.get("plants", [])):
-                if plant.get("notified"):
-                    continue
-                grow_time = get_plant_grow_time(profile, world, plant)
-                if now - float(plant.get("planted_at", now)) >= grow_time:
-                    plant_indexes.append(index)
+            if preferences.plant_ready:
+                for index, plant in enumerate(profile.get("plants", [])):
+                    if plant.get("notified"):
+                        continue
+                    grow_time = get_plant_grow_time(profile, world, plant)
+                    if now - float(plant.get("planted_at", now)) >= grow_time:
+                        plant_indexes.append(index)
 
             batch_indexes = []
-            for index, item in enumerate(profile.get("processing_queue", [])):
-                if item.get("notified"):
-                    continue
-                if now >= float(item.get("finish_time", now + 1)):
-                    batch_indexes.append(index)
+            if preferences.lab_ready:
+                for index, item in enumerate(profile.get("processing_queue", [])):
+                    if item.get("notified"):
+                        continue
+                    if now >= float(item.get("finish_time", now + 1)):
+                        batch_indexes.append(index)
 
             if not plant_indexes and not batch_indexes:
                 return None
