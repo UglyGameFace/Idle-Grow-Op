@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -57,6 +58,19 @@ _SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]{2,64}$")
 _STEAM_ID_RE = re.compile(r"^\d{15,20}$")
 _ROBLOX_ID_RE = re.compile(r"^\d{1,20}$")
 _YOUTUBE_HANDLE_RE = re.compile(r"^@?[A-Za-z0-9_.-]{3,100}$")
+
+
+def _configured_platform_emoji(platform_key: str, fallback: str) -> str:
+    value = os.getenv(f"PROFILE_PLATFORM_EMOJI_{platform_key.upper()}", "").strip()
+    if not value:
+        return fallback
+    if re.fullmatch(r"<a?:[A-Za-z0-9_]{2,32}:\d{15,22}>", value):
+        return value
+    logger.warning(
+        "Ignoring invalid configured profile emoji for platform %s",
+        platform_key,
+    )
+    return fallback
 
 
 @dataclass(frozen=True)
@@ -148,21 +162,21 @@ PLATFORMS: dict[str, PlatformSpec] = {
     "steam": PlatformSpec(
         "steam",
         "Steam",
-        "🎮",
+        _configured_platform_emoji("steam", "🎮"),
         frozenset({"steamcommunity.com", "www.steamcommunity.com"}),
         _steam_path,
         _steam_url,
     ),
-    "epic": PlatformSpec("epic", "Epic Games", "🟦", frozenset()),
-    "xbox": PlatformSpec("xbox", "Xbox", "🟢", frozenset()),
-    "playstation": PlatformSpec("playstation", "PlayStation", "🔵", frozenset()),
-    "nintendo": PlatformSpec("nintendo", "Nintendo", "🔴", frozenset()),
-    "riot": PlatformSpec("riot", "Riot", "⚔️", frozenset()),
-    "battlenet": PlatformSpec("battlenet", "Battle.net", "🌀", frozenset()),
+    "epic": PlatformSpec("epic", "Epic Games", _configured_platform_emoji("epic", "🟦"), frozenset()),
+    "xbox": PlatformSpec("xbox", "Xbox", _configured_platform_emoji("xbox", "🟢"), frozenset()),
+    "playstation": PlatformSpec("playstation", "PlayStation", _configured_platform_emoji("playstation", "🔵"), frozenset()),
+    "nintendo": PlatformSpec("nintendo", "Nintendo", _configured_platform_emoji("nintendo", "🔴"), frozenset()),
+    "riot": PlatformSpec("riot", "Riot", _configured_platform_emoji("riot", "⚔️"), frozenset()),
+    "battlenet": PlatformSpec("battlenet", "Battle.net", _configured_platform_emoji("battlenet", "🌀"), frozenset()),
     "roblox": PlatformSpec(
         "roblox",
         "Roblox",
-        "🟥",
+        _configured_platform_emoji("roblox", "🟥"),
         frozenset({"roblox.com", "www.roblox.com"}),
         _roblox_path,
         _roblox_url,
@@ -170,7 +184,7 @@ PLATFORMS: dict[str, PlatformSpec] = {
     "twitch": PlatformSpec(
         "twitch",
         "Twitch",
-        "🟣",
+        _configured_platform_emoji("twitch", "🟣"),
         frozenset({"twitch.tv", "www.twitch.tv"}),
         _single_path_segment,
         _twitch_url,
@@ -178,7 +192,7 @@ PLATFORMS: dict[str, PlatformSpec] = {
     "youtube": PlatformSpec(
         "youtube",
         "YouTube",
-        "▶️",
+        _configured_platform_emoji("youtube", "▶️"),
         frozenset({"youtube.com", "www.youtube.com"}),
         _youtube_path,
         _youtube_url,
@@ -186,12 +200,12 @@ PLATFORMS: dict[str, PlatformSpec] = {
     "kick": PlatformSpec(
         "kick",
         "Kick",
-        "🟩",
+        _configured_platform_emoji("kick", "🟩"),
         frozenset({"kick.com", "www.kick.com"}),
         _single_path_segment,
         _kick_url,
     ),
-    "custom": PlatformSpec("custom", "Other Platform", "🔗", frozenset()),
+    "custom": PlatformSpec("custom", "Other Platform", _configured_platform_emoji("custom", "🔗"), frozenset()),
 }
 
 
@@ -213,12 +227,16 @@ def normalize_platform_url(platform_key: str, raw_url: str) -> str:
         raise ValueError(f"{spec.label} does not have a reliable public profile-link format.")
     parsed = urlparse(value)
     host = (parsed.hostname or "").lower()
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"Use a direct HTTPS {spec.label} profile URL.") from exc
     if (
         parsed.scheme.lower() != "https"
         or host not in spec.hosts
         or parsed.username
         or parsed.password
-        or parsed.port not in (None, 443)
+        or port not in (None, 443)
         or parsed.query
         or parsed.fragment
     ):
@@ -1282,8 +1300,12 @@ class ProfileSignatures(commands.Cog):
         task.add_done_callback(_remove)
 
     async def _debounced_refresh(self, message: discord.Message) -> None:
+        key = (message.guild.id, message.channel.id)
+        task = asyncio.current_task()
         try:
             await asyncio.sleep(SIGNATURE_DEBOUNCE_SECONDS)
+            if self._pending.get(key) is task:
+                self._pending.pop(key, None)
             await self._refresh_signature(message)
         except asyncio.CancelledError:
             raise
@@ -1518,6 +1540,9 @@ class ProfileSignatures(commands.Cog):
             await self._clear_state(guild.id, resolved_channel_id)
         if enabled:
             await self.reconcile_guild(guild)
+
+    async def invalidate_guild_cards(self, guild: discord.Guild) -> None:
+        await self.disable_guild(guild)
 
     async def disable_guild(self, guild: discord.Guild) -> None:
         for key, task in list(self._pending.items()):
