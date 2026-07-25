@@ -297,3 +297,5 @@ jobs:
           git add setup.py
           git commit -m "Integrate optional AI into setup wizard"
           git push origin HEAD:feature/optional-ai-setup
+
+# Trigger after workflow creation.
