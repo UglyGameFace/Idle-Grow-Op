@@ -30,7 +30,7 @@ Give brand-new players a simple, truthful path into Idle Grow and give returning
 - `/start` must:
   - remain private for slash-command use;
   - show the active save and current wallet;
-  - identify the next action from actual seeds, plants, readiness, flower stash, and world-mode policy;
+  - identify the next action from actual seeds, plants, readiness, flower stash, lab completion, and world-mode policy;
   - use exact valid examples such as `/buy item_name:schwag seed` and `/plant strain_name:schwag`;
   - explain that weather can change grow time and sale value;
   - never mutate profile or world data.
@@ -41,8 +41,15 @@ Give brand-new players a simple, truthful path into Idle Grow and give returning
   - link players back to `/start` for a tailored next step.
 - Starter-message cleanup must replace nonexistent or misleading `!help`, `!shop`, `!plant`, `!status`, `!harvest`, `!process`, and `!collect` guidance where new players are most likely to encounter it.
 
+## Implementation Status
+- Canonical state-aware onboarding module added.
+- `/start` and `/help` interactive surfaces added.
+- Runtime next-step and read-only coverage added.
+- Static startup, privacy, command-map, setup, and stale-guidance contracts added.
+- Trusted PR #23 integration is applying startup registration and high-traffic message cleanup.
+
 ## Validation Requirements
-- Runtime tests for next-step selection across empty, seed-owned, growing, ready, harvested, and Player Choice states.
+- Runtime tests for next-step selection across empty, seed-owned, growing, ready, harvested, lab-ready, broke, and Player Choice states.
 - Tests proving `/start` reads without marking records dirty.
 - Owner-lock and private-response contracts.
 - Command-surface uniqueness for `/help` and `/start`.
