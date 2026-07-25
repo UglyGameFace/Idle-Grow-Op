@@ -48,7 +48,8 @@ Give brand-new players a simple, truthful path into Idle Grow and give returning
 - Static startup, privacy, command-map, setup, and stale-guidance contracts added.
 - Readiness handling now preserves valid zero timestamps and keeps harvest ahead of watering when a plant is ready.
 - Focused onboarding gate passes all 15 tests.
-- Trusted PR #23 integration is retrying with permanent commit/push output captured separately.
+- GitHub's workflow-file permission restriction is isolated: the production commit excludes `ci.yml`, which will be updated separately through the connector.
+- Trusted PR #23 integration is retrying the permanent production push.
 
 ## Validation Requirements
 - Runtime tests for next-step selection across empty, seed-owned, growing, ready, harvested, lab-ready, broke, and Player Choice states.
