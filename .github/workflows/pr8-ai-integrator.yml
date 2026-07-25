@@ -27,7 +27,7 @@ jobs:
       - name: Validate implementation
         run: |
           python -m py_compile ai.py setup.py
-          python -m pytest -q tests/test_ai_chat_runtime.py tests/test_optional_ai_setup_contract.py
+          python -m pytest -q tests/test_ai_chat_runtime.py tests/test_optional_ai_contract.py
       - name: Commit only permanent implementation
         run: |
           rm -f tools/apply_ai_setup_once.py .github/workflows/apply-ai-setup-once.yml
