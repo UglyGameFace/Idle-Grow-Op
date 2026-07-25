@@ -3,6 +3,7 @@ import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1]
+(ROOT / "PHASE3_PATCH_FAILURE.log").unlink(missing_ok=True)
 
 
 def publish_failure(message: str) -> None:
@@ -180,15 +181,19 @@ replace_once(
     "                profile = await self.bot.db.get_profile(\n                    session.guild_id,\n                    member.id,\n                )\n                gain = min(\n",
     "                scope = await resolve_game_scope(\n                    self.bot.db, session.guild_id, member.id\n                )\n                profile = await self.bot.db.get_profile(\n                    scope.scope_id,\n                    member.id,\n                )\n                gain = min(\n",
 )
-replace_all(
+replace_once(
     "sesh.py",
     "                    self.bot.db.mark_profile_dirty(\n                        session.guild_id,\n                        member.id,\n                    )\n",
     "                    mark_game_profile_dirty(self.bot.db, scope, member.id)\n",
-    2,
 )
 replace_once(
     "sesh.py",
-    "                profile = await self.bot.db.get_profile(\n                    session.guild_id,\n                    member.id,\n                )\n                profile[\"xp\"] = int(profile.get(\"xp\", 0)) + reward\n                mark_game_profile_dirty(self.bot.db, scope, member.id)\n",
+    "                        self.bot.db.mark_profile_dirty(\n                            session.guild_id,\n                            member.id,\n                        )\n",
+    "                        mark_game_profile_dirty(self.bot.db, scope, member.id)\n",
+)
+replace_once(
+    "sesh.py",
+    "                profile = await self.bot.db.get_profile(\n                    session.guild_id,\n                    member.id,\n                )\n                profile[\"xp\"] = int(profile.get(\"xp\", 0)) + reward\n                self.bot.db.mark_profile_dirty(\n                    session.guild_id,\n                    member.id,\n                )\n",
     "                scope = await resolve_game_scope(\n                    self.bot.db, session.guild_id, member.id\n                )\n                profile = await self.bot.db.get_profile(\n                    scope.scope_id,\n                    member.id,\n                )\n                profile[\"xp\"] = int(profile.get(\"xp\", 0)) + reward\n                mark_game_profile_dirty(self.bot.db, scope, member.id)\n",
 )
 
