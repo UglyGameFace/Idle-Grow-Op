@@ -1,0 +1,77 @@
+name: PR23 Onboarding Integrator
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.event.pull_request.number == 23 && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -q --upgrade pip
+          python -m pip install -q -r requirements.txt pytest
+
+      - name: Apply and validate onboarding integration
+        id: focused
+        shell: bash
+        run: |
+          set +e
+          python tools/apply_onboarding_integration.py > onboarding-focused.log 2>&1
+          code=$?
+          if [ "$code" -eq 0 ]; then
+            python -m py_compile onboarding.py main.py farming.py lab.py quick.py setup.py tasks.py >> onboarding-focused.log 2>&1
+            code=$?
+          fi
+          if [ "$code" -eq 0 ]; then
+            python -m pytest -q tests/test_onboarding_runtime.py tests/test_onboarding_contract.py >> onboarding-focused.log 2>&1
+            code=$?
+          fi
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload focused validation log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr23-onboarding-focused-log
+          path: onboarding-focused.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Fail when focused validation failed
+        if: steps.focused.outputs.exit_code != '0'
+        run: |
+          cat onboarding-focused.log
+          exit 1
+
+      - name: Commit only permanent implementation
+        run: |
+          rm tools/apply_onboarding_integration.py onboarding-focused.log
+          git diff --check
+          git status --short
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add first-run onboarding and real help"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
