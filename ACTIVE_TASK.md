@@ -41,10 +41,12 @@ Completed in the feature branch:
 - Added global privacy, stricter per-server privacy, full signature opt-out, immediate stale-card cleanup after privacy changes, and immediate card invalidation after server field restrictions change.
 - Preserved the existing `/profile` command and aliases through the canonical privacy-aware renderer.
 - Added focused URL safety, privacy, setup, persistence, anti-repetition, cancellation, and cleanup tests.
+- Staged final newest-speaker generation guards, platform-specific signature icons, and explicit-share visibility behavior for validation.
 
 Still required:
-- Run a fresh human-triggered complete repository CI gate after the final hardening commits.
-- Inspect automated review findings, final diff, mergeability, and cleanup before marking the pull request ready to merge.
+- Complete the final runtime validation workflow.
+- Run a fresh human-triggered complete repository CI gate after the generated hardening commit.
+- Inspect automated review findings, final diff, mergeability, and cleanup before declaring the pull request ready to merge.
 
 ## Validation Status
 - Integration compilation passed.
@@ -52,10 +54,12 @@ Still required:
 - Complete pytest passed inside both integration workflows.
 - Canonical command uniqueness passed.
 - Repository CI run 358 passed compilation, the complete test suite, all 14 canonical extensions loading, and legacy-artifact guards before the final hardening commits.
-- A fresh final repository CI run is pending.
+- Repository CI run 371 passed after the URL, setup, and emoji hardening commits.
+- A fresh final repository CI run is pending after newest-speaker generation hardening.
 
 ## Cleanup Status
-- Temporary integration scripts and workflows removed themselves.
+- Earlier temporary integration scripts and workflows removed themselves.
+- The final runtime patch workflow is required to remove itself before committing.
 - Generated `__pycache__`, `.pyc`, and `.pyo` artifacts were removed.
 - Permanent ignore rules now prevent compiled/test cache artifacts from being staged again.
 - No webhook impersonation, user-message deletion/reposting, guessed third-party platform links, or duplicate setup/profile command path exists.
