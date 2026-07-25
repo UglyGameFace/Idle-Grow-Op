@@ -53,7 +53,7 @@ replace_all(
     "lab.py",
     "self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)",
     "self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)",
-    5,
+    6,
 )
 replace_once(
     "lab.py",
