@@ -46,7 +46,8 @@ Completed on the feature branch:
 
 In progress:
 - Phase 3 routes lab queues/valuation, all casino settlements, Sesh participant XP, and profile/signature rendering through each target player’s active save.
-- The first Phase 3 run stopped before editing because the lab file contains six—not five—profile dirty writes. The corrected integration workflow is staged and no failed-run production edits landed.
+- The first Phase 3 run stopped before editing because the lab file contains six—not five—profile dirty writes. No failed-run production edits landed.
+- The corrected Phase 3 workflow is installed as a branch-push, self-reporting runner. This task-record commit is the clean post-install trigger; on failure it publishes only an exact diagnostic log, never partial source.
 
 Still required:
 - Complete Phase 3 and remove its temporary workflow.
@@ -61,6 +62,7 @@ Still required:
 - Canonical resolver and isolation unit tests passed.
 - Phase 1 foundation compile, focused tests, and complete existing regression suite passed.
 - Phase 2 routed-source compile, focused tests, complete existing regression suite, cleanup, commit, and push passed.
+- Phase 3 self-reporting validation is running from the clean post-install trigger.
 - Final whole-task validation is pending.
 
 ## Cleanup Status
