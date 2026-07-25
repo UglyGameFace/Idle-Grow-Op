@@ -11,6 +11,7 @@ NOTIFICATION_CANDIDATE_LIMIT = 500
 ANNOUNCEMENT_CHANNEL_KEY = "announcement_channel_id"
 GAME_CHANNEL_KEY = "game_channel_id"
 MAJOR_MARKET_CHANGE = 0.20
+MARKET_CHANGE_EPSILON = 1e-9
 
 
 class Tasks(commands.Cog):
@@ -96,13 +97,14 @@ class Tasks(commands.Cog):
                 color=discord.Color.green(),
             )
 
-        if abs(delta) < MAJOR_MARKET_CHANGE:
+        if abs(delta) + MARKET_CHANGE_EPSILON < MAJOR_MARKET_CHANGE:
             return None
 
         direction = "surged" if delta > 0 else "dropped"
+        icon = "📈" if delta > 0 else "📉"
         color = discord.Color.green() if delta > 0 else discord.Color.red()
         return discord.Embed(
-            title=f"📈 Market {direction.title()}",
+            title=f"{icon} Market {direction.title()}",
             description=(
                 f"The local market {direction} from **{previous_multiplier:.2f}x** "
                 f"to **{current_multiplier:.2f}x**.\n"
