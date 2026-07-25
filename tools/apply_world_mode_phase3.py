@@ -155,8 +155,8 @@ replace_once(
 )
 replace_once(
     "sesh.py",
-    "                profile = await self.bot.db.get_profile(\n                    session.guild_id,\n                    member.id,\n                )\n",
-    "                scope = await resolve_game_scope(\n                    self.bot.db, session.guild_id, member.id\n                )\n                profile = await self.bot.db.get_profile(\n                    scope.scope_id,\n                    member.id,\n                )\n",
+    "                profile = await self.bot.db.get_profile(\n                    session.guild_id,\n                    member.id,\n                )\n                gain = min(\n",
+    "                scope = await resolve_game_scope(\n                    self.bot.db, session.guild_id, member.id\n                )\n                profile = await self.bot.db.get_profile(\n                    scope.scope_id,\n                    member.id,\n                )\n                gain = min(\n",
 )
 replace_all(
     "sesh.py",
