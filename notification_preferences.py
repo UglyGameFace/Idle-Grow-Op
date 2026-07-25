@@ -48,12 +48,12 @@ def toggle_notification_preference(
     target: str,
 ) -> NotificationPreferences:
     if target == "all":
-        enabled = not (
+        enable_all = not (
             preferences.enabled
             and preferences.plant_ready
             and preferences.lab_ready
         )
-        return NotificationPreferences(enabled, enabled, enabled)
+        return NotificationPreferences(enable_all, enable_all, enable_all)
 
     plant_ready = preferences.plant_ready
     lab_ready = preferences.lab_ready
@@ -64,8 +64,11 @@ def toggle_notification_preference(
     else:
         raise ValueError(f"Unknown notification preference: {target}")
 
-    enabled = bool(plant_ready or lab_ready)
-    return NotificationPreferences(enabled, plant_ready, lab_ready)
+    return NotificationPreferences(
+        bool(plant_ready or lab_ready),
+        plant_ready,
+        lab_ready,
+    )
 
 
 def role_is_mentionable_by_bot(
@@ -158,16 +161,10 @@ class NotificationPreferencesView(discord.ui.View):
             self.guild_id,
             self.owner_id,
         )
-        view = NotificationPreferencesView(
-            self.cog,
-            self.owner_id,
-            self.guild_id,
-        )
         await interaction.response.edit_message(
             embed=self.cog.build_panel(scope, preferences),
-            view=view,
+            view=self,
         )
-        view.message = self.message
 
     async def toggle(
         self,
@@ -235,11 +232,10 @@ class NotificationPreferencesCog(commands.Cog):
         settings = profile.get("settings", {})
         if not isinstance(settings, dict):
             settings = {}
-        preferences = normalize_notification_preferences(
+        return scope, normalize_notification_preferences(
             settings.get("notifications", True),
             settings.get(NOTIFICATION_CATEGORIES_KEY),
         )
-        return scope, preferences
 
     async def toggle_preference(
         self,
@@ -265,7 +261,9 @@ class NotificationPreferencesCog(commands.Cog):
         scope: GameScope,
         preferences: NotificationPreferences,
     ) -> discord.Embed:
-        status = lambda enabled: "🟢 Enabled" if enabled else "⚪ Disabled"
+        def status(enabled: bool) -> str:
+            return "🟢 Enabled" if enabled else "⚪ Disabled"
+
         embed = discord.Embed(
             title="📟 Private Notification Preferences",
             description=(
@@ -280,7 +278,7 @@ class NotificationPreferencesCog(commands.Cog):
             inline=False,
         )
         embed.add_field(
-            name="All DM alerts",
+            name="DM delivery",
             value=status(preferences.enabled),
             inline=True,
         )
