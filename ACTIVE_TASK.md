@@ -27,6 +27,7 @@ Completed:
 - Added clear provider error classes and secret-safe error routing.
 - Added disabled-by-default guild checks for `/chat`.
 - Added regression contracts for the AI runtime and setup surface.
+- Corrected the trusted integration gate to run the actual optional-AI contract.
 
 Still required:
 - Integrate the Optional AI panel into the canonical `/setup` wizard.
@@ -37,7 +38,8 @@ Still required:
 
 ## Validation Status
 - Initial AI service tests reached the user-facing 401 error contract.
-- Full CI remains intentionally blocked until canonical setup integration lands.
+- Trusted canonical setup integration is retrying with the correct focused tests.
+- Full CI remains blocked until canonical setup integration lands.
 
 ## Cleanup Status
 - No second setup command or compatibility layer.
