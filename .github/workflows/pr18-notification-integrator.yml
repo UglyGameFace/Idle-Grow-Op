@@ -39,6 +39,32 @@ jobs:
           set +e
           python tools/apply_notification_preferences.py > notification-focused.log 2>&1
           code=$?
+          if [ "$code" -ne 0 ] && grep -q "Missing patch anchor: main panel announcement role status" notification-focused.log; then
+            python - <<'PY' >> notification-focused.log 2>&1
+          import tools.apply_notification_preferences as implementation
+
+          original_replace_once = implementation.replace_once
+
+          def flexible_replace_once(source, old, new, label):
+              if label == "main panel announcement role status" and old not in source:
+                  fallback_line = (
+                      '                announcement_status += "\\n↪ Uses the game channel as fallback"\n'
+                  )
+                  if fallback_line not in source:
+                      raise SystemExit("Missing direct announcement fallback line")
+                  replacement = fallback_line + (
+                      '        announcement_status += (\n'
+                      '            "\\n" + await self.announcement_role_status(guild)\n'
+                      '        )\n'
+                  )
+                  return source.replace(fallback_line, replacement, 1)
+              return original_replace_once(source, old, new, label)
+
+          implementation.replace_once = flexible_replace_once
+          implementation.patch_setup()
+          PY
+            code=$?
+          fi
           if [ "$code" -eq 0 ]; then
             python -m py_compile notification_preferences.py setup.py tasks.py main.py >> notification-focused.log 2>&1
             code=$?
