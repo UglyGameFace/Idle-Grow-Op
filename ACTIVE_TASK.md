@@ -33,19 +33,24 @@ In progress:
 - Verified PR #8 is merged into `main`.
 - Created `feature/live-profile-signatures` from current `main`.
 - Inspected the real message listener, profile command, scoped account/profile/world storage, setup UI, startup extension list, and command uniqueness guard.
-- Staged the one-shot integration and validation workflow for the production implementation.
+- Generated the live signature runtime, profile settings, platform validation, privacy persistence, setup controls, and targeted tests.
+- The integration compile and complete pytest gate passed before commit.
 
 Still required:
-- Complete the integration workflow and inspect every generated change.
-- Run compilation, focused tests, complete pytest, command uniqueness, all-extension loading, cleanup, and conflict inspection.
+- Remove generated Python bytecode accidentally staged by the validation command.
+- Inspect every permanent changed file and rerun the repository CI gate.
 - Fix any review or validation findings before opening the final merge request.
 
 ## Validation Status
-- Integration validation is pending.
+- Integration compilation passed.
+- Focused profile-signature tests passed.
+- Complete pytest passed inside the integration workflow.
+- Canonical command uniqueness passed inside the integration workflow.
 
 ## Cleanup Status
-- The temporary integration script and workflow are required to remove themselves in the generated implementation commit.
-- No webhook impersonation, user-message deletion, guessed third-party platform links, or duplicate setup/profile command path is planned.
+- Temporary integration script and workflow removed themselves successfully.
+- A cleanup workflow is removing all `__pycache__`/bytecode artifacts and adding permanent ignore rules.
+- No webhook impersonation, user-message deletion, guessed third-party platform links, or duplicate setup/profile command path exists.
 
 ## Blockers
 - None currently.
