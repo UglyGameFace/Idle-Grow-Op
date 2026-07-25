@@ -51,6 +51,7 @@ Still required:
 - None beyond the final full CI and conflict inspection.
 
 ## Backlog Locked Behind This Task
+- Optional per-server **Live Profile Signature** channels: after a human message, replace the previous bot-owned sticky card with a compact Idle Grow player profile for the latest speaker. Keep it disabled by default, selectable in `/setup`, debounced to prevent spam, persistent across restarts, and never delete/repost user messages or impersonate users through webhooks.
 - Multiplayer/open-world versus solo-world controls.
 - Notification preferences and announcement-role controls.
 - Broader onboarding and first-run guidance.
