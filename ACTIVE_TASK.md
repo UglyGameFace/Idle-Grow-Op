@@ -41,7 +41,7 @@ Route and gate all shared multiplayer value paths:
 
 Solo-safe personal systems remain usable: shops, production, solo heists, laundering, personal stats, and private progression.
 
-The Phase 4 patcher now targets the current AST method boundaries instead of historical string anchors. Its generated code blocks are raw-string preprocessed so embedded newline escapes remain valid Python source. This non-workflow commit triggers the corrected one-shot gate.
+The current-method AST patcher and raw-string source preflight are attached to PR #15's visible CI workflow. This task-record commit triggers the corrected patch, compile, focused-test, full-regression, cleanup, and source-publish sequence.
 
 ## Still Required
 - Complete and clean Phase 4.
@@ -53,7 +53,7 @@ The Phase 4 patcher now targets the current AST method boundaries instead of his
 
 ## Validation Status
 - Ordinary CI is expected to remain red until Phase 4 source lands.
-- The corrected Phase 4 integration either commits compiled and regression-tested source or publishes only an exact diagnostic after resetting partial changes.
+- The visible corrected Phase 4 integration gate is now triggered and will not publish partial gameplay edits.
 
 ## Blockers
 - None.
