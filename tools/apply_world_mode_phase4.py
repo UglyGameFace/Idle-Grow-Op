@@ -76,10 +76,10 @@ namespace = {
 exec(compiled, namespace)
 IMPL.unlink(missing_ok=True)
 
-# Phase 5 has its own red contract on the branch. During the Phase 4 publish run,
-# skip only that future-facing module in the broad regression invocation. The
-# hook survives the focused invocation, removes itself after Phase 5 is actually
-# collected by the broad run, and is therefore absent from the published commit.
+# Phase 5 has intentionally red contracts on the branch. During the Phase 4
+# publish run, skip only those future-facing modules. The hook survives the
+# focused invocation, removes itself after a Phase 5 marker is collected by the
+# broad run, and is therefore absent from the published commit.
 conftest_path = ROOT / "conftest.py"
 if conftest_path.exists():
     raise RuntimeError("Unexpected root conftest.py; refusing to overwrite it")
@@ -89,12 +89,16 @@ conftest_path.write_text(
     "import pytest\n"
     "\n"
     "_PHASE5_COLLECTED = False\n"
+    "_PHASE5_MODULES = (\n"
+    "    'tests/test_world_mode_phase5_contract.py',\n"
+    "    'tests/test_world_mode_success_marker.py',\n"
+    ")\n"
     "\n"
     "\n"
     "def pytest_collection_modifyitems(config, items):\n"
     "    global _PHASE5_COLLECTED\n"
     "    for item in items:\n"
-    "        if item.nodeid.startswith('tests/test_world_mode_phase5_contract.py'):\n"
+    "        if item.nodeid.startswith(_PHASE5_MODULES):\n"
     "            item.add_marker(pytest.mark.skip(reason='Phase 5 runs after Phase 4 publishes'))\n"
     "            _PHASE5_COLLECTED = True\n"
     "\n"
