@@ -67,7 +67,8 @@ def _ready_plant_count(profile: dict[str, Any], world: dict[str, Any], now: floa
     for plant in profile.get("plants", []) or []:
         if not isinstance(plant, dict):
             continue
-        planted_at = float(plant.get("planted_at", now) or now)
+        raw_planted_at = plant.get("planted_at")
+        planted_at = now if raw_planted_at is None else float(raw_planted_at)
         if now - planted_at >= get_plant_grow_time(profile, world, plant):
             ready += 1
     return ready

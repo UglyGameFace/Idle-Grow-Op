@@ -30,6 +30,7 @@ GAME_EXTENSIONS = (
     "gambling",
     "lab",
     "notification_preferences",
+    "onboarding",
     "progression",
     "quick",
     "profile_signatures",
@@ -127,7 +128,7 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
     if isinstance(error, commands.CommandOnCooldown):
         return await ctx.send(f"⏳ Try again in **{error.retry_after:.1f}s**.")
     if isinstance(error, commands.MissingRequiredArgument):
-        return await ctx.send(f"❌ Missing `{error.param.name}`. Try `!help` for usage.")
+        return await ctx.send(f"❌ Missing `{error.param.name}`. Try `/help` for usage.")
     if isinstance(error, commands.BadArgument):
         return await ctx.send("❌ I couldn't understand one of those values. Check the command usage and try again.")
     if isinstance(error, commands.CheckFailure):
@@ -179,7 +180,7 @@ async def on_ready():
     logger.info("Database: verified guild-scoped Supabase")
     logger.info("Loaded extensions: %s", ", ".join(sorted(bot.extensions)))
     logger.info("=" * 40)
-    await bot.change_presence(activity=discord.Game(name="!help | Growing 🌿"))
+    await bot.change_presence(activity=discord.Game(name="/help • /start • Growing 🌿"))
 
 
 async def load_extensions() -> None:

@@ -79,7 +79,7 @@ def test_growing_plant_uses_status_until_watering_is_due():
         "level": 1,
         "plants": [
             {
-                "strain": "schwag",
+                "strain": "mexican brick",
                 "planted_at": 900,
                 "last_watered": 900,
                 "water_count": 1,
