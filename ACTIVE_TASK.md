@@ -47,7 +47,7 @@ Completed on the feature branch:
 In progress:
 - Phase 3 routes lab queues/valuation, all casino settlements, Sesh participant XP, and profile/signature rendering through each target player’s active save.
 - The first Phase 3 run stopped before editing because the lab file contains six—not five—profile dirty writes. No failed-run production edits landed.
-- GitHub ignored newly introduced standalone workflow triggers, so Phase 3 is temporarily attached to the proven CI workflow as one deterministic pipeline. This is its clean trigger. Failure publishes only `PHASE3_DIAGNOSTIC.log` after resetting partial edits; success commits only compiled and regression-tested source.
+- All temporary integration wiring is now present before this non-workflow commit. The proven CI pipeline will either publish only `PHASE3_DIAGNOSTIC.log` after resetting partial edits or commit only compiled and regression-tested Phase 3 source.
 
 Still required:
 - Complete Phase 3 and restore the normal CI workflow/remove temporary Phase 3 files.
@@ -62,7 +62,7 @@ Still required:
 - Canonical resolver and isolation unit tests passed.
 - Phase 1 foundation compile, focused tests, and complete existing regression suite passed.
 - Phase 2 routed-source compile, focused tests, complete existing regression suite, cleanup, commit, and push passed.
-- Phase 3 deterministic validation is running through the existing repository CI workflow.
+- Phase 3 deterministic validation is triggered by this final non-workflow event.
 - Final whole-task validation is pending.
 
 ## Cleanup Status
