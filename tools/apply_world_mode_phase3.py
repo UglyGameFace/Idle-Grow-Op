@@ -1,7 +1,25 @@
 from pathlib import Path
+import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def publish_failure(message: str) -> None:
+    temporary = Path("/tmp/PHASE3_PATCH_FAILURE.log")
+    temporary.write_text(message + "\n", encoding="utf-8")
+    subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=ROOT, check=True)
+    diagnostic = ROOT / "PHASE3_PATCH_FAILURE.log"
+    diagnostic.write_text(temporary.read_text(encoding="utf-8"), encoding="utf-8")
+    subprocess.run(["git", "config", "user.name", "github-actions[bot]"], cwd=ROOT, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"],
+        cwd=ROOT,
+        check=True,
+    )
+    subprocess.run(["git", "add", "PHASE3_PATCH_FAILURE.log"], cwd=ROOT, check=True)
+    subprocess.run(["git", "commit", "-m", "Record exact world mode phase 3 patch failure"], cwd=ROOT, check=True)
+    subprocess.run(["git", "push", "origin", "HEAD:feature/world-mode-controls"], cwd=ROOT, check=True)
 
 
 def replace_once(path: str, old: str, new: str) -> None:
@@ -9,7 +27,9 @@ def replace_once(path: str, old: str, new: str) -> None:
     source = target.read_text(encoding="utf-8")
     count = source.count(old)
     if count != 1:
-        raise RuntimeError(f"expected one anchor in {path}: {old!r}; found {count}")
+        message = f"expected one anchor in {path}: {old!r}; found {count}"
+        publish_failure(message)
+        raise RuntimeError(message)
     target.write_text(source.replace(old, new, 1), encoding="utf-8")
 
 
@@ -18,7 +38,9 @@ def replace_all(path: str, old: str, new: str, expected: int) -> None:
     source = target.read_text(encoding="utf-8")
     count = source.count(old)
     if count != expected:
-        raise RuntimeError(f"expected {expected} anchors in {path}: {old!r}; found {count}")
+        message = f"expected {expected} anchors in {path}: {old!r}; found {count}"
+        publish_failure(message)
+        raise RuntimeError(message)
     target.write_text(source.replace(old, new), encoding="utf-8")
 
 
