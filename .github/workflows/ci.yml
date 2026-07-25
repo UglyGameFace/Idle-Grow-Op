@@ -148,8 +148,9 @@ jobs:
 
   integrate_world_mode_phase4:
     if: >-
-      github.event.pull_request.base.ref == 'feature/world-mode-controls' &&
-      github.event.pull_request.head.ref == 'chore/world-mode-phase4-trigger'
+      github.actor != 'github-actions[bot]' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.ref == 'feature/world-mode-controls'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -176,39 +177,72 @@ jobs:
           python -m pip install -q --upgrade pip
           python -m pip install -q -r requirements.txt pytest
 
-      - name: Apply phase 4 multiplayer routing
+      - name: Apply Phase 4 multiplayer routing
         id: patch
         run: |
           set +e
-          python tools/apply_world_mode_phase4.py > phase4-patch.log 2>&1
+          python - <<'PY' > phase4-diagnostic.log 2>&1
+          from __future__ import annotations
+
+          import io
+          import token
+          import tokenize
+          from pathlib import Path
+
+          path = Path('tools/apply_world_mode_phase4.py')
+          source = path.read_text(encoding='utf-8')
+          rewritten_tokens = []
+          converted = 0
+          for item in tokenize.generate_tokens(io.StringIO(source).readline):
+              if item.type == token.STRING and item.string.startswith(("'''", '"""')):
+                  item = tokenize.TokenInfo(
+                      item.type,
+                      'r' + item.string,
+                      item.start,
+                      item.end,
+                      item.line,
+                  )
+                  converted += 1
+              rewritten_tokens.append(item)
+          if converted < 10:
+              raise RuntimeError(f'Expected generated source blocks; converted only {converted}')
+          rewritten = tokenize.untokenize(rewritten_tokens)
+          compile(rewritten, str(path), 'exec')
+          path.write_text(rewritten, encoding='utf-8')
+          print(f'Converted {converted} generated blocks to raw strings')
+          PY
           code=$?
+          if [ "$code" -eq 0 ]; then
+            python tools/apply_world_mode_phase4.py >> phase4-diagnostic.log 2>&1
+            code=$?
+          fi
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           exit 0
 
-      - name: Upload phase 4 patch log
+      - name: Upload Phase 4 patch log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: phase4-patch-log
-          path: phase4-patch.log
+          path: phase4-diagnostic.log
           if-no-files-found: warn
           retention-days: 3
 
       - name: Fail when patch application fails
         if: steps.patch.outputs.exit_code != '0'
         run: |
-          cat phase4-patch.log
+          cat phase4-diagnostic.log
           exit 1
 
-      - name: Remove temporary patch script
+      - name: Remove temporary Phase 4 artifacts
         if: steps.patch.outputs.exit_code == '0'
-        run: rm -f tools/apply_world_mode_phase4.py phase4-patch.log
+        run: rm -f tools/apply_world_mode_phase4.py phase4-diagnostic.log PHASE4_PATCH_FAILURE.log
 
-      - name: Compile phase 4 sources
+      - name: Compile Phase 4 sources
         if: steps.patch.outputs.exit_code == '0'
         run: python -m compileall -q .
 
-      - name: Run focused phase 4 tests
+      - name: Run focused Phase 4 tests
         if: steps.patch.outputs.exit_code == '0'
         run: |
           python -m pytest -q \
@@ -222,41 +256,18 @@ jobs:
 
       - name: Run complete pre-background regression suite
         if: steps.patch.outputs.exit_code == '0'
-        id: regressions
-        run: |
-          set +e
-          python -m pytest -q --tb=short -x \
-            --ignore=tests/test_world_mode_integration_contract.py \
-            > phase4-regression.log 2>&1
-          code=$?
-          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
-          exit 0
-
-      - name: Upload phase 4 regression log
-        if: steps.patch.outputs.exit_code == '0' && always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: phase4-regression-log
-          path: phase4-regression.log
-          if-no-files-found: warn
-          retention-days: 3
-
-      - name: Fail when regressions fail
-        if: steps.patch.outputs.exit_code == '0' && steps.regressions.outputs.exit_code != '0'
-        run: |
-          cat phase4-regression.log
-          exit 1
+        run: python -m pytest -q --tb=short -x --ignore=tests/test_world_mode_integration_contract.py
 
       - name: Inspect cleanup and whitespace
         if: steps.patch.outputs.exit_code == '0'
         run: |
           find . -type d -name __pycache__ -prune -exec rm -rf {} +
           find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
-          rm -f phase4-regression.log
           git diff --check
           test ! -f tools/apply_world_mode_phase4.py
+          test ! -f PHASE4_PATCH_FAILURE.log
 
-      - name: Commit and push validated phase 4 source
+      - name: Commit and push validated Phase 4 source
         if: steps.patch.outputs.exit_code == '0'
         run: |
           git config user.name 'github-actions[bot]'
