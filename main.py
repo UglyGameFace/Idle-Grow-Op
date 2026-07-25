@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
-ERROR_LOG_CHANNEL_ID = int(os.getenv("ERROR_LOG_CHANNEL_ID", "0") or 0)
 
 GAME_EXTENSIONS = (
     "admin",
@@ -33,6 +32,7 @@ GAME_EXTENSIONS = (
     "progression",
     "quick",
     "sesh",
+    "setup",
     "social",
     "tasks",
 )
@@ -45,16 +45,37 @@ intents.presences = True
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 
-async def _report_error(title: str, detail: str) -> None:
+async def _configured_error_channel(guild_id: int | None):
+    if guild_id is None or not hasattr(bot, "db"):
+        return None
+    guild = bot.get_guild(int(guild_id))
+    if guild is None:
+        return None
+    try:
+        world = await bot.db.get_world(int(guild_id))
+        channel_id = world.get("settings", {}).get("error_log_channel_id")
+    except Exception:
+        logger.exception("Failed to resolve error channel for guild %s", guild_id)
+        return None
+    if not channel_id:
+        return None
+    channel = guild.get_channel(int(channel_id))
+    return channel if isinstance(channel, discord.TextChannel) else None
+
+
+async def _report_error(title: str, detail: str, *, guild_id: int | None) -> None:
     logger.error("%s | %s", title, detail)
-    if not ERROR_LOG_CHANNEL_ID or not bot.is_ready():
-        return
-    channel = bot.get_channel(ERROR_LOG_CHANNEL_ID)
+    channel = await _configured_error_channel(guild_id)
     if channel is None:
-        try:
-            channel = await bot.fetch_channel(ERROR_LOG_CHANNEL_ID)
-        except (discord.HTTPException, discord.NotFound, discord.Forbidden):
-            return
+        return
+    guild = channel.guild
+    member = guild.me
+    if member is None:
+        return
+    permissions = channel.permissions_for(member)
+    if not (permissions.view_channel and permissions.send_messages and permissions.embed_links):
+        logger.warning("Configured error channel is unusable for guild %s", guild.id)
+        return
     try:
         await channel.send(
             embed=discord.Embed(
@@ -64,7 +85,7 @@ async def _report_error(title: str, detail: str) -> None:
             )
         )
     except discord.HTTPException:
-        logger.exception("Failed to send command error to configured log channel")
+        logger.exception("Failed to send command error to guild %s", guild.id)
 
 
 @bot.event
@@ -81,14 +102,15 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
         return await ctx.send("❌ You cannot use that command here.")
 
     original = getattr(error, "original", error)
+    guild_id = getattr(ctx.guild, "id", None)
     context = (
         f"command={getattr(ctx.command, 'qualified_name', 'unknown')} "
-        f"guild={getattr(ctx.guild, 'id', None)} channel={getattr(ctx.channel, 'id', None)} "
+        f"guild={guild_id} channel={getattr(ctx.channel, 'id', None)} "
         f"user={getattr(ctx.author, 'id', None)} error={type(original).__name__}: {original}"
     )
-    await _report_error("Prefix command failure", context)
+    await _report_error("Prefix command failure", context, guild_id=guild_id)
     try:
-        await ctx.send("❌ Something went wrong running that command. The error was logged.")
+        await ctx.send("❌ Something went wrong running that command. The error was recorded.")
     except discord.HTTPException:
         pass
 
@@ -100,8 +122,8 @@ async def _tree_error(interaction: discord.Interaction, error: app_commands.AppC
         f"guild={interaction.guild_id} channel={interaction.channel_id} user={interaction.user.id} "
         f"error={type(original).__name__}: {original}"
     )
-    await _report_error("Slash command failure", detail)
-    message = "❌ Something went wrong running that command. The error was logged."
+    await _report_error("Slash command failure", detail, guild_id=interaction.guild_id)
+    message = "❌ Something went wrong running that command. The error was recorded."
     try:
         if interaction.response.is_done():
             await interaction.followup.send(message, ephemeral=True)
