@@ -140,3 +140,26 @@ def test_explicit_platform_sharing_enables_platform_visibility_in_source():
     assert 'if entry.get("shared", False):' in source
     assert 'visible.add("platforms")' in source
     assert "_safe_display(entry['username'], limit=80)" in source
+
+
+def test_generation_bump_cancels_only_the_pending_debounce_task():
+    import asyncio
+
+    from profile_signatures import ProfileSignatures
+
+    class BotStub:
+        guilds = []
+
+    async def scenario():
+        cog = ProfileSignatures(BotStub())
+        key = (1, 2)
+        pending = asyncio.create_task(asyncio.sleep(60))
+        cog._pending[key] = pending
+        generation = cog._bump_channel_generation(key)
+        await asyncio.sleep(0)
+        assert generation == 1
+        assert cog._channel_generation[key] == 1
+        assert key not in cog._pending
+        assert pending.cancelled()
+
+    asyncio.run(scenario())

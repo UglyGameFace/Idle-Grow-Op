@@ -23,7 +23,7 @@ def test_live_signatures_have_one_persisted_bot_owned_card_per_channel():
 
 def test_repeated_messages_are_debounced_and_same_speaker_is_suppressed():
     assert "SIGNATURE_DEBOUNCE_SECONDS" in SOURCE
-    assert "previous.cancel()" in SOURCE
+    assert "pending.cancel()" in SOURCE
     assert "if self._pending.get(key) is task:" in SOURCE
     assert "self._pending.pop(key, None)" in SOURCE
     assert "self._channel_generation.get(key) != generation" in SOURCE
@@ -43,6 +43,16 @@ def test_restart_reconciliation_collapses_duplicate_signature_cards():
     assert "keep = cards[0] if cards else None" in SOURCE
     assert "for duplicate in cards[1:]" in SOURCE
     assert "await duplicate.delete()" in SOURCE
+    assert "async def _discover_owned_signatures" in SOURCE
+
+
+def test_privacy_and_configuration_changes_invalidate_in_flight_cards():
+    assert "def _bump_channel_generation" in SOURCE
+    assert "latest_config = await self._get_signature_config(guild.id)" in SOURCE
+    assert "rebuilt = await self._build_signature(guild, member, latest_config)" in SOURCE
+    assert "async with self._lock_for(*key):" in SOURCE
+    assert "current_world = await self.bot.db.get_world(guild.id)" in SOURCE
+    assert "await sent.delete()" in SOURCE
 
 
 def test_platforms_and_privacy_use_scoped_persistence():
