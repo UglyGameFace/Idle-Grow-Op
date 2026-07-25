@@ -38,7 +38,24 @@ jobs:
           python -m pip install -q -r requirements.txt pytest
 
       - name: Apply phase 3 routing
-        run: python tools/apply_world_mode_phase3.py
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tools/apply_world_mode_phase3.py')
+          source = path.read_text(encoding='utf-8')
+          old = '''    "self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)",
+    "self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)",
+    5,
+)'''
+          new = '''    "self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)",
+    "self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)",
+    6,
+)'''
+          if source.count(old) != 1:
+              raise RuntimeError('lab dirty-count patch anchor changed')
+          path.write_text(source.replace(old, new, 1), encoding='utf-8')
+          PY
+          python tools/apply_world_mode_phase3.py
 
       - name: Remove temporary patch script
         run: rm -f tools/apply_world_mode_phase3.py
