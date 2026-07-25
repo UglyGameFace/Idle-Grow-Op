@@ -12,6 +12,11 @@ from discord.ext import commands
 from persistence_context import GuildContextRequired, require_guild_id
 from progression_core import add_progress, check_achievements
 from utils import GAMBLE_CONFIG, SLOTS_PAYOUTS, SLOTS_SYMBOLS, jail_guard
+from world_modes import (
+    WorldModeDenied,
+    require_multiplayer,
+    resolve_game_scope,
+)
 
 _SUFFIX = {"k": 1_000, "m": 1_000_000, "b": 1_000_000_000}
 GAME_METRICS = {
@@ -124,11 +129,11 @@ def _record_win(profile: dict, user_id: int) -> None:
 
 
 class BlackjackView(discord.ui.View):
-    def __init__(self, cog: "Gambling", ctx, guild_id: int, user_id: int, bet: int, deck, player, dealer):
+    def __init__(self, cog: "Gambling", ctx, scope_id: int, user_id: int, bet: int, deck, player, dealer):
         super().__init__(timeout=60)
         self.cog = cog
         self.ctx = ctx
-        self.guild_id = guild_id
+        self.scope_id = scope_id
         self.user_id = user_id
         self.bet = bet
         self.deck = deck
@@ -171,7 +176,7 @@ class BlackjackView(discord.ui.View):
                 return
             self.ended = True
             async with self.cog.bot.db.lock:
-                profile = await self.cog.bot.db.get_profile(self.guild_id, self.user_id)
+                profile = await self.cog.bot.db.get_profile(self.scope_id, self.user_id)
                 if timeout_refund:
                     profile["grams"] = int(profile.get("grams", 0) or 0) + self.bet
                     title, color = "🃏 Blackjack expired — wager refunded", discord.Color.gold()
@@ -187,7 +192,7 @@ class BlackjackView(discord.ui.View):
                 else:
                     update_gamble_stats(profile, "blackjack", -self.bet, self.bet)
                     title, color = f"🃏 Lost {_fmt_cash(self.bet)}", discord.Color.red()
-                self.cog.bot.db.mark_profile_dirty(self.guild_id, self.user_id)
+                self.cog.bot.db.mark_profile_dirty(self.scope_id, self.user_id)
             self.clear_items()
             embed = discord.Embed(title=title, color=color)
             embed.add_field(name="Your Hand", value=f"{self.cards(self.player)}\nValue: **{self.value(self.player)}**")
@@ -239,15 +244,17 @@ class Gambling(commands.Cog):
     async def _profile(self, ctx, user_id: int | None = None):
         guild_id = require_guild_id(ctx)
         resolved = ctx.author.id if user_id is None else user_id
-        return guild_id, await self.bot.db.get_profile(guild_id, resolved)
+        scope = await resolve_game_scope(self.bot.db, guild_id, resolved)
+        return scope, await self.bot.db.get_profile(scope.scope_id, resolved)
 
     async def _usage(self, ctx, title: str, *examples: str):
         await ctx.send(embed=discord.Embed(title=title, description="**Examples:**\n" + "\n".join(f"• `{x}`" for x in examples), color=0x9B59B6))
 
     async def _atomic_game(self, ctx, raw_bet, game: str, resolver, *, min_bet=10, max_bet=None):
         guild_id = require_guild_id(ctx)
+        scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
         async with self.bot.db.lock:
-            profile = await self.bot.db.get_profile(guild_id, ctx.author.id)
+            profile = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
             if await jail_guard(ctx, profile, "gamble"):
                 return None
             balance = max(0, int(profile.get("grams", 0) or 0))
@@ -263,18 +270,19 @@ class Gambling(commands.Cog):
             update_gamble_stats(profile, game, net, bet)
             if net > 0:
                 _record_win(profile, ctx.author.id)
-            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
         return bet, result
 
     @commands.hybrid_command(name="casino", aliases=["gambleprofile"])
     async def casino_profile(self, ctx, target: discord.User = None):
         target = target or ctx.author
-        _, profile = await self._profile(ctx, target.id)
+        scope, profile = await self._profile(ctx, target.id)
         stats = profile.get("stats", {}) or {}
         wins = int(stats.get("gambler_wins", 0) or 0)
         losses = int(stats.get("gambler_losses", 0) or 0)
         profit = int(stats.get("casino_total_profit", 0) or 0)
         embed = discord.Embed(title=f"🎰 {target.name}'s Gambling Record", color=0x9B59B6)
+        embed.description = f"**Active save:** {scope.emoji} {scope.label}"
         embed.add_field(name="Net Profit", value=f"{'+' if profit >= 0 else '-'}{_fmt_cash(abs(profit))}", inline=False)
         embed.add_field(name="Activity", value=f"Bets: **{int(stats.get('casino_total_bets', 0) or 0):,}**\nWagered: **{_fmt_cash(int(stats.get('casino_total_wagered', 0) or 0))}**")
         total = wins + losses
@@ -289,8 +297,15 @@ class Gambling(commands.Cog):
     @commands.hybrid_command(name="casinolb", aliases=["clb", "gamblinglb"])
     async def casinolb(self, ctx, game: str = "all"):
         guild_id = require_guild_id(ctx)
+        scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
+        try:
+            require_multiplayer(scope, "leaderboard")
+        except WorldModeDenied as exc:
+            return await ctx.send(str(exc))
         metric = GAME_METRICS.get(_norm(game), "casino_total_profit")
-        rows = await self.bot.db.list_guild_casino_leaderboard(guild_id, metric=metric, limit=10)
+        rows = await self.bot.db.list_guild_casino_leaderboard(
+            scope.scope_id, metric=metric, limit=10
+        )
         lines = []
         for index, row in enumerate(rows):
             uid, amount = int(row[0]), int(row[1])
@@ -413,24 +428,25 @@ class Gambling(commands.Cog):
     @commands.hybrid_command(name="blackjack", aliases=["bj"])
     async def blackjack(self, ctx, bet: str="200"):
         guild_id=require_guild_id(ctx)
+        scope=await resolve_game_scope(self.bot.db,guild_id,ctx.author.id)
         async with self.bot.db.lock:
-            profile=await self.bot.db.get_profile(guild_id,ctx.author.id)
+            profile=await self.bot.db.get_profile(scope.scope_id,ctx.author.id)
             if await jail_guard(ctx,profile,"gamble"): return
             wager=_parse_bet(bet,int(profile.get("grams",0) or 0),min_bet=int(_cfg("blackjack_min_bet",200)))
             if wager is None: return await ctx.send("❌ Invalid bet or insufficient funds.")
-            profile["grams"]-=wager; self.bot.db.mark_profile_dirty(guild_id,ctx.author.id)
+            profile["grams"]-=wager; self.bot.db.mark_profile_dirty(scope.scope_id,ctx.author.id)
         deck=[2,3,4,5,6,7,8,9,10,"J","Q","K","A"]*4; random.shuffle(deck); player=[deck.pop(),deck.pop()]; dealer=[deck.pop(),deck.pop()]
-        view=BlackjackView(self,ctx,guild_id,ctx.author.id,wager,deck,player,dealer)
+        view=BlackjackView(self,ctx,scope.scope_id,ctx.author.id,wager,deck,player,dealer)
         if view.value(player) == 21:
             result = "tie" if view.value(dealer) == 21 else "win"
             payout = wager if result == "tie" else int(wager * 2.5)
             async with self.bot.db.lock:
-                profile = await self.bot.db.get_profile(guild_id, ctx.author.id)
+                profile = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
                 profile["grams"] = int(profile.get("grams", 0) or 0) + payout
                 update_gamble_stats(profile, "blackjack", payout - wager, wager)
                 if result == "win":
                     _record_win(profile, ctx.author.id)
-                self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
             if result == "tie":
                 await ctx.send("🃏 **PUSH!** Both have 21. Wager returned.")
             else:

@@ -14,6 +14,7 @@ import discord
 from discord.ext import commands
 
 from persistence_context import GuildContextRequired, require_guild_id
+from world_modes import mark_game_profile_dirty, resolve_game_scope
 
 
 logger = logging.getLogger(__name__)
@@ -630,8 +631,11 @@ class Sesh(commands.Cog):
                     if voice and (voice.self_mute or voice.mute)
                     else 1
                 )
+                scope = await resolve_game_scope(
+                    self.bot.db, session.guild_id, member.id
+                )
                 profile = await self.bot.db.get_profile(
-                    session.guild_id,
+                    scope.scope_id,
                     member.id,
                 )
                 gain = min(
@@ -645,10 +649,7 @@ class Sesh(commands.Cog):
                         int(social_stats.get("sesh_xp", 0)) + gain
                     )
                     state.total_awarded += gain
-                    self.bot.db.mark_profile_dirty(
-                        session.guild_id,
-                        member.id,
-                    )
+                    mark_game_profile_dirty(self.bot.db, scope, member.id)
 
                 minutes = int((now - state.joined_at) // 60)
                 for milestone, bonus in zip(
@@ -667,10 +668,7 @@ class Sesh(commands.Cog):
                         profile["xp"] += reward
                         state.total_awarded += reward
                         state.streak_awarded.add(milestone)
-                        self.bot.db.mark_profile_dirty(
-                            session.guild_id,
-                            member.id,
-                        )
+                        mark_game_profile_dirty(self.bot.db, scope, member.id)
 
             for user_id, state in session.participants.items():
                 if user_id not in present and state.left_at is None:
@@ -732,15 +730,15 @@ class Sesh(commands.Cog):
         reward = min(5, SESH_XP_MAX_PER_USER - state.total_awarded)
         async with self.bot.db.lock:
             if reward:
+                scope = await resolve_game_scope(
+                    self.bot.db, session.guild_id, member.id
+                )
                 profile = await self.bot.db.get_profile(
-                    session.guild_id,
+                    scope.scope_id,
                     member.id,
                 )
                 profile["xp"] = int(profile.get("xp", 0)) + reward
-                self.bot.db.mark_profile_dirty(
-                    session.guild_id,
-                    member.id,
-                )
+                mark_game_profile_dirty(self.bot.db, scope, member.id)
                 state.total_awarded += reward
             state.rotation_awarded += 1
             state.last_rotation_at = now

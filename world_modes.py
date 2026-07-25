@@ -562,6 +562,9 @@ class PlayerWorldModeView(discord.ui.View):
         except WorldModeError as exc:
             await interaction.response.send_message(f"❌ {exc}", ephemeral=True)
             return
+        signatures = self.cog.bot.get_cog("ProfileSignatures")
+        if signatures is not None and hasattr(signatures, "remove_user_cards"):
+            await signatures.remove_user_cards(self.guild_id, self.owner_id)
         await interaction.response.edit_message(
             embed=await build_player_mode_embed(
                 self.cog.bot.db,
@@ -611,6 +614,9 @@ class ConfirmWorldPolicyView(discord.ui.View):
     @discord.ui.button(label="Confirm Change", emoji="✅", style=discord.ButtonStyle.success)
     async def confirm(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
         await set_server_policy(self.cog.bot.db, self.guild_id, self.policy)
+        signatures = self.cog.bot.get_cog("ProfileSignatures")
+        if signatures is not None and hasattr(signatures, "invalidate_guild_cards"):
+            await signatures.invalidate_guild_cards(interaction.guild)
         await interaction.response.edit_message(
             embed=await build_server_mode_embed(self.cog.bot.db, interaction.guild),
             view=ServerWorldModeView(self.cog, self.owner_id, self.guild_id),

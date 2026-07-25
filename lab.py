@@ -14,6 +14,11 @@ from economy_integrity import (
     split_reservation_penalty,
 )
 from persistence_context import require_guild_id
+from world_modes import (
+    effective_market_multiplier,
+    processing_queue_limit,
+    resolve_game_scope,
+)
 from utils import (
     CONCENTRATE_TYPES,
     SafeView,
@@ -39,13 +44,14 @@ def _lab_prestige_mult(user):
     return 1.0 + (prestige * 0.05)
 
 
-def _lab_market_value(user, world, base_value):
-    market_mult = float(world.get("market_multiplier", 1.0))
+def _lab_market_value(user, world, base_value, scope):
+    market_mult = effective_market_multiplier(world, scope)
     prestige_mult = _lab_prestige_mult(user)
     district_mult = 1.0
     district = world.get("district", {})
     if (
-        district.get("owner_crew_id") == user.get("crew_id")
+        scope.multiplayer
+        and district.get("owner_crew_id") == user.get("crew_id")
         and time.time() < float(district.get("expires_at", 0) or 0)
     ):
         district_mult = float(district.get("multiplier", 1.10))
@@ -101,7 +107,8 @@ class Lab(commands.Cog):
     @commands.hybrid_command(name="process", aliases=["cook"])
     async def process(self, ctx, concentrate_type: str = None, amount: str = "1"):
         guild_id = require_guild_id(ctx)
-        user = await self.bot.db.get_profile(guild_id, ctx.author.id)
+        scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
+        user = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
         if await jail_guard(ctx, user, "process"):
             return
 
@@ -142,6 +149,13 @@ class Lab(commands.Cog):
         duration = 300 * qty
 
         async with self.bot.db.lock:
+            queue = user.setdefault("processing_queue", [])
+            queue_cap = processing_queue_limit(scope)
+            if queue_cap is not None and len(queue) >= queue_cap:
+                return await ctx.send(
+                    f"🔒 Solo Grow allows **{queue_cap} active lab batches** at a time. "
+                    "Collect a completed batch before starting another."
+                )
             if int(user.get("level", 1)) < required_level:
                 return await ctx.send(f"🔒 **Level {required_level} Required.**")
             if required_tool and not has_item(user, required_tool):
@@ -157,7 +171,7 @@ class Lab(commands.Cog):
                     f"(You have {total_flower}g)."
                 )
 
-            user.setdefault("processing_queue", []).append(
+            queue.append(
                 {
                     "type": c_type,
                     "amount": qty,
@@ -168,7 +182,7 @@ class Lab(commands.Cog):
                 }
             )
             add__progress(user, "process_dabs", qty)
-            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
         embed = discord.Embed(
             title="⚗️ **Extraction Started**",
@@ -183,7 +197,8 @@ class Lab(commands.Cog):
     async def collect(self, ctx):
         """Collect all completed queued concentrate batches exactly once."""
         guild_id = require_guild_id(ctx)
-        user = await self.bot.db.get_profile(guild_id, ctx.author.id)
+        scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
+        user = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
         now = time.time()
         collected: dict[str, int] = {}
 
@@ -218,7 +233,7 @@ class Lab(commands.Cog):
             stats["concentrate_made"] = max(0, int(stats.get("concentrate_made", 0))) + sum(
                 collected.values()
             )
-            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
         summary = "\n".join(f"• **{qty}g {name.title()}**" for name, qty in collected.items())
         await ctx.send(f"📦 **Lab collection complete:**\n{summary}")
@@ -227,8 +242,9 @@ class Lab(commands.Cog):
     async def conc(self, ctx, user_target: discord.Member = None):
         guild_id = require_guild_id(ctx)
         target = user_target or ctx.author
-        player = await self.bot.db.get_profile(guild_id, target.id)
-        world = await self.bot.db.get_world(guild_id)
+        scope = await resolve_game_scope(self.bot.db, guild_id, target.id)
+        player = await self.bot.db.get_profile(scope.scope_id, target.id)
+        world = await self.bot.db.get_world(scope.scope_id)
         concentrates = player.get("concentrates", {})
         queue = player.get("processing_queue", [])
 
@@ -238,6 +254,7 @@ class Lab(commands.Cog):
             return await ctx.send(f"🧪 **{target.display_name}** has no concentrates.")
 
         embed = discord.Embed(title=f"🧪 {target.display_name}'s Concentrates", color=0x9B59B6)
+        embed.description = f"**Active save:** {scope.emoji} {scope.label}"
         conc_lines = []
         total_value = 0
         for conc_type, raw_amount in concentrates.items():
@@ -246,7 +263,7 @@ class Lab(commands.Cog):
                 continue
             conc_data = CONCENTRATE_TYPES.get(conc_type, {"value_mult": 3.0})
             base_total = 500 * float(conc_data.get("value_mult", 3.0)) * amount
-            final_value = _lab_market_value(player, world, base_total)
+            final_value = _lab_market_value(player, world, base_total, scope)
             total_value += final_value
             conc_lines.append(f"**{conc_type.title()}:** {amount}g (≈${final_value:,})")
         if conc_lines:
@@ -276,7 +293,8 @@ class Lab(commands.Cog):
     async def lab(self, ctx, conc_type: str = "shatter", amount: int = 10):
         """Play the manual extraction minigame with flower reserved up front."""
         guild_id = require_guild_id(ctx)
-        user = await self.bot.db.get_profile(guild_id, ctx.author.id)
+        scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
+        user = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
         if await jail_guard(ctx, user, "lab"):
             return
 
@@ -304,7 +322,7 @@ class Lab(commands.Cog):
                 reservation = reserve_flower(stash, needed_flower)
             except ValueError:
                 return await ctx.send(f"🌿 **Not enough flower.** Need {needed_flower}g.")
-            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
         target = random.randint(40, 75)
         view = LabMinigameView(ctx.author.id, c_type, qty, target)
@@ -340,7 +358,7 @@ class Lab(commands.Cog):
         if not view.pressed:
             async with self.bot.db.lock:
                 restore_flower(user.setdefault("flower_stash", {}), reservation)
-                self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
             await msg.edit(content="💥 **Timeout!** Reserved flower was returned.", view=None)
             return
 
@@ -352,7 +370,7 @@ class Lab(commands.Cog):
                 add__progress(user, "process_dabs", qty)
                 stats = user.setdefault("stats", {})
                 stats["concentrate_made"] = max(0, int(stats.get("concentrate_made", 0))) + qty
-                self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
             await ctx.send(f"💎 **Success!** Created **{qty}g {c_type.title()}**.")
             if level_up:
                 await ctx.send(f"🎉 **Level Up!** You are now level {level_up}!")
@@ -362,7 +380,7 @@ class Lab(commands.Cog):
         _, refundable = split_reservation_penalty(reservation, penalty)
         async with self.bot.db.lock:
             restore_flower(user.setdefault("flower_stash", {}), refundable)
-            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
         await ctx.send(f"💥 **Failed!** Lost {penalty}g flower; the rest was returned.")
 
 
