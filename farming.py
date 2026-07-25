@@ -6,6 +6,7 @@ from discord.ext import commands
 
 from economy_integrity import calculate_harvest_outcome
 from persistence_context import require_guild_id
+from world_modes import effective_pot_capacity, resolve_game_scope
 from utils import (
     GROWTH_CYCLES,
     check_achievements,
@@ -39,7 +40,8 @@ class Farming(commands.Cog):
     async def plant(self, ctx, *, strain_name: str = ""):
         """Plant a seed in the current server's grow operation."""
         guild_id = require_guild_id(ctx)
-        user = await self.bot.db.get_profile(guild_id, ctx.author.id)
+        scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
+        user = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
         if await jail_guard(ctx, user, "plant"):
             return
 
@@ -53,7 +55,7 @@ class Farming(commands.Cog):
             return await ctx.send(f"❌ Unknown strain: **{clean_name}**. Check `!strains`.")
 
         strain_info = GROWTH_CYCLES[clean_name]
-        world = await self.bot.db.get_world(guild_id)
+        world = await self.bot.db.get_world(scope.scope_id)
 
         async with self.bot.db.lock:
             if int(user.get("level", 1)) < int(strain_info.get("level_req", 1)):
@@ -64,7 +66,7 @@ class Farming(commands.Cog):
                     f"❌ You don't have any **{clean_name.title()} Seeds**!\nBuy some in the `!shop`."
                 )
 
-            max_pots = max(0, int(user.get("max_pots", 3)))
+            max_pots = effective_pot_capacity(user, scope)
             current_plants = user.setdefault("plants", [])
             if len(current_plants) >= max_pots:
                 return await ctx.send(
@@ -84,7 +86,7 @@ class Farming(commands.Cog):
                 "quality": 1.0,
             }
             current_plants.append(new_plant)
-            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
         grow_time = get_plant_grow_time(user, world, new_plant)
         ready_at = int(planted_at + grow_time)
@@ -94,7 +96,8 @@ class Farming(commands.Cog):
     async def water(self, ctx):
         """Water all eligible plants in the current server."""
         guild_id = require_guild_id(ctx)
-        user = await self.bot.db.get_profile(guild_id, ctx.author.id)
+        scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
+        user = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
         if await jail_guard(ctx, user, "water"):
             return
 
@@ -114,7 +117,7 @@ class Farming(commands.Cog):
             if count == 0:
                 return await ctx.send("💧 Plants are already wet enough.")
 
-            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
         await ctx.send(f"💦 **Watered {count} plants.** Keep 'em happy!")
 
@@ -122,10 +125,11 @@ class Farming(commands.Cog):
     async def harvest(self, ctx):
         """Harvest ready plants into this server's flower stash."""
         guild_id = require_guild_id(ctx)
-        user = await self.bot.db.get_profile(guild_id, ctx.author.id)
+        scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
+        user = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
         if await jail_guard(ctx, user, "harvest"):
             return
-        world = await self.bot.db.get_world(guild_id)
+        world = await self.bot.db.get_world(scope.scope_id)
 
         async with self.bot.db.lock:
             plants = user.get("plants", [])
@@ -163,7 +167,7 @@ class Farming(commands.Cog):
 
             await self._add_xp(ctx, user, outcome["total_xp"])
             await check_achievements(ctx, user)
-            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
         harvested_summary = ", ".join(
             f"{strain.title()} ({amount}g)"
@@ -180,7 +184,8 @@ class Farming(commands.Cog):
     async def status(self, ctx):
         """Check plant progress for the current server."""
         guild_id = require_guild_id(ctx)
-        user = await self.bot.db.get_profile(guild_id, ctx.author.id)
+        scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
+        user = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
         plants = user.get("plants", [])
 
         if not plants:
@@ -191,7 +196,7 @@ class Farming(commands.Cog):
             )
             return await ctx.send(embed=embed)
 
-        world = await self.bot.db.get_world(guild_id)
+        world = await self.bot.db.get_world(scope.scope_id)
         embed = discord.Embed(title=f"🌱 {ctx.author.name}'s Garden", color=discord.Color.green())
         now = time.time()
         lines = []

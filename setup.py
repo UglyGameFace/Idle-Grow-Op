@@ -15,6 +15,11 @@ from profile_signatures import (
     SIGNATURE_CONFIG_KEY,
     SIGNATURE_ENABLED_KEY,
 )
+from world_modes import (
+    ServerWorldModeView,
+    build_server_mode_embed,
+    world_mode_status,
+)
 
 
 SETTINGS_KEY = "settings"
@@ -1200,6 +1205,37 @@ class SetupView(OwnedSetupView):
         await self.open_channel_panel(interaction, ANNOUNCEMENT_CHANNEL)
 
     @discord.ui.button(
+        label="World Mode",
+        emoji="🌍",
+        style=discord.ButtonStyle.secondary,
+        row=3,
+    )
+    async def world_mode_setup(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+            return
+        world_modes = self.cog.bot.get_cog("WorldModes")
+        if world_modes is None:
+            await interaction.response.send_message(
+                "❌ World mode controls are unavailable.", ephemeral=True
+            )
+            return
+        view = ServerWorldModeView(world_modes, interaction.user.id, guild.id)
+        await interaction.response.send_message(
+            embed=await build_server_mode_embed(self.cog.bot.db, guild),
+            view=view,
+            ephemeral=True,
+        )
+        view.message = await interaction.original_response()
+
+    @discord.ui.button(
         label="Optional Sesh",
         emoji="🔥",
         style=discord.ButtonStyle.secondary,
@@ -1673,6 +1709,11 @@ class Setup(commands.Cog):
         embed.add_field(name="🌿 Main Game Channel", value=game_status, inline=False)
         embed.add_field(name="📢 Announcements", value=announcement_status, inline=False)
         embed.add_field(name="🚨 Error Logging", value=error_status, inline=False)
+        embed.add_field(
+            name="🌍 World Mode",
+            value=await world_mode_status(self.bot.db, guild.id),
+            inline=False,
+        )
         embed.add_field(name="🔥 Optional Sesh", value=await self.sesh_status(guild), inline=False)
         embed.add_field(name="🤖 Optional AI", value=await self.ai_status(guild), inline=False)
         embed.add_field(
@@ -1682,7 +1723,7 @@ class Setup(commands.Cog):
         )
         embed.add_field(
             name="Coming next",
-            value="Multiplayer • Notifications",
+            value="Notifications",
             inline=False,
         )
         embed.set_footer(
