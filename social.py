@@ -51,6 +51,15 @@ class Social(commands.Cog):
     async def profile(self, ctx, target: discord.Member = None):
         guild_id = require_guild_id(ctx)
         target = target or ctx.author
+        signatures = self.bot.get_cog("ProfileSignatures")
+        if signatures is not None and hasattr(signatures, "build_full_profile"):
+            embed, view = await signatures.build_full_profile(
+                ctx.guild,
+                target,
+                viewer_id=ctx.author.id,
+            )
+            await ctx.send(embed=embed, view=view)
+            return
         user = await self.bot.db.get_profile(guild_id, target.id)
         world = await self.bot.db.get_world(guild_id)
 

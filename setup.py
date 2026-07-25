@@ -6,6 +6,16 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from profile_signatures import (
+    ALL_PROFILE_FIELDS,
+    DEFAULT_SERVER_ALLOWED_FIELDS,
+    FIELD_LABELS,
+    SIGNATURE_ALLOWED_FIELDS_KEY,
+    SIGNATURE_CHANNELS_KEY,
+    SIGNATURE_CONFIG_KEY,
+    SIGNATURE_ENABLED_KEY,
+)
+
 
 SETTINGS_KEY = "settings"
 SESH_CONFIG_KEY = "sesh_config"
@@ -683,6 +693,300 @@ class AISetupView(OwnedSetupView):
         await self.refresh(interaction)
 
 
+
+class SignatureChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, view: "SignatureSetupView") -> None:
+        self.signature_view = view
+        super().__init__(
+            placeholder="Choose profile-signature channels…",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            min_values=1,
+            max_values=25,
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        guild = interaction.guild
+        if guild is None or guild.me is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+            return
+        selected_ids: list[int] = []
+        missing_by_channel: list[str] = []
+        for selected in self.values:
+            channel = guild.get_channel(selected.id)
+            if not isinstance(channel, discord.TextChannel):
+                continue
+            healthy, missing = _permission_health(channel, guild.me)
+            if healthy:
+                selected_ids.append(channel.id)
+            else:
+                missing_by_channel.append(
+                    f"{channel.mention}: {', '.join(missing)}"
+                )
+        if missing_by_channel:
+            await interaction.response.send_message(
+                "❌ Fix these channel permissions first:\n"
+                + "\n".join(missing_by_channel[:10]),
+                ephemeral=True,
+            )
+            return
+        if not selected_ids:
+            await interaction.response.send_message(
+                "❌ Choose at least one usable text or announcement channel.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        await self.signature_view.cog.update_signature_config(
+            guild.id,
+            **{SIGNATURE_CHANNELS_KEY: selected_ids},
+        )
+        signature_cog = self.signature_view.cog.bot.get_cog("ProfileSignatures")
+        if signature_cog is not None and hasattr(
+            signature_cog, "sync_guild_configuration"
+        ):
+            await signature_cog.sync_guild_configuration(guild)
+        config = await self.signature_view.cog.get_signature_config(guild.id)
+        view = SignatureSetupView(
+            self.signature_view.cog,
+            interaction.user.id,
+            guild.id,
+            config,
+        )
+        await interaction.edit_original_response(
+            embed=await self.signature_view.cog.build_signature_panel(guild),
+            view=view,
+        )
+
+
+class SignatureFieldSelect(discord.ui.Select):
+    def __init__(self, view: "SignatureSetupView", selected: set[str]) -> None:
+        self.signature_view = view
+        options = [
+            discord.SelectOption(
+                label=FIELD_LABELS[key],
+                value=key,
+                default=key in selected,
+            )
+            for key in ALL_PROFILE_FIELDS
+        ]
+        super().__init__(
+            placeholder="Choose fields permitted in signature cards…",
+            options=options,
+            min_values=1,
+            max_values=len(options),
+            row=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+            return
+        await interaction.response.defer()
+        await self.signature_view.cog.update_signature_config(
+            guild.id,
+            **{SIGNATURE_ALLOWED_FIELDS_KEY: list(self.values)},
+        )
+        signature_cog = self.signature_view.cog.bot.get_cog("ProfileSignatures")
+        if signature_cog is not None and hasattr(
+            signature_cog, "invalidate_guild_cards"
+        ):
+            await signature_cog.invalidate_guild_cards(guild)
+        config = await self.signature_view.cog.get_signature_config(guild.id)
+        view = SignatureSetupView(
+            self.signature_view.cog,
+            interaction.user.id,
+            guild.id,
+            config,
+        )
+        await interaction.edit_original_response(
+            embed=await self.signature_view.cog.build_signature_panel(guild),
+            view=view,
+        )
+
+
+class SignatureSetupView(OwnedSetupView):
+    def __init__(
+        self,
+        cog: "Setup",
+        owner_id: int,
+        guild_id: int,
+        config: dict,
+    ) -> None:
+        super().__init__(owner_id, guild_id)
+        self.cog = cog
+        raw_allowed = config.get(
+            SIGNATURE_ALLOWED_FIELDS_KEY,
+            DEFAULT_SERVER_ALLOWED_FIELDS,
+        )
+        selected = {
+            str(value)
+            for value in raw_allowed
+            if str(value) in FIELD_LABELS
+        }
+        if not selected:
+            selected = set(DEFAULT_SERVER_ALLOWED_FIELDS)
+        self.add_item(SignatureChannelSelect(self))
+        self.add_item(SignatureFieldSelect(self, selected))
+
+    async def refresh(self, interaction: discord.Interaction) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+            return
+        config = await self.cog.get_signature_config(guild.id)
+        view = SignatureSetupView(
+            self.cog,
+            interaction.user.id,
+            guild.id,
+            config,
+        )
+        await interaction.response.edit_message(
+            embed=await self.cog.build_signature_panel(guild),
+            view=view,
+        )
+        view.message = self.message
+
+    @discord.ui.button(
+        label="Enable Signatures",
+        emoji="🪪",
+        style=discord.ButtonStyle.success,
+        row=2,
+    )
+    async def enable_signatures(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+            return
+        healthy_channels = await self.cog.signature_channels(guild)
+        if not healthy_channels:
+            await interaction.response.send_message(
+                "❌ Select at least one healthy signature channel first.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        await self.cog.update_signature_config(
+            guild.id,
+            **{SIGNATURE_ENABLED_KEY: True},
+        )
+        signature_cog = self.cog.bot.get_cog("ProfileSignatures")
+        if signature_cog is not None and hasattr(
+            signature_cog, "sync_guild_configuration"
+        ):
+            await signature_cog.sync_guild_configuration(guild)
+        config = await self.cog.get_signature_config(guild.id)
+        view = SignatureSetupView(
+            self.cog,
+            interaction.user.id,
+            guild.id,
+            config,
+        )
+        await interaction.edit_original_response(
+            embed=await self.cog.build_signature_panel(guild),
+            view=view,
+        )
+
+    @discord.ui.button(
+        label="Use This Channel",
+        emoji="📍",
+        style=discord.ButtonStyle.primary,
+        row=2,
+    )
+    async def use_this_channel(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        guild = interaction.guild
+        channel = interaction.channel
+        if (
+            guild is None
+            or guild.me is None
+            or not isinstance(channel, discord.TextChannel)
+        ):
+            await interaction.response.send_message(
+                "❌ Open this panel in a server text or announcement channel.",
+                ephemeral=True,
+            )
+            return
+        healthy, missing = _permission_health(channel, guild.me)
+        if not healthy:
+            await interaction.response.send_message(
+                "❌ I cannot use this channel yet. Missing: **"
+                + ", ".join(missing)
+                + "**.",
+                ephemeral=True,
+            )
+            return
+        config = await self.cog.get_signature_config(guild.id)
+        channel_ids = {
+            int(value)
+            for value in config.get(SIGNATURE_CHANNELS_KEY, [])
+            if str(value).isdigit()
+        }
+        channel_ids.add(channel.id)
+        await self.cog.update_signature_config(
+            guild.id,
+            **{SIGNATURE_CHANNELS_KEY: sorted(channel_ids)},
+        )
+        await self.refresh(interaction)
+
+    @discord.ui.button(
+        label="Disable Signatures",
+        emoji="🔕",
+        style=discord.ButtonStyle.danger,
+        row=2,
+    )
+    async def disable_signatures(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+            return
+        await interaction.response.defer()
+        await self.cog.update_signature_config(
+            guild.id,
+            **{SIGNATURE_ENABLED_KEY: False},
+        )
+        signature_cog = self.cog.bot.get_cog("ProfileSignatures")
+        if signature_cog is not None and hasattr(signature_cog, "disable_guild"):
+            await signature_cog.disable_guild(guild)
+        config = await self.cog.get_signature_config(guild.id)
+        view = SignatureSetupView(
+            self.cog,
+            interaction.user.id,
+            guild.id,
+            config,
+        )
+        await interaction.edit_original_response(
+            embed=await self.cog.build_signature_panel(guild),
+            view=view,
+        )
+        await interaction.followup.send(
+            "✅ Live profile signatures are disabled and existing bot cards were cleaned up.",
+            ephemeral=True,
+        )
+
+
 class SetupView(OwnedSetupView):
     def __init__(self, cog: "Setup", owner_id: int, guild_id: int) -> None:
         super().__init__(owner_id, guild_id)
@@ -947,6 +1251,39 @@ class SetupView(OwnedSetupView):
 
 
 
+
+    @discord.ui.button(
+        label="Profile Signatures",
+        emoji="🪪",
+        style=discord.ButtonStyle.secondary,
+        row=4,
+    )
+    async def profile_signatures_setup(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+            return
+        config = await self.cog.get_signature_config(guild.id)
+        view = SignatureSetupView(
+            self.cog,
+            interaction.user.id,
+            guild.id,
+            config,
+        )
+        await interaction.response.send_message(
+            embed=await self.cog.build_signature_panel(guild),
+            view=view,
+            ephemeral=True,
+        )
+        view.message = await interaction.original_response()
+
+
 class Setup(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
@@ -1168,6 +1505,135 @@ class Setup(commands.Cog):
         return embed
 
 
+
+    async def update_signature_config(
+        self,
+        guild_id: int,
+        **changes: object,
+    ) -> None:
+        async with self.bot.db.lock:
+            world = await self.bot.db.get_world(int(guild_id))
+            config = world.setdefault(SIGNATURE_CONFIG_KEY, {})
+            for key, value in changes.items():
+                if value is None:
+                    config.pop(key, None)
+                else:
+                    config[key] = value
+            self.bot.db.mark_world_dirty(int(guild_id))
+
+    async def get_signature_config(self, guild_id: int) -> dict:
+        world = await self.bot.db.get_world(int(guild_id))
+        raw = world.get(SIGNATURE_CONFIG_KEY)
+        return dict(raw) if isinstance(raw, dict) else {}
+
+    async def signature_channels(
+        self,
+        guild: discord.Guild,
+    ) -> list[discord.TextChannel]:
+        config = await self.get_signature_config(guild.id)
+        if guild.me is None:
+            return []
+        channels: list[discord.TextChannel] = []
+        for raw_channel_id in config.get(SIGNATURE_CHANNELS_KEY, []):
+            try:
+                channel_id = int(raw_channel_id)
+            except (TypeError, ValueError):
+                continue
+            channel = guild.get_channel(channel_id)
+            if not isinstance(channel, discord.TextChannel):
+                continue
+            healthy, _missing = _permission_health(channel, guild.me)
+            if healthy:
+                channels.append(channel)
+        return channels
+
+    async def signature_status(self, guild: discord.Guild) -> str:
+        config = await self.get_signature_config(guild.id)
+        channel_ids = [
+            value
+            for value in config.get(SIGNATURE_CHANNELS_KEY, [])
+            if str(value).isdigit()
+        ]
+        if not config.get(SIGNATURE_ENABLED_KEY, False):
+            if channel_ids:
+                return f"⚪ **Optional and disabled** — {len(channel_ids)} channel(s) selected"
+            return "⚪ **Optional and disabled**"
+        channels = await self.signature_channels(guild)
+        if not channels:
+            return "🟠 **Needs attention** — enabled without a usable channel"
+        return f"🟢 **Enabled** — {len(channels)} channel(s), one card per channel"
+
+    async def build_signature_panel(self, guild: discord.Guild) -> discord.Embed:
+        config = await self.get_signature_config(guild.id)
+        channels = await self.signature_channels(guild)
+        configured_ids = {
+            int(value)
+            for value in config.get(SIGNATURE_CHANNELS_KEY, [])
+            if str(value).isdigit()
+        }
+        missing_count = max(0, len(configured_ids) - len(channels))
+        channel_text = (
+            ", ".join(channel.mention for channel in channels[:15])
+            or "None selected"
+        )
+        if missing_count:
+            channel_text += f"\n🟠 {missing_count} saved channel(s) missing or unhealthy"
+
+        raw_allowed = config.get(
+            SIGNATURE_ALLOWED_FIELDS_KEY,
+            DEFAULT_SERVER_ALLOWED_FIELDS,
+        )
+        allowed = [
+            FIELD_LABELS[str(value)]
+            for value in raw_allowed
+            if str(value) in FIELD_LABELS
+        ]
+        embed = discord.Embed(
+            title="🪪 Live Profile Signatures",
+            description=(
+                "Keeps one compact Idle Grow profile card for the latest eligible speaker "
+                "in each selected channel. It does not alter, delete, or impersonate user messages."
+            ),
+            color=discord.Color.green(),
+        )
+        embed.add_field(
+            name="Status",
+            value=await self.signature_status(guild),
+            inline=False,
+        )
+        embed.add_field(
+            name="Channels",
+            value=channel_text,
+            inline=False,
+        )
+        embed.add_field(
+            name="Fields this server permits",
+            value=", ".join(allowed) or "None",
+            inline=False,
+        )
+        embed.add_field(
+            name="Anti-spam behavior",
+            value=(
+                "One active card per channel. Message bursts are debounced, repeated messages "
+                "from the same person do not keep reposting the card, and channel/user cooldowns "
+                "limit Discord API traffic."
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="User privacy always wins",
+            value=(
+                "Players can opt out or hide individual fields with `/profile-settings`. "
+                "Platform accounts are private until the player explicitly shares them."
+            ),
+            inline=False,
+        )
+        embed.set_footer(
+            text="Select channels and permitted fields, then enable. Disabled by default."
+        )
+        return embed
+
+
     async def build_channel_panel(
         self,
         guild: discord.Guild,
@@ -1209,6 +1675,11 @@ class Setup(commands.Cog):
         embed.add_field(name="🚨 Error Logging", value=error_status, inline=False)
         embed.add_field(name="🔥 Optional Sesh", value=await self.sesh_status(guild), inline=False)
         embed.add_field(name="🤖 Optional AI", value=await self.ai_status(guild), inline=False)
+        embed.add_field(
+            name="🪪 Profile Signatures",
+            value=await self.signature_status(guild),
+            inline=False,
+        )
         embed.add_field(
             name="Coming next",
             value="Multiplayer • Notifications",

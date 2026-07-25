@@ -13,6 +13,7 @@ EXPECTED_EXTENSIONS = {
     "lab",
     "progression",
     "quick",
+    "profile_signatures",
     "sesh",
     "setup",
     "social",
