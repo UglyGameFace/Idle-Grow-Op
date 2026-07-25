@@ -1,9 +1,10 @@
+import asyncio
 import os
 from pathlib import Path
 
 import pytest
 
-from ai import AI, _extract_reply, _public_api_error
+from ai import AI, _extract_reply, _int_env, _public_api_error
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,6 +14,20 @@ class BotStub:
     pass
 
 
+class DatabaseStub:
+    def __init__(self, world):
+        self.world = world
+
+    async def get_world(self, guild_id):
+        assert guild_id == 123
+        return self.world
+
+
+class ConfigBotStub:
+    def __init__(self, world):
+        self.db = DatabaseStub(world)
+
+
 def test_chat_uses_only_openrouter_key(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "not-valid-for-openrouter")
@@ -20,6 +35,25 @@ def test_chat_uses_only_openrouter_key(monkeypatch):
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-test")
     assert AI(BotStub()).api_key == "sk-or-v1-test"
+
+
+def test_int_env_falls_back_and_clamps_without_crashing(monkeypatch):
+    monkeypatch.setenv("AI_TEST_INTEGER", "thirty")
+    assert _int_env("AI_TEST_INTEGER", 30, minimum=5, maximum=60) == 30
+
+    monkeypatch.setenv("AI_TEST_INTEGER", "1")
+    assert _int_env("AI_TEST_INTEGER", 30, minimum=5, maximum=60) == 5
+
+    monkeypatch.setenv("AI_TEST_INTEGER", "500")
+    assert _int_env("AI_TEST_INTEGER", 30, minimum=5, maximum=60) == 60
+
+
+def test_guild_config_read_does_not_mutate_world():
+    world = {}
+    config = asyncio.run(AI(ConfigBotStub(world))._guild_config(123))
+
+    assert config == {}
+    assert world == {}
 
 
 def test_extract_reply_accepts_standard_openrouter_response():
