@@ -76,7 +76,7 @@ def _extract_reply(payload: Any) -> str:
 def _public_api_error(status: int) -> str:
     messages = {
         400: "❌ **The AI request was rejected.** Try rewording it.",
-        401: "❌ **AI service configuration needs attention.**",
+        401: "❌ **The OpenRouter API key is invalid.**",
         402: "💳 **Idle Grow AI is temporarily out of provider credits.**",
         403: "⛔ **The AI provider blocked that request.**",
         408: "⌛ **The AI provider timed out.** Try again shortly.",
