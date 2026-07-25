@@ -1,101 +1,61 @@
-# Active Task: Guild-Scoped Persistence Architecture
+# Active Task: Public Server Setup — Game and Announcement Channels
 
 ## Scope
-Replace the single global in-memory user/world cache with an explicit hybrid model that scales across Discord servers without cross-server economy leakage, startup-wide user loading, or full-database rewrites.
+Expand the existing Discord-native `/setup` wizard so every server owner can configure a main game channel and announcement channel without copying IDs or editing deployment variables.
 
 ## Root Cause and Confirmed Findings
-- Player records were keyed only by Discord user ID, causing balances, inventory, plants, crews, heat, jail, and progression to leak across servers.
-- One global world record shared weather, markets, crews, districts, auctions, events, and configuration across every guild.
-- Startup loaded every user into RAM.
-- One global dirty flag caused every cached user and the world record to be rewritten.
-- Leaderboards and background tasks scanned the complete cache.
-- The old Supabase path accepted a generic key, could not verify schema version, and silently fell back to volatile memory.
-- Generic Supabase environment names could collide with Dank Shield or another bot's database configuration.
-- AI chat accepted an OpenAI key but always called OpenRouter, causing authentication failures.
-- AI image generation was unwanted and added unnecessary balance/refund persistence paths.
+- Error logging was already moved to per-guild setup, but game and announcement destinations were still absent.
+- A saved setting without a real consumer would be misleading, so announcement routing must be connected to the live world-cycle execution path.
+- Hard-locking gameplay commands to one channel would make the bot fragile and could lock users out after permission or channel changes.
+- The 15-minute world cycle changes weather frequently; announcing every routine roll would create spam.
+- Discord component rows become cluttered quickly on mobile, so focused sub-panels are preferable to three simultaneous channel pickers.
 
 ## Architecture Decision
-Use a hybrid model:
-- Global account: cross-server identity and future collection, cosmetic, reputation, and prestige metadata.
-- Guild profile: local economy, garden, inventory, crime, lab, quests, crew membership, and progression.
-- Guild world: weather, market, events, crews, districts, auctions, and server configuration.
+- Keep one canonical `setup.py` system.
+- Store `game_channel_id` and `announcement_channel_id` in each guild world's `settings` map.
+- Treat the game channel as the recommended play hub, not a command restriction.
+- Route special-event and major-market announcements to the explicit announcement channel.
+- Use the configured game channel only when no announcement channel was selected.
+- Never fall back to a random writable channel.
+- If an explicitly configured announcement channel is deleted or unhealthy, show it as unhealthy and do not silently reroute.
 
-Local assets stay local unless a future feature explicitly defines a cross-server system.
-
-## Implementation Completed
-- Added canonical typed keys and strict Discord snowflake validation.
-- Added lazy loading and concurrent first-read deduplication.
-- Added exact per-record dirty tracking and retry-safe flushes.
-- Added a scoped database manager with explicit account/profile/world accessors.
-- Added strict guild-context helpers; ambiguous DM gameplay is rejected.
-- Migrated Admin, Economy, Farming, Lab, Crime, Social, Tasks, and AI to explicit guild scopes.
-- Added guild-local indexed wealth and heist leaderboards.
-- Added indexed background-notification candidate queries so Tasks does not scan every player.
-- Made active heist/session state include guild identity where required.
-- Added idempotent Supabase migration `001_guild_scoped_persistence` with a migration ledger.
-- Added `global_accounts`, `guild_profiles`, and `guild_worlds` tables.
-- Enabled RLS, revoked `anon` and `authenticated`, and restricted server persistence to `service_role`.
-- Production bootstrap requires `IDLE_SUPABASE_URL` and `IDLE_SUPABASE_SERVICE_ROLE_KEY` only.
-- Generic Supabase variables and the legacy `IDLE_SUPABASE_KEY` are intentionally ignored.
-- Startup verifies migration version, required tables, and required generated columns before Discord connects.
-- Removed the old Database class, global cache, `world_state`, load-all query, global dirty flag, generic `SUPABASE_KEY`, memory fallback, and import-time background task.
-- `main.py` is now the sole owner of database startup, assignment, flush, and shutdown.
-- Removed AI image generation commands and all image cost/refund/API code.
-- Corrected AI chat to require `OPENROUTER_API_KEY`, use a bounded timeout, validate responses, and report authentication, credit, rate-limit, provider, and timeout failures clearly.
-- Added a one-time legacy migration tool requiring an explicit target guild, defaulting to dry-run, refusing conflicting overwrites, batching writes, and preserving legacy tables for rollback.
-- Added a guarded manual GitHub Actions workflow for mobile-friendly dry-run/apply execution using Idle Grow-specific secrets.
-
-## Validation Completed
-- Python compilation passes.
-- Full pytest suite passes.
-- Every canonical game extension loads successfully with an explicit scoped test database.
-- Supabase schema/bootstrap tests pass.
-- Guild-isolation, routing, dirty-only write, failed-write retry, concurrency, leaderboard, background-task, and migration-tool tests pass.
-- AI runtime-contract tests pass.
-- Legacy persistence and image-generation regression contracts pass.
-- Supabase migration `001_guild_scoped_persistence` executed successfully in production.
-- Legacy dry-run for home guild `1514374173517152418` reported 39 profiles to copy, 0 conflicts, 0 invalid IDs, and no world conflict.
-- Legacy data apply completed successfully.
-- Post-copy verification reported 39 legacy profiles, 39 scoped profiles, 0 profile mismatches, a scoped world present, and 0 world mismatches.
-- Legacy `users` and `world` tables remain untouched for rollback.
-
-## Production Rollout Status
+## Implementation Status
 Completed:
-1. Stopped the deployed bot during migration.
-2. Installed `migrations/001_guild_scoped_persistence.sql`.
-3. Confirmed home guild ID `1514374173517152418`.
-4. Dry-ran the legacy copy with zero conflicts.
-5. Copied 39 profiles and the legacy world into scoped tables.
-6. Verified exact data parity with zero mismatches.
+- Created `feature/setup-game-announcement-channels` from current `main`.
+- Added Game Channel and Announcements buttons to the existing `/setup` panel.
+- Added focused private channel-selection sub-panels.
+- Added existing-channel selection, current-channel selection, automatic channel creation, test delivery, and disable actions.
+- Added permission-health checks and deleted-channel detection.
+- Added guild-world persistence with exact dirty tracking.
+- Added game-channel fallback presentation in the main setup panel.
+- Connected the Tasks world cycle to configured announcement routing.
+- Added event-start, event-end, and major-market-change announcement generation.
+- Kept routine weather rolls silent to prevent channel spam.
 
 Still required:
-1. Configure Discloud with `IDLE_SUPABASE_URL`, `IDLE_SUPABASE_SERVICE_ROLE_KEY`, `DISCORD_TOKEN`, and a valid funded `OPENROUTER_API_KEY`.
-2. Remove obsolete `IDLE_SUPABASE_KEY` and `OPENAI_API_KEY` deployment variables.
-3. Leave any Dank Shield Supabase variables untouched; Idle Grow does not read them.
-4. Merge/deploy the scoped branch.
-5. Verify startup reports the scoped Supabase backend and every extension loads.
-6. Verify balances and worlds are isolated in at least two Discord servers.
-7. Keep legacy tables temporarily for rollback.
+- Add direct runtime tests for event and market announcement generation.
+- Run full pytest, compilation, command uniqueness, and all-extension load checks.
+- Inspect the final diff for duplicate configuration paths or temporary code.
+- Merge only after CI is green.
+
+## Validation Status
+- Static setup contracts updated for all three guild channel settings.
+- Full CI has not yet run on this branch.
 
 ## Cleanup Status
-- No monkey patches.
-- No startup guards.
-- No permanent dual-write or compatibility layer.
-- No silent cross-scope fallback.
-- No public anon-key persistence.
-- No cross-bot generic Supabase configuration.
-- No image generation.
-- Temporary pytest artifact logging remains intentionally in CI for diagnosable failures and is not production code.
+- No hardcoded channel IDs.
+- No new environment variables.
+- No second setup command or compatibility layer.
+- No command-channel lock.
+- No random-channel fallback.
+- No routine weather announcement spam.
 
-## Remaining Before Task Completion
-- Final CI on the namespaced-environment commit.
-- Configure production environment variables.
-- Merge and deploy PR #3.
-- Verify the live bot in two servers.
+## Blockers
+- None currently.
 
 ## Backlog Locked Behind This Task
-- Player onboarding and Discord-native control panel.
-- Admin setup and server customization.
-- Solo-world versus open-world gameplay, raids, multiplayer, and item/progression overhaul.
-- Cross-server tournaments and global account features.
-- Large-scale sharding, distributed cache, and worker deployment.
+- Sesh voice-room selection and private-category setup.
+- AI enable/disable and model controls.
+- Multiplayer/open-world versus solo-world controls.
+- Notification preferences and announcement-role controls.
+- Broader onboarding and first-run guidance.

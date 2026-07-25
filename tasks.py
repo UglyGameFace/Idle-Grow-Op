@@ -8,6 +8,10 @@ from utils import SPECIAL_EVENTS, WEATHER_TYPES, get_plant_grow_time
 
 
 NOTIFICATION_CANDIDATE_LIMIT = 500
+ANNOUNCEMENT_CHANNEL_KEY = "announcement_channel_id"
+GAME_CHANNEL_KEY = "game_channel_id"
+MAJOR_MARKET_CHANGE = 0.20
+MARKET_CHANGE_EPSILON = 1e-9
 
 
 class Tasks(commands.Cog):
@@ -35,20 +39,116 @@ class Tasks(commands.Cog):
         updated_worlds = 0
         for guild in tuple(self.bot.guilds):
             guild_id = int(guild.id)
+            announcement = None
             try:
                 async with self.bot.db.lock:
                     world = await self.bot.db.get_world(guild_id)
+                    before = self._world_announcement_snapshot(world)
                     auction_changed = await economy._settle_expired_auctions(guild_id, world)
                     world_changed = self._advance_world(world)
                     if world_changed:
                         self.bot.db.mark_world_dirty(guild_id)
+                        announcement = self._build_world_announcement(before, world)
                     if auction_changed or world_changed:
                         updated_worlds += 1
             except Exception as exc:
                 print(f"❌ Guild world cycle failed for {guild_id}: {exc}")
+                continue
+
+            if announcement is not None:
+                await self._send_world_announcement(guild, announcement)
 
         if updated_worlds:
             print(f"🌍 Updated {updated_worlds} guild world(s)")
+
+    @staticmethod
+    def _world_announcement_snapshot(world: dict) -> dict:
+        return {
+            "event": dict(world.get("event") or {}),
+            "weather": world.get("weather"),
+            "market_multiplier": float(world.get("market_multiplier", 1.0)),
+        }
+
+    @staticmethod
+    def _build_world_announcement(before: dict, world: dict) -> discord.Embed | None:
+        previous_event = before.get("event") or {}
+        current_event = world.get("event") or {}
+        previous_multiplier = float(before.get("market_multiplier", 1.0))
+        current_multiplier = float(world.get("market_multiplier", 1.0))
+        delta = current_multiplier - previous_multiplier
+
+        if not previous_event and current_event:
+            return discord.Embed(
+                title="🚨 Special World Event Started",
+                description=(
+                    f"**{current_event.get('name', 'Unknown Event')}** is now active.\n"
+                    f"Market multiplier: **{current_multiplier:.2f}x**"
+                ),
+                color=discord.Color.gold(),
+            )
+
+        if previous_event and not current_event:
+            return discord.Embed(
+                title="✅ Special World Event Ended",
+                description=(
+                    f"**{previous_event.get('name', 'The event')}** has ended.\n"
+                    f"The market is now **{current_multiplier:.2f}x**."
+                ),
+                color=discord.Color.green(),
+            )
+
+        if abs(delta) + MARKET_CHANGE_EPSILON < MAJOR_MARKET_CHANGE:
+            return None
+
+        direction = "surged" if delta > 0 else "dropped"
+        icon = "📈" if delta > 0 else "📉"
+        color = discord.Color.green() if delta > 0 else discord.Color.red()
+        return discord.Embed(
+            title=f"{icon} Market {direction.title()}",
+            description=(
+                f"The local market {direction} from **{previous_multiplier:.2f}x** "
+                f"to **{current_multiplier:.2f}x**.\n"
+                f"Weather: **{world.get('weather', 'Unknown')}**"
+            ),
+            color=color,
+        )
+
+    async def _configured_announcement_channel(
+        self,
+        guild: discord.Guild,
+    ) -> discord.TextChannel | None:
+        try:
+            world = await self.bot.db.get_world(guild.id)
+        except Exception as exc:
+            print(f"❌ Announcement configuration lookup failed for {guild.id}: {exc}")
+            return None
+
+        settings = world.get("settings", {})
+        announcement_id = settings.get(ANNOUNCEMENT_CHANNEL_KEY)
+        channel_id = announcement_id or settings.get(GAME_CHANNEL_KEY)
+        if not channel_id:
+            return None
+
+        channel = guild.get_channel(int(channel_id))
+        if not isinstance(channel, discord.TextChannel) or guild.me is None:
+            return None
+        permissions = channel.permissions_for(guild.me)
+        if not (permissions.view_channel and permissions.send_messages and permissions.embed_links):
+            return None
+        return channel
+
+    async def _send_world_announcement(
+        self,
+        guild: discord.Guild,
+        embed: discord.Embed,
+    ) -> None:
+        channel = await self._configured_announcement_channel(guild)
+        if channel is None:
+            return
+        try:
+            await channel.send(embed=embed)
+        except discord.HTTPException as exc:
+            print(f"❌ World announcement failed for guild {guild.id}: {exc}")
 
     @staticmethod
     def _advance_world(world: dict) -> bool:

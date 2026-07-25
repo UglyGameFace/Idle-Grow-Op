@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -7,11 +9,50 @@ from discord.ext import commands
 
 SETTINGS_KEY = "settings"
 ERROR_LOG_CHANNEL_KEY = "error_log_channel_id"
-REQUIRED_ERROR_LOG_PERMISSIONS = (
+GAME_CHANNEL_KEY = "game_channel_id"
+ANNOUNCEMENT_CHANNEL_KEY = "announcement_channel_id"
+REQUIRED_CHANNEL_PERMISSIONS = (
     "view_channel",
     "send_messages",
     "embed_links",
     "read_message_history",
+)
+
+
+@dataclass(frozen=True)
+class ChannelPurpose:
+    key: str
+    label: str
+    emoji: str
+    create_name: str
+    description: str
+    test_title: str
+    test_description: str
+
+
+GAME_CHANNEL = ChannelPurpose(
+    key=GAME_CHANNEL_KEY,
+    label="Main Game Channel",
+    emoji="🌿",
+    create_name="idle-grow",
+    description=(
+        "The recommended home for Idle Grow commands and community play. "
+        "Commands remain usable elsewhere so nobody gets locked out."
+    ),
+    test_title="🌿 Idle Grow Game Hub Ready",
+    test_description="This channel is configured as this server's main Idle Grow play hub.",
+)
+ANNOUNCEMENT_CHANNEL = ChannelPurpose(
+    key=ANNOUNCEMENT_CHANNEL_KEY,
+    label="Announcement Channel",
+    emoji="📢",
+    create_name="idle-grow-news",
+    description=(
+        "Receives special world-event and major market notices. If disabled, "
+        "the configured game channel is used as a safe fallback."
+    ),
+    test_title="📢 Idle Grow Announcement Test",
+    test_description="World events and major market notices can be delivered here.",
 )
 
 
@@ -26,7 +67,7 @@ def _permission_health(
     permissions = channel.permissions_for(member)
     missing = [
         name.replace("_", " ").title()
-        for name in REQUIRED_ERROR_LOG_PERMISSIONS
+        for name in REQUIRED_CHANNEL_PERMISSIONS
         if not getattr(permissions, name, False)
     ]
     return not missing, missing
@@ -53,14 +94,33 @@ class ErrorLogChannelSelect(discord.ui.ChannelSelect):
         await self.setup_view.save_error_channel(interaction, resolved)
 
 
-class SetupView(discord.ui.View):
-    def __init__(self, cog: "Setup", owner_id: int, guild_id: int) -> None:
-        super().__init__(timeout=300)
-        self.cog = cog
+class ConfiguredChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, view: "ChannelConfigView") -> None:
+        self.config_view = view
+        super().__init__(
+            placeholder=f"Choose the {view.purpose.label.lower()}…",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            min_values=1,
+            max_values=1,
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        selected = self.values[0]
+        channel = interaction.guild.get_channel(selected.id) if interaction.guild else None
+        if not isinstance(channel, discord.TextChannel):
+            return await interaction.response.send_message(
+                "❌ Choose a text or announcement channel.", ephemeral=True
+            )
+        await self.config_view.save(interaction, channel)
+
+
+class OwnedSetupView(discord.ui.View):
+    def __init__(self, owner_id: int, guild_id: int, *, timeout: float = 300) -> None:
+        super().__init__(timeout=timeout)
         self.owner_id = int(owner_id)
         self.guild_id = int(guild_id)
         self.message: discord.InteractionMessage | discord.WebhookMessage | discord.Message | None = None
-        self.add_item(ErrorLogChannelSelect(self))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.owner_id:
@@ -84,6 +144,169 @@ class SetupView(discord.ui.View):
             except discord.HTTPException:
                 pass
 
+
+class ChannelConfigView(OwnedSetupView):
+    def __init__(
+        self,
+        cog: "Setup",
+        owner_id: int,
+        guild_id: int,
+        purpose: ChannelPurpose,
+    ) -> None:
+        super().__init__(owner_id, guild_id)
+        self.cog = cog
+        self.purpose = purpose
+        self.add_item(ConfiguredChannelSelect(self))
+
+    async def save(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None or guild.me is None:
+            return await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+        healthy, missing = _permission_health(channel, guild.me)
+        if not healthy:
+            return await interaction.response.send_message(
+                "❌ I cannot use that channel yet. Missing: **" + ", ".join(missing) + "**.",
+                ephemeral=True,
+            )
+        await self.cog.set_channel_setting(guild.id, self.purpose.key, channel.id)
+        await interaction.response.edit_message(
+            embed=await self.cog.build_channel_panel(guild, self.purpose),
+            view=self,
+        )
+
+    @discord.ui.button(
+        label="Use This Channel",
+        emoji="📍",
+        style=discord.ButtonStyle.primary,
+        row=1,
+    )
+    async def use_current_channel(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        channel = interaction.channel
+        if not isinstance(channel, discord.TextChannel):
+            return await interaction.response.send_message(
+                "❌ Open this panel in a server text or announcement channel.", ephemeral=True
+            )
+        await self.save(interaction, channel)
+
+    @discord.ui.button(
+        label="Create Channel",
+        emoji="➕",
+        style=discord.ButtonStyle.success,
+        row=1,
+    )
+    async def create_channel(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None or guild.me is None:
+            return await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+        if not guild.me.guild_permissions.manage_channels:
+            return await interaction.response.send_message(
+                f"❌ I need **Manage Channels** to create `{self.purpose.create_name}`.",
+                ephemeral=True,
+            )
+        channel = discord.utils.get(guild.text_channels, name=self.purpose.create_name)
+        if channel is None:
+            overwrites = {
+                guild.me: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    embed_links=True,
+                    read_message_history=True,
+                )
+            }
+            try:
+                channel = await guild.create_text_channel(
+                    self.purpose.create_name,
+                    overwrites=overwrites,
+                    reason=f"Idle Grow setup by {interaction.user}",
+                )
+            except discord.HTTPException as exc:
+                return await interaction.response.send_message(
+                    f"❌ I could not create the channel: {exc}", ephemeral=True
+                )
+        await self.save(interaction, channel)
+
+    @discord.ui.button(
+        label="Send Test",
+        emoji="🧪",
+        style=discord.ButtonStyle.secondary,
+        row=2,
+    )
+    async def send_test(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        guild = interaction.guild
+        channel = (
+            await self.cog.get_configured_channel(guild, self.purpose.key)
+            if guild is not None
+            else None
+        )
+        if channel is None:
+            return await interaction.response.send_message(
+                f"❌ Choose a healthy {self.purpose.label.lower()} first.", ephemeral=True
+            )
+        try:
+            await channel.send(
+                embed=discord.Embed(
+                    title=self.purpose.test_title,
+                    description=self.purpose.test_description,
+                    color=discord.Color.green(),
+                )
+            )
+        except discord.HTTPException as exc:
+            return await interaction.response.send_message(
+                f"❌ The test failed: {exc}", ephemeral=True
+            )
+        await interaction.response.send_message(
+            f"✅ Test sent to {channel.mention}.", ephemeral=True
+        )
+
+    @discord.ui.button(
+        label="Disable",
+        emoji="🔕",
+        style=discord.ButtonStyle.danger,
+        row=2,
+    )
+    async def disable(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            return await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+        await self.cog.set_channel_setting(guild.id, self.purpose.key, None)
+        await interaction.response.edit_message(
+            embed=await self.cog.build_channel_panel(guild, self.purpose),
+            view=self,
+        )
+
+
+class SetupView(OwnedSetupView):
+    def __init__(self, cog: "Setup", owner_id: int, guild_id: int) -> None:
+        super().__init__(owner_id, guild_id)
+        self.cog = cog
+        self.add_item(ErrorLogChannelSelect(self))
+
     async def save_error_channel(
         self,
         interaction: discord.Interaction,
@@ -94,15 +317,13 @@ class SetupView(discord.ui.View):
             return await interaction.response.send_message(
                 "❌ Server context is unavailable.", ephemeral=True
             )
-
         healthy, missing = _permission_health(channel, guild.me)
         if not healthy:
             return await interaction.response.send_message(
                 "❌ I cannot use that channel yet. Missing: **" + ", ".join(missing) + "**.",
                 ephemeral=True,
             )
-
-        await self.cog.set_error_log_channel(guild.id, channel.id)
+        await self.cog.set_channel_setting(guild.id, ERROR_LOG_CHANNEL_KEY, channel.id)
         await interaction.response.edit_message(
             embed=await self.cog.build_panel(guild),
             view=self,
@@ -148,9 +369,7 @@ class SetupView(discord.ui.View):
                 "❌ I need **Manage Channels** to create `idle-grow-logs`.",
                 ephemeral=True,
             )
-
-        existing = discord.utils.get(guild.text_channels, name="idle-grow-logs")
-        channel = existing
+        channel = discord.utils.get(guild.text_channels, name="idle-grow-logs")
         if channel is None:
             overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {
                 guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -191,7 +410,11 @@ class SetupView(discord.ui.View):
         _button: discord.ui.Button,
     ) -> None:
         guild = interaction.guild
-        channel = await self.cog.get_error_log_channel(guild) if guild else None
+        channel = (
+            await self.cog.get_configured_channel(guild, ERROR_LOG_CHANNEL_KEY)
+            if guild is not None
+            else None
+        )
         if channel is None:
             return await interaction.response.send_message(
                 "❌ Choose a healthy error logging channel first.", ephemeral=True
@@ -228,61 +451,134 @@ class SetupView(discord.ui.View):
             return await interaction.response.send_message(
                 "❌ Server context is unavailable.", ephemeral=True
             )
-        await self.cog.set_error_log_channel(self.guild_id, None)
+        await self.cog.set_channel_setting(guild.id, ERROR_LOG_CHANNEL_KEY, None)
         await interaction.response.edit_message(
             embed=await self.cog.build_panel(guild),
             view=self,
         )
+
+    async def open_channel_panel(
+        self,
+        interaction: discord.Interaction,
+        purpose: ChannelPurpose,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            return await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+        view = ChannelConfigView(self.cog, interaction.user.id, guild.id, purpose)
+        await interaction.response.send_message(
+            embed=await self.cog.build_channel_panel(guild, purpose),
+            view=view,
+            ephemeral=True,
+        )
+        view.message = await interaction.original_response()
+
+    @discord.ui.button(
+        label="Game Channel",
+        emoji="🌿",
+        style=discord.ButtonStyle.secondary,
+        row=3,
+    )
+    async def game_channel(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        await self.open_channel_panel(interaction, GAME_CHANNEL)
+
+    @discord.ui.button(
+        label="Announcements",
+        emoji="📢",
+        style=discord.ButtonStyle.secondary,
+        row=3,
+    )
+    async def announcement_channel(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        await self.open_channel_panel(interaction, ANNOUNCEMENT_CHANNEL)
 
 
 class Setup(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    async def set_error_log_channel(self, guild_id: int, channel_id: int | None) -> None:
+    async def set_channel_setting(
+        self,
+        guild_id: int,
+        key: str,
+        channel_id: int | None,
+    ) -> None:
         async with self.bot.db.lock:
             world = await self.bot.db.get_world(int(guild_id))
             settings = world.setdefault(SETTINGS_KEY, {})
             if channel_id is None:
-                settings.pop(ERROR_LOG_CHANNEL_KEY, None)
+                settings.pop(key, None)
             else:
-                settings[ERROR_LOG_CHANNEL_KEY] = int(channel_id)
+                settings[key] = int(channel_id)
             self.bot.db.mark_world_dirty(int(guild_id))
 
-    async def get_error_log_channel_id(self, guild_id: int) -> int | None:
+    async def get_channel_setting_id(self, guild_id: int, key: str) -> int | None:
         world = await self.bot.db.get_world(int(guild_id))
-        channel_id = world.get(SETTINGS_KEY, {}).get(ERROR_LOG_CHANNEL_KEY)
+        channel_id = world.get(SETTINGS_KEY, {}).get(key)
         return int(channel_id) if channel_id else None
 
-    async def get_error_log_channel(self, guild: discord.Guild) -> discord.TextChannel | None:
-        channel_id = await self.get_error_log_channel_id(guild.id)
+    async def get_configured_channel(
+        self,
+        guild: discord.Guild,
+        key: str,
+    ) -> discord.TextChannel | None:
+        channel_id = await self.get_channel_setting_id(guild.id, key)
         if channel_id is None:
             return None
         channel = guild.get_channel(channel_id)
-        return channel if isinstance(channel, discord.TextChannel) else None
+        if not isinstance(channel, discord.TextChannel) or guild.me is None:
+            return None
+        healthy, _missing = _permission_health(channel, guild.me)
+        return channel if healthy else None
+
+    async def channel_status(self, guild: discord.Guild, key: str) -> str:
+        channel_id = await self.get_channel_setting_id(guild.id, key)
+        channel = guild.get_channel(channel_id) if channel_id is not None else None
+        if channel_id is None:
+            return "🔴 **Not configured**"
+        if not isinstance(channel, discord.TextChannel):
+            return "🟠 **Needs attention** — saved channel was deleted or is unusable"
+        if guild.me is None:
+            return f"🟡 {channel.mention} — unable to verify permissions"
+        healthy, missing = _permission_health(channel, guild.me)
+        if healthy:
+            return f"🟢 **Healthy** — {channel.mention}"
+        return f"🟠 **Needs attention** — {channel.mention}\nMissing: {', '.join(missing)}"
+
+    async def build_channel_panel(
+        self,
+        guild: discord.Guild,
+        purpose: ChannelPurpose,
+    ) -> discord.Embed:
+        embed = discord.Embed(
+            title=f"{purpose.emoji} {purpose.label}",
+            description=purpose.description,
+            color=discord.Color.green(),
+        )
+        embed.add_field(
+            name="Current status",
+            value=await self.channel_status(guild, purpose.key),
+            inline=False,
+        )
+        embed.set_footer(text="Choose a channel, use this channel, create one, test, or disable.")
+        return embed
 
     async def build_panel(self, guild: discord.Guild) -> discord.Embed:
-        channel_id = await self.get_error_log_channel_id(guild.id)
-        channel = guild.get_channel(channel_id) if channel_id is not None else None
-
-        if channel_id is None:
-            status = "🔴 **Disabled**\nChoose a channel, use this channel, or create one automatically."
-        elif not isinstance(channel, discord.TextChannel):
-            status = (
-                "🟠 **Needs attention**\n"
-                "The saved channel was deleted or is no longer a usable text channel. Choose another one."
-            )
-        elif guild.me is None:
-            status = f"🟡 {channel.mention}\nUnable to verify permissions right now."
-        else:
-            healthy, missing = _permission_health(channel, guild.me)
-            if healthy:
-                status = f"🟢 **Healthy** — {channel.mention}"
-            else:
-                status = (
-                    f"🟠 **Needs attention** — {channel.mention}\n"
-                    f"Missing: {', '.join(missing)}"
-                )
+        error_status = await self.channel_status(guild, ERROR_LOG_CHANNEL_KEY)
+        game_status = await self.channel_status(guild, GAME_CHANNEL_KEY)
+        announcement_status = await self.channel_status(guild, ANNOUNCEMENT_CHANNEL_KEY)
+        if await self.get_channel_setting_id(guild.id, ANNOUNCEMENT_CHANNEL_KEY) is None:
+            if await self.get_configured_channel(guild, GAME_CHANNEL_KEY) is not None:
+                announcement_status += "\n↪ Uses the game channel as fallback"
 
         embed = discord.Embed(
             title="🌿 Idle Grow Server Setup",
@@ -292,10 +588,12 @@ class Setup(commands.Cog):
             ),
             color=discord.Color.green(),
         )
-        embed.add_field(name="🚨 Error Logging", value=status, inline=False)
+        embed.add_field(name="🌿 Main Game Channel", value=game_status, inline=False)
+        embed.add_field(name="📢 Announcements", value=announcement_status, inline=False)
+        embed.add_field(name="🚨 Error Logging", value=error_status, inline=False)
         embed.add_field(
             name="Coming next",
-            value="Game channel • Sesh rooms • Announcements • AI • Multiplayer • Notifications",
+            value="Sesh rooms • AI • Multiplayer • Notifications",
             inline=False,
         )
         embed.set_footer(
@@ -311,7 +609,6 @@ class Setup(commands.Cog):
             return await ctx.send(
                 "❌ You need **Manage Server** to configure Idle Grow.", ephemeral=True
             )
-
         view = SetupView(self, ctx.author.id, ctx.guild.id)
         message = await ctx.send(
             embed=await self.build_panel(ctx.guild),
