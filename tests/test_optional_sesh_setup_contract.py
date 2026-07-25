@@ -10,8 +10,9 @@ def test_sesh_is_optional_and_disabled_by_default():
     assert 'SESH_ENABLED_KEY = "enabled"' in SETUP_SOURCE
     assert 'config.get(SESH_ENABLED_KEY, False)' in SETUP_SOURCE
     assert 'Optional and disabled' in SETUP_SOURCE
-    assert 'if not config.get(SESH_ENABLED_KEY, False):' in SESH_SOURCE
-    assert 'This server has not enabled the optional Sesh feature' in SESH_SOURCE
+    assert 'if not bool(config.get(SESH_ENABLED_KEY, False)):' in SESH_SOURCE
+    assert 'Sesh is an optional Idle Grow community feature' in SESH_SOURCE
+    assert 'disabled for this server' in SESH_SOURCE
 
 
 def test_setup_requires_explicit_voice_room_scope_before_enabling():
@@ -46,7 +47,7 @@ def test_disabling_sesh_ends_all_guild_sessions_and_cleans_temp_rooms():
     assert 'private_room_expired' in SESH_SOURCE
     assert 'stale restart cleanup' in SESH_SOURCE
     assert 'orphaned temporary Sesh cleanup' in SESH_SOURCE
-    assert 'switch failed' in SESH_SOURCE
+    assert 'Temporary Sesh activation failed' in SESH_SOURCE
 
 
 def test_cleanup_only_targets_bot_marked_temporary_rooms():
