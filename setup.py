@@ -787,11 +787,27 @@ class SignatureFieldSelect(discord.ui.Select):
                 "❌ Server context is unavailable.", ephemeral=True
             )
             return
+        await interaction.response.defer()
         await self.signature_view.cog.update_signature_config(
             guild.id,
             **{SIGNATURE_ALLOWED_FIELDS_KEY: list(self.values)},
         )
-        await self.signature_view.refresh(interaction)
+        signature_cog = self.signature_view.cog.bot.get_cog("ProfileSignatures")
+        if signature_cog is not None and hasattr(
+            signature_cog, "invalidate_guild_cards"
+        ):
+            await signature_cog.invalidate_guild_cards(guild)
+        config = await self.signature_view.cog.get_signature_config(guild.id)
+        view = SignatureSetupView(
+            self.signature_view.cog,
+            interaction.user.id,
+            guild.id,
+            config,
+        )
+        await interaction.edit_original_response(
+            embed=await self.signature_view.cog.build_signature_panel(guild),
+            view=view,
+        )
 
 
 class SignatureSetupView(OwnedSetupView):
@@ -946,7 +962,7 @@ class SignatureSetupView(OwnedSetupView):
                 "❌ Server context is unavailable.", ephemeral=True
             )
             return
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         await self.cog.update_signature_config(
             guild.id,
             **{SIGNATURE_ENABLED_KEY: False},
