@@ -52,7 +52,28 @@ jobs:
         run: python -m pytest -q tests/test_world_modes_core.py tests/test_startup_contract.py tests/test_command_surface_uniqueness.py
 
       - name: Run existing regression suite
-        run: python -m pytest -q --ignore=tests/test_world_mode_integration_contract.py
+        id: regressions
+        run: |
+          set +e
+          python -m pytest -q --tb=short -x --ignore=tests/test_world_mode_integration_contract.py > phase2-regression.log 2>&1
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload phase 2 regression log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-regression-log
+          path: phase2-regression.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Fail when regressions fail
+        if: steps.regressions.outputs.exit_code != '0'
+        run: |
+          cat phase2-regression.log
+          exit 1
 
       - name: Inspect cleanup and whitespace
         run: |
