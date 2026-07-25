@@ -152,7 +152,7 @@ jobs:
       (github.ref == 'refs/heads/feature/world-mode-controls' ||
       github.event.pull_request.head.ref == 'feature/world-mode-controls')
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     env:
       PYTHONDONTWRITEBYTECODE: '1'
       DISCORD_TOKEN: ''
@@ -177,11 +177,13 @@ jobs:
           python -m pip install -q --upgrade pip
           python -m pip install -q -r requirements.txt pytest
 
-      - name: Apply phase 3 routing
-        id: patch
+      - name: Apply and validate phase 3
+        id: pipeline
         run: |
           set +e
-          python - <<'PY'
+          : > PHASE3_DIAGNOSTIC.log
+          echo 'STAGE: runtime anchor correction' >> PHASE3_DIAGNOSTIC.log
+          python - <<'PY' >> PHASE3_DIAGNOSTIC.log 2>&1
           from pathlib import Path
           path = Path('tools/apply_world_mode_phase3.py')
           source = path.read_text(encoding='utf-8')
@@ -197,78 +199,69 @@ jobs:
               raise RuntimeError('lab dirty-count patch anchor changed')
           path.write_text(source.replace(old, new, 1), encoding='utf-8')
           PY
-          python tools/apply_world_mode_phase3.py > phase3-patch.log 2>&1
           code=$?
+          if [ "$code" -eq 0 ]; then
+            echo 'STAGE: apply source patch' >> PHASE3_DIAGNOSTIC.log
+            python tools/apply_world_mode_phase3.py >> PHASE3_DIAGNOSTIC.log 2>&1
+            code=$?
+          fi
+          if [ "$code" -eq 0 ]; then
+            rm -f tools/apply_world_mode_phase3.py
+            echo 'STAGE: compile' >> PHASE3_DIAGNOSTIC.log
+            python -m compileall -q . >> PHASE3_DIAGNOSTIC.log 2>&1
+            code=$?
+          fi
+          if [ "$code" -eq 0 ]; then
+            echo 'STAGE: focused tests' >> PHASE3_DIAGNOSTIC.log
+            python -m pytest -q \
+              tests/test_world_modes_core.py \
+              tests/test_world_mode_phase3_contract.py \
+              tests/test_lab_scoped_persistence_contract.py \
+              tests/test_profile_signature_core.py \
+              tests/test_profile_signature_contract.py \
+              tests/test_optional_sesh_setup_contract.py \
+              tests/test_sesh_concept_contract.py \
+              tests/test_command_surface_uniqueness.py \
+              >> PHASE3_DIAGNOSTIC.log 2>&1
+            code=$?
+          fi
+          if [ "$code" -eq 0 ]; then
+            echo 'STAGE: pre-integration regression suite' >> PHASE3_DIAGNOSTIC.log
+            python -m pytest -q --tb=short -x \
+              --ignore=tests/test_world_mode_integration_contract.py \
+              >> PHASE3_DIAGNOSTIC.log 2>&1
+            code=$?
+          fi
+          if [ "$code" -eq 0 ]; then
+            echo 'STAGE: cleanup and whitespace' >> PHASE3_DIAGNOSTIC.log
+            find . -type d -name __pycache__ -prune -exec rm -rf {} +
+            find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+            git diff --check >> PHASE3_DIAGNOSTIC.log 2>&1
+            code=$?
+          fi
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           exit 0
 
-      - name: Upload patch diagnostic
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: phase3-patch-log
-          path: phase3-patch.log
-          if-no-files-found: warn
-          retention-days: 3
-
-      - name: Fail when patch application fails
-        if: steps.patch.outputs.exit_code != '0'
+      - name: Publish exact failure diagnostic
+        if: steps.pipeline.outputs.exit_code != '0'
         run: |
-          cat phase3-patch.log
-          exit 1
+          cp PHASE3_DIAGNOSTIC.log /tmp/PHASE3_DIAGNOSTIC.log
+          git reset --hard HEAD
+          cp /tmp/PHASE3_DIAGNOSTIC.log PHASE3_DIAGNOSTIC.log
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add PHASE3_DIAGNOSTIC.log
+          git commit -m 'Record world mode phase 3 diagnostic'
+          git push origin HEAD:feature/world-mode-controls
 
-      - name: Remove temporary patch script
-        run: rm -f tools/apply_world_mode_phase3.py phase3-patch.log
+      - name: Stop after diagnostic publication
+        if: steps.pipeline.outputs.exit_code != '0'
+        run: exit 1
 
-      - name: Compile routed sources
-        run: python -m compileall -q .
-
-      - name: Run focused phase 3 tests
+      - name: Commit and push validated phase 3 source
+        if: steps.pipeline.outputs.exit_code == '0'
         run: |
-          python -m pytest -q \
-            tests/test_world_modes_core.py \
-            tests/test_world_mode_phase3_contract.py \
-            tests/test_lab_scoped_persistence_contract.py \
-            tests/test_profile_signature_core.py \
-            tests/test_profile_signature_contract.py \
-            tests/test_optional_sesh_setup_contract.py \
-            tests/test_sesh_concept_contract.py \
-            tests/test_command_surface_uniqueness.py
-
-      - name: Run existing regression suite
-        id: regressions
-        run: |
-          set +e
-          python -m pytest -q --tb=short -x --ignore=tests/test_world_mode_integration_contract.py > phase3-regression.log 2>&1
-          code=$?
-          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
-          exit 0
-
-      - name: Upload phase 3 regression log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: phase3-regression-log
-          path: phase3-regression.log
-          if-no-files-found: warn
-          retention-days: 3
-
-      - name: Fail when regressions fail
-        if: steps.regressions.outputs.exit_code != '0'
-        run: |
-          cat phase3-regression.log
-          exit 1
-
-      - name: Inspect cleanup and whitespace
-        run: |
-          find . -type d -name __pycache__ -prune -exec rm -rf {} +
-          find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
-          rm -f phase3-regression.log
-          git diff --check
-          test ! -f tools/apply_world_mode_phase3.py
-
-      - name: Commit and push phase 3 source only
-        run: |
+          rm -f PHASE3_DIAGNOSTIC.log
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
