@@ -9,6 +9,8 @@ from discord.ext import commands
 
 SETTINGS_KEY = "settings"
 SESH_CONFIG_KEY = "sesh_config"
+AI_CONFIG_KEY = "ai_config"
+AI_ENABLED_KEY = "enabled"
 ERROR_LOG_CHANNEL_KEY = "error_log_channel_id"
 GAME_CHANNEL_KEY = "game_channel_id"
 ANNOUNCEMENT_CHANNEL_KEY = "announcement_channel_id"
@@ -567,6 +569,120 @@ class SeshSetupView(OwnedSetupView):
         await self.refresh(interaction)
 
 
+class AISetupView(OwnedSetupView):
+    def __init__(self, cog: "Setup", owner_id: int, guild_id: int) -> None:
+        super().__init__(owner_id, guild_id)
+        self.cog = cog
+
+    async def refresh(self, interaction: discord.Interaction) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+            return
+        await interaction.response.edit_message(
+            embed=await self.cog.build_ai_panel(guild),
+            view=self,
+        )
+
+    @discord.ui.button(
+        label="Enable AI",
+        emoji="🤖",
+        style=discord.ButtonStyle.success,
+        row=0,
+    )
+    async def enable_ai(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+            return
+        ai_cog = self.cog.bot.get_cog("AI")
+        if ai_cog is None or not hasattr(ai_cog, "service_health"):
+            await interaction.response.send_message(
+                "❌ Idle Grow AI is not loaded on the bot host.", ephemeral=True
+            )
+            return
+        healthy, detail = ai_cog.service_health()
+        if not healthy:
+            await interaction.response.send_message(
+                f"❌ Idle Grow AI cannot be enabled yet: **{detail}**.",
+                ephemeral=True,
+            )
+            return
+        await self.cog.update_ai_config(guild.id, **{AI_ENABLED_KEY: True})
+        await self.refresh(interaction)
+
+    @discord.ui.button(
+        label="Test AI",
+        emoji="🧪",
+        style=discord.ButtonStyle.primary,
+        row=0,
+    )
+    async def test_ai(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+            return
+        ai_cog = self.cog.bot.get_cog("AI")
+        if ai_cog is None or not hasattr(ai_cog, "request_reply"):
+            await interaction.response.send_message(
+                "❌ Idle Grow AI is not loaded on the bot host.", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            reply = await ai_cog.request_reply(
+                guild.id,
+                "Reply only with: Idle Grow AI is ready.",
+                health_test=True,
+            )
+        except Exception as exc:
+            public_message = getattr(
+                exc,
+                "public_message",
+                "❌ Idle Grow AI test failed. Check the configured error log.",
+            )
+            await interaction.followup.send(public_message, ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"✅ Private health test passed. Provider reply: **{reply[:300]}**",
+            ephemeral=True,
+        )
+
+    @discord.ui.button(
+        label="Disable AI",
+        emoji="🔕",
+        style=discord.ButtonStyle.danger,
+        row=0,
+    )
+    async def disable_ai(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+            return
+        await self.cog.update_ai_config(guild.id, **{AI_ENABLED_KEY: False})
+        await self.refresh(interaction)
+
+
 class SetupView(OwnedSetupView):
     def __init__(self, cog: "Setup", owner_id: int, guild_id: int) -> None:
         super().__init__(owner_id, guild_id)
@@ -804,6 +920,32 @@ class SetupView(OwnedSetupView):
         )
         view.message = await interaction.original_response()
 
+    @discord.ui.button(
+        label="Optional AI",
+        emoji="🤖",
+        style=discord.ButtonStyle.secondary,
+        row=4,
+    )
+    async def ai_setup(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Server context is unavailable.", ephemeral=True
+            )
+            return
+        view = AISetupView(self.cog, interaction.user.id, guild.id)
+        await interaction.response.send_message(
+            embed=await self.cog.build_ai_panel(guild),
+            view=view,
+            ephemeral=True,
+        )
+        view.message = await interaction.original_response()
+
+
 
 class Setup(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
@@ -955,6 +1097,77 @@ class Setup(commands.Cog):
         )
         return embed
 
+
+    async def update_ai_config(self, guild_id: int, **changes: object) -> None:
+        async with self.bot.db.lock:
+            world = await self.bot.db.get_world(int(guild_id))
+            config = world.setdefault(AI_CONFIG_KEY, {})
+            for key, value in changes.items():
+                if value is None:
+                    config.pop(key, None)
+                else:
+                    config[key] = value
+            self.bot.db.mark_world_dirty(int(guild_id))
+
+    async def get_ai_config(self, guild_id: int) -> dict:
+        world = await self.bot.db.get_world(int(guild_id))
+        return dict(world.get(AI_CONFIG_KEY, {}))
+
+    async def ai_status(self, guild: discord.Guild) -> str:
+        config = await self.get_ai_config(guild.id)
+        if not config.get(AI_ENABLED_KEY, False):
+            return "⚪ **Optional and disabled**"
+        ai_cog = self.bot.get_cog("AI")
+        if ai_cog is None or not hasattr(ai_cog, "service_health"):
+            return "🟠 **Needs attention** — AI extension is unavailable"
+        healthy, detail = ai_cog.service_health()
+        if healthy:
+            return f"🟢 **Enabled and healthy** — {detail}"
+        return f"🟠 **Needs attention** — {detail}"
+
+    async def build_ai_panel(self, guild: discord.Guild) -> discord.Embed:
+        ai_cog = self.bot.get_cog("AI")
+        if ai_cog is None or not hasattr(ai_cog, "service_health"):
+            service_status = "🔴 AI extension is not loaded"
+        else:
+            healthy, detail = ai_cog.service_health()
+            service_status = ("🟢 " if healthy else "🟠 ") + detail
+
+        embed = discord.Embed(
+            title="🤖 Optional Idle Grow AI",
+            description=(
+                "AI game help is optional per server and disabled by default. The OpenRouter "
+                "key and model configuration belong to the bot host; server owners never enter "
+                "or see secrets. The assistant cannot grant items, currency, XP, or generate images."
+            ),
+            color=discord.Color.green(),
+        )
+        embed.add_field(
+            name="Server status",
+            value=await self.ai_status(guild),
+            inline=False,
+        )
+        embed.add_field(name="Provider health", value=service_status, inline=False)
+        embed.add_field(
+            name="Private test",
+            value=(
+                "Test AI sends a tiny health prompt through the same request path as `/chat`. "
+                "The result is visible only to the manager using this panel."
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Privacy and errors",
+            value=(
+                "Provider failures can route to this server's configured error log, but prompts, "
+                "responses, API keys, and provider secrets are never included."
+            ),
+            inline=False,
+        )
+        embed.set_footer(text="Test first, then enable. Run /setup anytime to disable it again.")
+        return embed
+
+
     async def build_channel_panel(
         self,
         guild: discord.Guild,
@@ -995,9 +1208,10 @@ class Setup(commands.Cog):
         embed.add_field(name="📢 Announcements", value=announcement_status, inline=False)
         embed.add_field(name="🚨 Error Logging", value=error_status, inline=False)
         embed.add_field(name="🔥 Optional Sesh", value=await self.sesh_status(guild), inline=False)
+        embed.add_field(name="🤖 Optional AI", value=await self.ai_status(guild), inline=False)
         embed.add_field(
             name="Coming next",
-            value="AI • Multiplayer • Notifications",
+            value="Multiplayer • Notifications",
             inline=False,
         )
         embed.set_footer(

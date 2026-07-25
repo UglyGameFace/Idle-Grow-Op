@@ -1,61 +1,75 @@
-# Active Task: Public Server Setup — Game and Announcement Channels
+# Active Task: Optional Guild-Scoped AI Setup
 
 ## Scope
-Expand the existing Discord-native `/setup` wizard so every server owner can configure a main game channel and announcement channel without copying IDs or editing deployment variables.
+Integrate optional Idle Grow AI controls into the existing Discord-native `/setup` wizard and make the real `/chat` execution path reliable, current, secret-safe, and disabled by default per server.
 
 ## Root Cause and Confirmed Findings
-- Error logging was already moved to per-guild setup, but game and announcement destinations were still absent.
-- A saved setting without a real consumer would be misleading, so announcement routing must be connected to the live world-cycle execution path.
-- Hard-locking gameplay commands to one channel would make the bot fragile and could lock users out after permission or channel changes.
-- The 15-minute world cycle changes weather frequently; announcing every routine roll would create spam.
-- Discord component rows become cluttered quickly on mobile, so focused sub-panels are preferable to three simultaneous channel pickers.
+- The old AI path was branded for Stoney Baloney and documented outdated prefix commands.
+- The model, timeout, token limit, and cooldown were hardcoded instead of using host configuration.
+- Every server could use AI automatically with no guild opt-in.
+- Provider errors were printed to stdout without guild-scoped error routing.
+- The AI cog referenced a guild error-reporter hook that did not exist on the bot.
+- Malformed numeric environment values could crash the AI extension during import and abort startup.
+- The AI read path mutated cached guild-world configuration without locking or dirty tracking.
+- Raw provider error bodies were not safe to retain because they could contain request-related details.
+- Server owners must never enter or see the host OpenRouter key.
+- AI image generation must remain absent.
 
 ## Architecture Decision
-- Keep one canonical `setup.py` system.
-- Store `game_channel_id` and `announcement_channel_id` in each guild world's `settings` map.
-- Treat the game channel as the recommended play hub, not a command restriction.
-- Route special-event and major-market announcements to the explicit announcement channel.
-- Use the configured game channel only when no announcement channel was selected.
-- Never fall back to a random writable channel.
-- If an explicitly configured announcement channel is deleted or unhealthy, show it as unhealthy and do not silently reroute.
+- Keep one canonical `setup.py` wizard.
+- Store AI enablement in each guild world's `ai_config` map.
+- Keep OpenRouter secrets and model configuration at the bot-host level.
+- Use one `request_reply()` path for `/chat` and private setup health tests.
+- Expose one awaited bot-level guild error-reporter contract for cogs.
+- Route only secret-safe provider metadata to the configured guild error log.
+- Never log prompts, replies, raw provider bodies, API keys, or provider secrets.
+- Keep config reads non-mutating; reserve locked writes and dirty tracking for setup changes.
 
 ## Implementation Status
 Completed:
-- Created `feature/setup-game-announcement-channels` from current `main`.
-- Added Game Channel and Announcements buttons to the existing `/setup` panel.
-- Added focused private channel-selection sub-panels.
-- Added existing-channel selection, current-channel selection, automatic channel creation, test delivery, and disable actions.
-- Added permission-health checks and deleted-channel detection.
-- Added guild-world persistence with exact dirty tracking.
-- Added game-channel fallback presentation in the main setup panel.
-- Connected the Tasks world cycle to configured announcement routing.
-- Added event-start, event-end, and major-market-change announcement generation.
-- Kept routine weather rolls silent to prevent channel spam.
+- Rebuilt `ai.py` around a guild-aware canonical request service.
+- Added current Idle Grow Op prompt and slash-command guidance.
+- Added host-configured model fallback, timeout, cooldown, and token limits.
+- Added bounded safe integer parsing with default fallback for malformed host configuration.
+- Added clear provider error classes and secret-safe error routing.
+- Added the real awaited `bot.report_command_error` hook backed by the existing per-guild reporter.
+- Removed raw provider response bodies from logs.
+- Changed guild AI configuration reads to return a non-mutating copy.
+- Added disabled-by-default guild checks for `/chat`.
+- Added the Optional AI panel to the existing `/setup` wizard.
+- Added private provider health testing plus enable and disable controls.
+- Added guild-world persistence for AI enablement.
+- Added focused runtime, reporter, privacy, and setup regression contracts.
+- Updated the existing guild error-routing contract for safe persisted ID parsing.
 
 Still required:
-- Add direct runtime tests for event and market announcement generation.
-- Run full pytest, compilation, command uniqueness, and all-extension load checks.
-- Inspect the final diff for duplicate configuration paths or temporary code.
-- Merge only after CI is green.
+- User approval to merge PR #8 into `main`.
 
 ## Validation Status
-- Static setup contracts updated for all three guild channel settings.
-- Full CI has not yet run on this branch.
+- Focused AI runtime and setup tests passed.
+- Qodo's three review findings are resolved.
+- PR #8 is mergeable with no file conflicts.
+- GitHub Actions CI run **347** passed on commit `3102746`.
+- Compilation passed.
+- Complete pytest passed.
+- All 13 canonical Enterprise extensions loaded successfully.
+- Legacy persistence and backup-artifact guard passed.
 
 ## Cleanup Status
-- No hardcoded channel IDs.
-- No new environment variables.
 - No second setup command or compatibility layer.
-- No command-channel lock.
-- No random-channel fallback.
-- No routine weather announcement spam.
+- No AI image generation command or endpoint.
+- No server-owned API key storage.
+- No prompt, response, raw provider-body, or secret logging.
+- No duplicate AI configuration path.
+- No temporary patch script or branch workflow remains.
+- The temporary trusted integrator was removed from `main` after use.
+- Final changed-file surface is limited to AI runtime, shared error routing, canonical setup, task record, and targeted regression tests.
 
 ## Blockers
-- None currently.
+- None. PR #8 is ready to merge.
 
 ## Backlog Locked Behind This Task
-- Sesh voice-room selection and private-category setup.
-- AI enable/disable and model controls.
+- Live Profile Signature cards are tracked separately in issue #13 and must avoid repetitive reposting or channel spam.
 - Multiplayer/open-world versus solo-world controls.
 - Notification preferences and announcement-role controls.
 - Broader onboarding and first-run guidance.
