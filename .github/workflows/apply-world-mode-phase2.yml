@@ -41,18 +41,20 @@ jobs:
         run: |
           python tools/apply_world_mode_phase2.py
           python tools/migrate_admin_world_mode_contract.py
+          python tools/migrate_routed_world_mode_contracts.py
 
       - name: Remove temporary integration files
         run: |
           rm -f tools/apply_world_mode_phase2.py
           rm -f tools/migrate_admin_world_mode_contract.py
+          rm -f tools/migrate_routed_world_mode_contracts.py
           rm -f .github/workflows/apply-world-mode-phase2.yml
 
       - name: Compile routed sources
         run: python -m compileall -q .
 
       - name: Run focused world mode tests
-        run: python -m pytest -q tests/test_world_modes_core.py tests/test_startup_contract.py tests/test_command_surface_uniqueness.py tests/test_admin_integrity_contract.py
+        run: python -m pytest -q tests/test_world_modes_core.py tests/test_startup_contract.py tests/test_command_surface_uniqueness.py tests/test_admin_integrity_contract.py tests/test_farming_scoped_persistence_contract.py
 
       - name: Run existing regression suite
         id: regressions
@@ -85,6 +87,7 @@ jobs:
           git diff --check
           test ! -f tools/apply_world_mode_phase2.py
           test ! -f tools/migrate_admin_world_mode_contract.py
+          test ! -f tools/migrate_routed_world_mode_contracts.py
           test ! -f .github/workflows/apply-world-mode-phase2.yml
 
       - name: Commit routed foundation
