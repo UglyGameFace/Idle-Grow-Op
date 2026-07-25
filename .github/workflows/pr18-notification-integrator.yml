@@ -32,16 +32,17 @@ jobs:
           python -m pip install -q --upgrade pip
           python -m pip install -q -r requirements.txt pytest
 
-      - name: Apply canonical notification integration
-        run: python tools/apply_notification_preferences.py
-
-      - name: Validate focused implementation
+      - name: Apply and validate canonical notification integration
         id: focused
         shell: bash
         run: |
           set +e
-          python -m py_compile notification_preferences.py setup.py tasks.py main.py > notification-focused.log 2>&1
+          python tools/apply_notification_preferences.py > notification-focused.log 2>&1
           code=$?
+          if [ "$code" -eq 0 ]; then
+            python -m py_compile notification_preferences.py setup.py tasks.py main.py >> notification-focused.log 2>&1
+            code=$?
+          fi
           if [ "$code" -eq 0 ]; then
             python -m pytest -q tests/test_notification_preferences_runtime.py tests/test_notification_preferences_contract.py >> notification-focused.log 2>&1
             code=$?
