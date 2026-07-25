@@ -39,16 +39,24 @@ jobs:
 
       - name: Apply routing phase
         run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tools/apply_world_mode_phase2.py')
+          source = path.read_text(encoding='utf-8')
+          marker = '# Keep the legacy-artifact guard aware of the new canonical module.'
+          if marker not in source:
+              raise RuntimeError('CI patch marker missing')
+          path.write_text(source.split(marker, 1)[0].rstrip() + '\n', encoding='utf-8')
+          PY
           python tools/apply_world_mode_phase2.py
           python tools/migrate_admin_world_mode_contract.py
           python tools/migrate_routed_world_mode_contracts.py
 
-      - name: Remove temporary integration files
+      - name: Remove temporary patch scripts
         run: |
           rm -f tools/apply_world_mode_phase2.py
           rm -f tools/migrate_admin_world_mode_contract.py
           rm -f tools/migrate_routed_world_mode_contracts.py
-          rm -f .github/workflows/apply-world-mode-phase2.yml
 
       - name: Compile routed sources
         run: python -m compileall -q .
@@ -84,39 +92,17 @@ jobs:
         run: |
           find . -type d -name __pycache__ -prune -exec rm -rf {} +
           find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+          rm -f phase2-regression.log phase2-publish.log
           git diff --check
           test ! -f tools/apply_world_mode_phase2.py
           test ! -f tools/migrate_admin_world_mode_contract.py
           test ! -f tools/migrate_routed_world_mode_contracts.py
-          test ! -f .github/workflows/apply-world-mode-phase2.yml
+          test -f .github/workflows/apply-world-mode-phase2.yml
 
-      - name: Commit routed foundation
-        id: publish
+      - name: Commit and push routed foundation
         run: |
-          set +e
-          {
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git status --short
-            git add -A
-            git commit -m 'Route core gameplay through world mode scopes'
-            git pull --rebase origin feature/world-mode-controls
-            git push origin HEAD:feature/world-mode-controls
-          } > phase2-publish.log 2>&1
-          code=$?
-          cat phase2-publish.log
-          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
-          exit 0
-
-      - name: Upload publish log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: phase2-publish-log
-          path: phase2-publish.log
-          if-no-files-found: error
-          retention-days: 3
-
-      - name: Fail when publish fails
-        if: steps.publish.outputs.exit_code != '0'
-        run: exit 1
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Route core gameplay through world mode scopes'
+          git push origin HEAD:feature/world-mode-controls
