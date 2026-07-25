@@ -33,6 +33,19 @@ def test_setup_has_easy_selection_and_recovery_actions():
     assert "guild.create_text_channel" in SETUP_SOURCE
 
 
+def test_setup_only_accepts_channels_that_can_receive_normal_embeds():
+    assert "isinstance(resolved, discord.TextChannel)" in SETUP_SOURCE
+    assert "isinstance(channel, discord.TextChannel)" in SETUP_SOURCE
+    assert "discord.ForumChannel" not in SETUP_SOURCE
+
+
+def test_auto_created_log_channel_is_private_but_visible_to_setup_manager():
+    assert "guild.default_role: discord.PermissionOverwrite(view_channel=False)" in SETUP_SOURCE
+    assert "overwrites[interaction.user]" in SETUP_SOURCE
+    assert "view_channel=True" in SETUP_SOURCE
+    assert "read_message_history=True" in SETUP_SOURCE
+
+
 def test_setup_validates_channel_health_before_saving():
     for permission in (
         '"view_channel"',
@@ -43,6 +56,14 @@ def test_setup_validates_channel_health_before_saving():
         assert permission in SETUP_SOURCE
     assert "_permission_health(channel, guild.me)" in SETUP_SOURCE
     assert "Missing:" in SETUP_SOURCE
+
+
+def test_deleted_saved_channel_is_reported_as_unhealthy_not_disabled():
+    assert "channel_id = await self.get_error_log_channel_id(guild.id)" in SETUP_SOURCE
+    assert "The saved channel was deleted" in SETUP_SOURCE
+    assert 'status = "🔴 **Disabled**' in SETUP_SOURCE
+    assert 'status = (' in SETUP_SOURCE
+    assert '"🟠 **Needs attention**' in SETUP_SOURCE
 
 
 def test_error_reporting_uses_current_guild_configuration_only():
