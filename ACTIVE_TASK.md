@@ -26,31 +26,29 @@ Completed:
 - Added host-configured model fallback, timeout, cooldown, and token limits.
 - Added clear provider error classes and secret-safe error routing.
 - Added disabled-by-default guild checks for `/chat`.
-- Added regression contracts for the AI runtime and setup surface.
-- Corrected the trusted integration gate to run the actual optional-AI contract.
-- Added focused validation artifact capture so the remaining mismatch is diagnosable.
+- Added the Optional AI panel to the existing `/setup` wizard.
+- Added private provider health testing plus enable and disable controls.
+- Added guild-world persistence for AI enablement.
+- Added focused runtime and setup regression contracts.
 
 Still required:
-- Integrate the Optional AI panel into the canonical `/setup` wizard.
-- Validate private health testing and enable/disable persistence.
-- Remove all temporary integration helpers.
-- Run full pytest, compilation, command uniqueness, and all-extension loading.
-- Inspect the final diff and merge only after every gate passes.
+- Run fresh full pytest, compilation, command uniqueness, and all-extension loading.
+- Inspect the final PR diff and merge only after every gate passes.
 
 ## Validation Status
-- Initial AI service tests reached the user-facing 401 error contract.
-- Trusted canonical setup integration is retrying with focused log capture.
-- Full CI remains blocked until canonical setup integration lands.
+- Focused AI runtime and setup tests passed in the trusted integration gate.
+- A fresh human-authored commit is triggering the complete repository CI gate.
 
 ## Cleanup Status
 - No second setup command or compatibility layer.
 - No AI image generation.
 - No server-owned API key storage.
 - No prompt or response logging.
-- Temporary integration tooling must be absent before merge.
+- No temporary patch script or branch workflow remains.
+- The temporary trusted integrator was removed from `main` after use.
 
 ## Blockers
-- Canonical `setup.py` integration is the current active implementation step.
+- None beyond the final full CI and conflict inspection.
 
 ## Backlog Locked Behind This Task
 - Multiplayer/open-world versus solo-world controls.
