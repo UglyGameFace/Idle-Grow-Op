@@ -105,9 +105,10 @@ def test_announcement_routing_uses_explicit_channel_then_game_fallback():
 
 def test_world_announcements_are_major_events_not_every_weather_roll():
     assert "MAJOR_MARKET_CHANGE = 0.20" in TASKS_SOURCE
+    assert "MARKET_CHANGE_EPSILON" in TASKS_SOURCE
     assert "if not previous_event and current_event:" in TASKS_SOURCE
     assert "if previous_event and not current_event:" in TASKS_SOURCE
-    assert "if abs(delta) < MAJOR_MARKET_CHANGE:" in TASKS_SOURCE
+    assert "if abs(delta) + MARKET_CHANGE_EPSILON < MAJOR_MARKET_CHANGE:" in TASKS_SOURCE
     assert "return None" in TASKS_SOURCE
     assert "await self._send_world_announcement(guild, announcement)" in TASKS_SOURCE
 
