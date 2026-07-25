@@ -14,6 +14,7 @@ EXPECTED_EXTENSIONS = {
     "progression",
     "quick",
     "sesh",
+    "setup",
     "social",
     "tasks",
 }
