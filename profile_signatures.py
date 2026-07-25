@@ -16,6 +16,7 @@ from discord.ext import commands
 
 from persistence_context import GuildContextRequired, require_guild_id
 from utils import _xp_needed_for_level, get_plant_grow_time
+from world_modes import MODE_LABELS, resolve_game_scope
 
 
 logger = logging.getLogger(__name__)
@@ -1101,17 +1102,30 @@ class ProfileSignatures(commands.Cog):
         member: discord.Member,
         *,
         server_allowed: set[str] | None = None,
-    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], set[str], list[dict[str, Any]]]:
+    ) -> tuple[
+        dict[str, Any],
+        dict[str, Any],
+        dict[str, Any],
+        set[str],
+        list[dict[str, Any]],
+        Any,
+    ]:
         account = await self.bot.db.get_account(member.id)
-        profile = await self.bot.db.get_profile(guild.id, member.id)
-        world = await self.bot.db.get_world(guild.id)
+        privacy_profile = await self.bot.db.get_profile(guild.id, member.id)
+        game_scope = await resolve_game_scope(self.bot.db, guild.id, member.id)
+        profile = await self.bot.db.get_profile(game_scope.scope_id, member.id)
+        world = await self.bot.db.get_world(game_scope.scope_id)
         visible = effective_visible_fields(
             account,
-            profile,
+            privacy_profile,
             server_allowed=server_allowed,
         )
+        visible = set(visible)
+        if game_scope.solo:
+            visible.discard("crew")
+            visible.discard("rank")
         platforms = shared_platform_entries(account) if "platforms" in visible else []
-        return account, profile, world, visible, platforms
+        return account, profile, world, visible, platforms, game_scope
 
     async def build_full_profile(
         self,
@@ -1120,7 +1134,7 @@ class ProfileSignatures(commands.Cog):
         *,
         viewer_id: int,
     ) -> tuple[discord.Embed, discord.ui.View | None]:
-        _account, profile, world, visible, platforms = await self._profile_components(
+        _account, profile, world, visible, platforms, game_scope = await self._profile_components(
             guild,
             member,
         )
@@ -1129,6 +1143,11 @@ class ProfileSignatures(commands.Cog):
             color=member.color,
         )
         embed.set_thumbnail(url=member.display_avatar.url)
+        embed.add_field(
+            name="🌍 Active Save",
+            value=f"{game_scope.emoji} **{MODE_LABELS[game_scope.mode]}**",
+            inline=False,
+        )
 
         if "level" in visible:
             embed.add_field(name="⭐ Level & XP", value=_xp_line(profile), inline=False)
@@ -1159,10 +1178,11 @@ class ProfileSignatures(commands.Cog):
                 value=_inventory_summary(profile),
                 inline=False,
             )
-        if "rank" in visible:
-            rank = await self._rank_for(guild.id, member.id)
+        if "rank" in visible and game_scope.multiplayer:
+            rank = await self._rank_for(game_scope.scope_id, member.id)
             if rank is not None:
-                embed.add_field(name="🏆 Server Rank", value=f"#{rank}", inline=True)
+                rank_label = "Open World Rank" if game_scope.cross_server else "Server Rank"
+                embed.add_field(name=f"🏆 {rank_label}", value=f"#{rank}", inline=True)
         if "achievements" in visible:
             achievements = profile.get("achievements")
             count = len(achievements) if isinstance(achievements, list) else 0
@@ -1207,7 +1227,7 @@ class ProfileSignatures(commands.Cog):
             for value in raw_allowed
             if str(value) in FIELD_LABELS
         }
-        _account, profile, world, visible, platforms = await self._profile_components(
+        _account, profile, world, visible, platforms, game_scope = await self._profile_components(
             guild,
             member,
             server_allowed=server_allowed,
@@ -1215,7 +1235,9 @@ class ProfileSignatures(commands.Cog):
         if not visible:
             return None
 
-        lines: list[str] = []
+        lines: list[str] = [
+            f"{game_scope.emoji} **{MODE_LABELS[game_scope.mode]}**"
+        ]
         if "level" in visible:
             level = max(1, _safe_int(profile.get("level"), 1))
             xp = max(0, _safe_int(profile.get("xp")))
@@ -1234,10 +1256,11 @@ class ProfileSignatures(commands.Cog):
             lines.append(f"💰 **Net worth:** ${total:,}")
         if "inventory" in visible:
             lines.append(f"🎒 **Inventory:** {_inventory_summary(profile)}")
-        if "rank" in visible:
-            rank = await self._rank_for(guild.id, member.id)
+        if "rank" in visible and game_scope.multiplayer:
+            rank = await self._rank_for(game_scope.scope_id, member.id)
             if rank is not None:
-                lines.append(f"🏆 **Server rank:** #{rank}")
+                rank_label = "Open World rank" if game_scope.cross_server else "Server rank"
+                lines.append(f"🏆 **{rank_label}:** #{rank}")
         if "achievements" in visible:
             achievements = profile.get("achievements")
             count = len(achievements) if isinstance(achievements, list) else 0

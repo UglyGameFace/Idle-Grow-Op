@@ -18,6 +18,7 @@ EXPECTED_EXTENSIONS = {
     "setup",
     "social",
     "tasks",
+    "world_modes",
 }
 
 

@@ -1,73 +1,60 @@
-# Active Task: Live Profile Signatures
+# Active Task: World Mode Controls
 
 ## Scope
-Add an optional per-server Live Profile Signature system that keeps one compact bot-owned Idle Grow profile card for the latest eligible speaker in explicitly configured channels. Add user-managed gaming/social identities and privacy controls without breaking the existing `/profile` command or leaking private profile data.
+Add safe server-owner controls for Solo Grow, shared Open World, Player Choice, and compatibility-safe Current Server World without copying, merging, resetting, or deleting existing progress.
 
-## Root Cause and Confirmed Findings
-- No profile-signature runtime existed; the only prior message listener in `social.py` handled support-service rewards in one fixed channel.
-- The existing `/profile` command directly built a public embed from guild profile/world data and exposed fields without user-level visibility controls.
-- Discord cannot attach content to another user's message. A forum-signature effect therefore requires a separate bot-owned message that is safely moved, replaced, and deduplicated.
-- Reposting after every message would be noisy and rate-limit prone. The runtime requires channel debouncing, same-speaker suppression, per-channel/per-user cooldowns, and persistent active-card state.
-- Global accounts are the correct home for cross-server platform identities and default privacy choices.
-- Guild profiles are the correct home for stricter per-server privacy overrides.
-- Guild worlds are the correct home for server configuration and active bot-card references.
-- The existing top-level `/profile` slash command cannot also become an application-command group without breaking its current invocation. Private editing/privacy controls therefore use `/profile-settings` plus an owner-only button on the existing profile view.
-- Several requested platforms do not have a reliable canonical public profile URL. Those identities remain username-only rather than using guessed or third-party links.
-- Discord link buttons require Unicode or uploaded application emoji. The runtime supports safe portable fallbacks plus host-configured application emoji for exact branded logos.
+## Locked Requirements
+- Solo Grow is a real private server-local operation, not multiplayer with a different label.
+- Open World is one shared cross-server economy with trading, auctions, crews, raids, territory, and global competition.
+- Solo and Open World saves never mix balances, inventory, plants, crews, cooldowns, achievements, auctions, or progression.
+- Player Choice uses separate saves and a seven-day switch cooldown after the first free selection.
+- Existing guild-local multiplayer progress remains available through Current Server World compatibility mode.
+- Solo keeps lower active grow, lab, and positive-market ceilings so it does not become the easiest or richest route.
+- Setup remains simple for ordinary server owners and requires no copied IDs or environment edits.
 
-## Architecture Decision
-- Use one canonical `profile_signatures.py` extension; no second profile system and no webhook impersonation path.
-- Keep the existing `/profile` command and aliases intact.
-- Store cross-server identities and default privacy under the global account.
-- Store stricter server-only hidden fields and opt-out under the guild profile.
-- Store server feature configuration and persisted active-card references in the guild world.
-- Keep the feature disabled by default and require explicit channel selection through `/setup` before enabling.
-- Use one card per configured channel, identified by a private footer marker and persisted message ID.
-- Ignore bots, webhooks, system messages, commands, opted-out users, and users with no visible permitted fields.
-- Coalesce message bursts, suppress repeated same-speaker reposts, and enforce per-channel/per-user cooldowns.
-- Validate recognized URLs against platform-specific HTTPS host/path allowlists. Never allow arbitrary custom links behind trusted platform labels.
-- Server managers may reduce the fields available in signatures, but user privacy always wins.
+## Implemented Architecture
+- `world_modes.py` is the canonical policy, scope, feature-gate, mode-label, and dirty-record routing layer.
+- Reserved persistence scope `1` stores the shared Open World using the existing normalized profile and world tables.
+- Server policy remains in the real guild world; Player Choice metadata remains in the real guild profile.
+- Gameplay records resolve to either the real guild scope or the reserved Open World scope.
+- Mode changes never migrate gameplay data. Returning to a mode restores that mode's existing save.
+- Existing guild-local crews, auctions, and progress become dormant rather than being deleted when their policy changes.
 
-## Implementation Status
-Completed:
-- Added the live profile-signature extension and startup registration.
-- Added compact signature rendering using existing guild-scoped game data.
-- Added one-card-per-channel persistence, bot ownership checks, message-burst debouncing, same-speaker suppression, per-channel/per-user cooldowns, newest-speaker generation guards, and restart duplicate reconciliation.
-- Added fallback discovery of bot-owned cards when persisted state is missing and delete-on-persistence-failure cleanup.
-- Added setup channel selection, field restrictions, enable/disable controls, health presentation, and cleanup behavior.
-- Added private `/profile-settings` controls and owner-only profile editing access.
-- Added Steam, Epic Games, Xbox, PlayStation, Nintendo, Riot, Battle.net, Roblox, Twitch, YouTube, Kick, and limited custom-platform identities.
-- Added allowlisted HTTPS validation and username-only fallback for platforms without dependable canonical profile links.
-- Added optional host-configured application emoji for exact platform logos with safe Unicode fallbacks.
-- Added platform-specific icons in compact cards and automatic platform visibility after an explicit share choice.
-- Added global privacy, stricter per-server privacy, complete signature opt-out, immediate stale-card cleanup after privacy changes, and immediate card invalidation after server field restrictions change.
-- Preserved the existing `/profile` command and aliases through the canonical privacy-aware renderer.
-- Added focused URL safety, privacy, setup, persistence, anti-repetition, cancellation, restart reconciliation, and cleanup tests.
-- Remediated Qodo's cooldown/privacy race by invalidating in-flight generations, serializing cleanup with channel locks, re-reading guild configuration and permissions after cooldowns, and rebuilding cards from current privacy before sending.
+## Implemented Behavior
+- Safe Solo default for new worlds and compatibility interpretation for pre-feature worlds.
+- `/world-mode` player controls and `/setup` server policy controls with confirmation and plain-language consequences.
+- First selection is free; later switches use a seven-day cooldown.
+- Progression, farming, quick actions, owner tools, lab, gambling, Sesh XP, profiles, signatures, active-save ranks, and stale-card invalidation use the active save.
+- Transfers, auctions, shared leaderboards, crews, crew banking, district wars, crew heists, raids, and theft require an eligible matching multiplayer scope.
+- Solo-safe personal systems remain available: shops, production, solo heists, laundering, personal stats, and private progression.
+- Shared Open World auctions, weather, market events, and world advancement run once per tick regardless of participating server count.
+- Local worlds continue once per active local scope.
+- Notification candidates are filtered against the player's active save before profile reads, DMs, or notification-flag writes.
+- Open World member lookup spans participating guilds while sending each shared notification only once.
+- One participating guild supplies safe announcement routing for the shared world.
 
 ## Validation Status
-Passed:
-- Python compilation.
-- Focused profile-signature test suite.
+Completed:
+- Phase 1 through Phase 5 focused contracts and runtime tests.
 - Complete pytest regression suite.
-- Canonical command uniqueness checks.
-- All 14 canonical Enterprise extensions loading.
-- Legacy persistence and backup-artifact guards.
-- Corrected pull-request-visible remediation workflow, including full tests and self-cleanup.
-- Final human-triggered repository CI run 401.
-- Qodo review with its only actionable thread resolved.
-- Mergeability and conflict inspection: branch is ahead of `main`, behind by zero, and mergeable.
+- Every Enterprise extension loaded together.
+- Python compilation and startup contracts.
+- Command uniqueness checks.
+- Legacy persistence and backup-artifact rejection.
+- Final changed-file cleanup and conflict inspection against `main`.
+- Final PR head CI run 569 passed.
+- Branch is 99 commits ahead and 0 behind `main`, with `main` at the exact merge base.
 
 ## Cleanup Status
-- All temporary integration scripts and workflows removed.
-- Generated `__pycache__`, `.pyc`, `.pyo`, and pytest-cache artifacts removed and ignored.
-- Final diff contains only 11 intended implementation, setup, persistence, startup, documentation, and test files.
-- No webhook impersonation, user-message deletion/reposting, arbitrary disguised links, guessed third-party platform links, or duplicate setup/profile command path exists.
+- Temporary Phase 1 through Phase 5 patch scripts, wrappers, helper copies, diagnostics, shadow modules, trigger markers, and one-shot workflows are removed.
+- Permanent CI is restored to read-only contents permission.
+- Temporary PR #17 is closed and was not merged.
+- No database migration, economy copy, profile merge, or destructive conversion exists.
+- No duplicate world-mode policy or persistence path remains.
 
 ## Blockers
-- None. Pull request #14 is ready to merge.
+- None.
 
 ## Backlog Locked Behind This Task
-- Multiplayer/open-world versus solo-world controls.
 - Notification preferences and announcement-role controls.
 - Broader onboarding and first-run guidance.

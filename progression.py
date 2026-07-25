@@ -9,6 +9,7 @@ from progression_core import (
     ensure_progression,
 )
 from progression_data import ACHIEVEMENTS
+from world_modes import resolve_game_scope
 
 
 class Progression(commands.Cog):
@@ -25,16 +26,17 @@ class Progression(commands.Cog):
 
     async def _profile(self, ctx):
         guild_id = require_guild_id(ctx)
-        profile = await self.bot.db.get_profile(guild_id, ctx.author.id)
-        return guild_id, profile
+        scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
+        profile = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
+        return scope, profile
 
     async def _claim_daily(self, ctx):
-        guild_id, profile = await self._profile(ctx)
+        scope, profile = await self._profile(ctx)
         async with self.bot.db.lock:
             result = claim_daily(profile, user_id=ctx.author.id)
             if result["ok"]:
                 check_achievements(profile)
-                self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
         if result["already"]:
             return await ctx.send("⏳ You already claimed today's grow reward.")
@@ -60,11 +62,11 @@ class Progression(commands.Cog):
 
     @commands.hybrid_command(name="growquests", aliases=["quests", "dq", "dailyquests"])
     async def growquests(self, ctx):
-        guild_id, profile = await self._profile(ctx)
+        scope, profile = await self._profile(ctx)
         async with self.bot.db.lock:
             refreshed = ensure_daily_quests(profile, user_id=ctx.author.id)
             if refreshed:
-                self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
             quests = [dict(item) for item in profile.get("daily_quests", []) if isinstance(item, dict)]
 
         lines = []
@@ -88,12 +90,12 @@ class Progression(commands.Cog):
 
     @commands.hybrid_command(name="growachievements", aliases=["achievements", "achs", "ach"])
     async def growachievements(self, ctx):
-        guild_id, profile = await self._profile(ctx)
+        scope, profile = await self._profile(ctx)
         async with self.bot.db.lock:
             ensure_progression(profile)
             newly_unlocked = check_achievements(profile)
             if newly_unlocked:
-                self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
             owned = set(profile.get("achievements", []))
 
         lines = []

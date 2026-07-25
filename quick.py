@@ -4,6 +4,11 @@ import discord
 from discord.ext import commands
 
 from persistence_context import GuildContextRequired, require_guild_id
+from world_modes import (
+    effective_market_multiplier,
+    effective_pot_capacity,
+    resolve_game_scope,
+)
 from utils import (
     GROWTH_CYCLES,
     SHOP_ITEMS,
@@ -49,9 +54,10 @@ class Quick(commands.Cog):
 
     async def _scope(self, ctx):
         guild_id = require_guild_id(ctx)
-        profile = await self.bot.db.get_profile(guild_id, ctx.author.id)
-        world = await self.bot.db.get_world(guild_id)
-        return guild_id, profile, world
+        scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
+        profile = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
+        world = await self.bot.db.get_world(scope.scope_id)
+        return scope, profile, world
 
     @commands.hybrid_command(name="qhelp", aliases=["quickhelp"])
     async def qhelp(self, ctx):
@@ -98,7 +104,7 @@ class Quick(commands.Cog):
 
     @commands.hybrid_command(name="cooldowns", aliases=["cd", "timers"])
     async def cooldowns(self, ctx):
-        _, profile, world = await self._scope(ctx)
+        scope, profile, world = await self._scope(ctx)
         now = time.time()
         last_daily = float(profile.get("last_daily", 0) or 0)
         remaining = 86_400 - (now - last_daily)
@@ -108,7 +114,7 @@ class Quick(commands.Cog):
         embed = discord.Embed(title="⏱️ Timers", color=discord.Color.blue())
         embed.add_field(name="☀️ Daily Reward", value=daily, inline=True)
         embed.add_field(name="👮 Jail Time", value=jail, inline=True)
-        if profile.get("crew_id"):
+        if scope.multiplayer and profile.get("crew_id"):
             district = world.get("district", {}) or {}
             expires_at = float(district.get("expires_at", 0) or 0)
             if expires_at > now:
@@ -137,7 +143,7 @@ class Quick(commands.Cog):
         data = GROWTH_CYCLES[strain]
         seed_cost = _seed_cost(f"{strain} seed")
         average_yield = sum(data["yield"]) / 2
-        market = max(0.0, float(world.get("market_multiplier", 1.0) or 1.0))
+        market = effective_market_multiplier(world, scope)
         revenue = average_yield * float(data.get("base_value", 0) or 0) * market
         embed = discord.Embed(title=f"📊 Analysis: {strain.title()}", color=discord.Color.gold())
         embed.add_field(name="⏱️ Time", value=f"{int(float(data.get('time', 0)) / 60)} mins", inline=True)
@@ -150,16 +156,17 @@ class Quick(commands.Cog):
 
     @commands.hybrid_command(name="qplant", aliases=["qp", "quickplant"])
     async def qplant(self, ctx, count: int = None):
-        guild_id, profile, _ = await self._scope(ctx)
+        scope, profile, _ = await self._scope(ctx)
         if await jail_guard(ctx, profile, "plant"):
             return
         desired = max(1, min(_safe_int(count, QPLANT_MAX_PLANT_PER_CALL), QPLANT_MAX_PLANT_PER_CALL)) if count is not None else None
 
         async with self.bot.db.lock:
             plants = profile.setdefault("plants", [])
-            free_slots = max(0, _safe_int(profile.get("max_pots"), 3) - len(plants))
+            max_pots = effective_pot_capacity(profile, scope)
+            free_slots = max(0, max_pots - len(plants))
             if free_slots <= 0:
-                return await ctx.send(f"🚫 **No Pots Available!** ({len(plants)}/{profile.get('max_pots', 3)})")
+                return await ctx.send(f"🚫 **No Pots Available!** ({len(plants)}/{max_pots})")
             desired = min(desired or free_slots, free_slots)
             level = max(1, _safe_int(profile.get("level"), 1))
             candidates = []
@@ -197,7 +204,7 @@ class Quick(commands.Cog):
                 if len(planted) >= desired:
                     break
             if planted:
-                self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
         if not planted:
             return await ctx.send("⚠️ Couldn't plant anything.")

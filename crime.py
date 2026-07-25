@@ -16,6 +16,12 @@ from crime_integrity import (
 from economy_integrity import require_positive_amount
 from persistence_context import require_guild_id
 from utils import add_heat, has_item, jail_guard
+from world_modes import (
+    WorldModeDenied,
+    require_multiplayer,
+    require_same_multiplayer_scope,
+    resolve_game_scope,
+)
 
 
 HEIST_SOLO_COOLDOWN = 30 * 60
@@ -105,8 +111,8 @@ class Crime(commands.Cog):
         return crews
 
     @staticmethod
-    def _session_key(guild_id: int, kind: str, identifier: object) -> str:
-        return f"guild:{guild_id}:{kind}:{identifier}"
+    def _session_key(scope_id: int, kind: str, identifier: object) -> str:
+        return f"scope:{scope_id}:{kind}:{identifier}"
 
     def _apply_heat_decay(self, user: dict) -> int:
         heat = max(0, int(user.get("heat", 0) or 0))
@@ -164,24 +170,37 @@ class Crime(commands.Cog):
     @commands.command(name="heist", aliases=["heists"])
     async def heist(self, ctx, mode: str = "solo", arg: str = None):
         guild_id = require_guild_id(ctx)
-        user = await self.bot.db.get_profile(guild_id, ctx.author.id)
+        scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
+        user = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
         if await jail_guard(ctx, user, "heist"):
             return
 
         mode = (mode or "solo").lower().strip()
         if mode in ("solo", ""):
-            await self._solo_heist(ctx, guild_id, user, arg or "stealth")
+            await self._solo_heist(ctx, scope, user, arg or "stealth")
         elif mode in ("crew", "coop"):
-            await self._start_crew_heist(ctx, guild_id, user)
+            try:
+                require_multiplayer(scope, "crew_heist")
+            except WorldModeDenied as exc:
+                return await ctx.send(str(exc))
+            await self._start_crew_heist(ctx, scope, user)
         elif mode == "join":
-            await self._join_crew_heist(ctx, guild_id, user)
+            try:
+                require_multiplayer(scope, "crew_heist")
+            except WorldModeDenied as exc:
+                return await ctx.send(str(exc))
+            await self._join_crew_heist(ctx, scope, user)
         elif mode in ("raid", "pvp"):
-            await self._raid(ctx, guild_id, user, arg)
+            try:
+                require_multiplayer(scope, "raid")
+            except WorldModeDenied as exc:
+                return await ctx.send(str(exc))
+            await self._raid(ctx, scope, user, arg)
         else:
             await ctx.send("Usage: `!heist solo [plan]`, `!heist crew`, `!heist join`, or `!heist raid <crew_id>`")
 
-    async def _solo_heist(self, ctx, guild_id: int, user: dict, plan: str) -> None:
-        key = self._session_key(guild_id, "user", ctx.author.id)
+    async def _solo_heist(self, ctx, scope, user: dict, plan: str) -> None:
+        key = self._session_key(scope.scope_id, "user", ctx.author.id)
         if _ACTIVE_HEISTS.get(key, {}).get("ends", 0) > self._now():
             await ctx.send("⏳ You’re already mid-heist.")
             return
@@ -231,7 +250,7 @@ class Crime(commands.Cog):
                     xp = 0
 
                 self._set_user_cooldown(user, "heist_solo", self._now())
-                self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
         finally:
             _ACTIVE_HEISTS.pop(key, None)
 
@@ -261,17 +280,17 @@ class Crime(commands.Cog):
             )
         await ctx.send(embed=embed)
 
-    async def _start_crew_heist(self, ctx, guild_id: int, user: dict) -> None:
+    async def _start_crew_heist(self, ctx, scope, user: dict) -> None:
         crew_id = user.get("crew_id")
         if not crew_id:
             return await ctx.send("❌ You need a crew.")
 
-        world = await self.bot.db.get_world(guild_id)
+        world = await self.bot.db.get_world(scope.scope_id)
         crew = self._get_crews(world).get(str(crew_id))
         if not crew:
             return await ctx.send("❌ Crew data missing.")
 
-        key = self._session_key(guild_id, "crew", crew_id)
+        key = self._session_key(scope.scope_id, "crew", crew_id)
         async with self.bot.db.lock:
             remaining = self._crew_cooldown_left(crew, "heist")
             if remaining > 0:
@@ -280,7 +299,7 @@ class Crime(commands.Cog):
                 return await ctx.send("⏳ Crew heist already forming. Use `!heist join`.")
             _ACTIVE_HEISTS[key] = {
                 "join_until": self._now() + HEIST_JOIN_WINDOW,
-                "members": {int(ctx.author.id)},
+                "members": {int(ctx.author.id): int(scope.guild_id)},
                 "host_id": int(ctx.author.id),
             }
 
@@ -298,14 +317,21 @@ class Crime(commands.Cog):
             session = _ACTIVE_HEISTS.pop(key, None)
             if not session:
                 return
-            world = await self.bot.db.get_world(guild_id)
+            world = await self.bot.db.get_world(scope.scope_id)
             crew = self._get_crews(world).get(str(crew_id))
             if not crew:
                 return await ctx.send("❌ Crew data missing.")
 
             valid_members: list[tuple[int, dict]] = []
-            for member_id in session.get("members", set()):
-                member = await self.bot.db.get_profile(guild_id, member_id)
+            for member_id, member_guild_id in session.get("members", {}).items():
+                member_scope = await resolve_game_scope(
+                    self.bot.db,
+                    int(member_guild_id),
+                    int(member_id),
+                )
+                if member_scope.scope_id != scope.scope_id:
+                    continue
+                member = await self.bot.db.get_profile(scope.scope_id, int(member_id))
                 if self._in_jail(member) <= 0 and str(member.get("crew_id")) == str(crew_id):
                     valid_members.append((int(member_id), member))
             if len(valid_members) < 2:
@@ -324,7 +350,7 @@ class Crime(commands.Cog):
                 for member_id, member in valid_members:
                     member["grams"] = max(0, int(member.get("grams", 0))) + split.member_gain
                     add_heat(member, 2)
-                    self.bot.db.mark_profile_dirty(guild_id, member_id)
+                    self.bot.db.mark_profile_dirty(scope.scope_id, member_id)
                 bank_gain = split.crew_bank_gain + split.remainder
                 member_gain = split.member_gain
                 jail_minutes = 0
@@ -336,12 +362,12 @@ class Crime(commands.Cog):
                     member["grams"] = balance - loss
                     member["jail_until"] = int(self._now() + jail_minutes * 60)
                     add_heat(member, 6)
-                    self.bot.db.mark_profile_dirty(guild_id, member_id)
+                    self.bot.db.mark_profile_dirty(scope.scope_id, member_id)
                 bank_gain = 0
                 member_gain = 0
 
             self._set_crew_cooldown(crew, "heist")
-            self.bot.db.mark_world_dirty(guild_id)
+            self.bot.db.mark_world_dirty(scope.scope_id)
 
         if success:
             await ctx.send(embed=discord.Embed(
@@ -356,21 +382,21 @@ class Crime(commands.Cog):
         else:
             await ctx.send(f"🚨 **Crew heist failed.** Eligible members were jailed for {jail_minutes}m.")
 
-    async def _join_crew_heist(self, ctx, guild_id: int, user: dict) -> None:
+    async def _join_crew_heist(self, ctx, scope, user: dict) -> None:
         if self._in_jail(user) > 0:
             return await ctx.send("🚔 You are jailed.")
         crew_id = user.get("crew_id")
         if not crew_id:
             return await ctx.send("❌ You need a crew.")
-        key = self._session_key(guild_id, "crew", crew_id)
+        key = self._session_key(scope.scope_id, "crew", crew_id)
         async with self.bot.db.lock:
             session = _ACTIVE_HEISTS.get(key)
             if not session or session.get("join_until", 0) <= self._now():
                 return await ctx.send("❌ No heist is forming.")
-            session.setdefault("members", set()).add(int(ctx.author.id))
+            session.setdefault("members", {})[int(ctx.author.id)] = int(scope.guild_id)
         await ctx.send(f"✅ {ctx.author.mention} joined!")
 
-    async def _raid(self, ctx, guild_id: int, user: dict, target_id: str | None) -> None:
+    async def _raid(self, ctx, scope, user: dict, target_id: str | None) -> None:
         crew_id = user.get("crew_id")
         if not crew_id:
             return await ctx.send("❌ You need a crew.")
@@ -378,7 +404,7 @@ class Crime(commands.Cog):
             return await ctx.send("Usage: `!heist raid <target_crew_id>`")
 
         async with self.bot.db.lock:
-            world = await self.bot.db.get_world(guild_id)
+            world = await self.bot.db.get_world(scope.scope_id)
             crews = self._get_crews(world)
             attacker = crews.get(str(crew_id))
             defender = crews.get(str(target_id).strip())
@@ -397,7 +423,7 @@ class Crime(commands.Cog):
                 result = []
                 for member_id in crew.get("members", []):
                     try:
-                        profile = await self.bot.db.get_profile(guild_id, int(member_id))
+                        profile = await self.bot.db.get_profile(scope.scope_id, int(member_id))
                     except (TypeError, ValueError):
                         continue
                     result.append(max(1, int(profile.get("level", 1))))
@@ -432,8 +458,8 @@ class Crime(commands.Cog):
             stats["raids_run"] = max(0, int(stats.get("raids_run", 0))) + 1
             if success:
                 stats["raids_won"] = max(0, int(stats.get("raids_won", 0))) + 1
-            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
-            self.bot.db.mark_world_dirty(guild_id)
+            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+            self.bot.db.mark_world_dirty(scope.scope_id)
 
         if success:
             await ctx.send(embed=discord.Embed(
@@ -457,12 +483,18 @@ class Crime(commands.Cog):
         if target.id == ctx.author.id:
             return await ctx.send("❌ Robbing yourself?")
         guild_id = require_guild_id(ctx)
-        robber = await self.bot.db.get_profile(guild_id, ctx.author.id)
+        scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
+        target_scope = await resolve_game_scope(self.bot.db, guild_id, target.id)
+        try:
+            require_same_multiplayer_scope(scope, target_scope, "theft")
+        except WorldModeDenied as exc:
+            return await ctx.send(str(exc))
+        robber = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
         if await jail_guard(ctx, robber, "steal"):
             return
 
         async with self.bot.db.lock:
-            victim = await self.bot.db.get_profile(guild_id, target.id)
+            victim = await self.bot.db.get_profile(scope.scope_id, target.id)
             chance = 0.50
             if has_item(victim, "dog") or has_item(victim, "guard dog"):
                 chance -= 0.25
@@ -488,7 +520,7 @@ class Crime(commands.Cog):
                 stats["steals"] = max(0, int(stats.get("steals", 0))) + 1
                 success = True
                 fine = 0
-                self.bot.db.mark_profile_dirty(guild_id, target.id)
+                self.bot.db.mark_profile_dirty(scope.scope_id, target.id)
             else:
                 balance = max(0, int(robber.get("grams", 0)))
                 fine = calculate_capped_loss(balance, 1_000)
@@ -497,7 +529,7 @@ class Crime(commands.Cog):
                 add_heat(robber, 25)
                 amount = 0
                 success = False
-            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
         if success:
             await ctx.send(f"🔫 **SUCCESS!** Stole **${amount:,}** in dirty cash.")
@@ -508,7 +540,8 @@ class Crime(commands.Cog):
     @commands.cooldown(1, 30, commands.BucketType.user)
     async def launder(self, ctx, amount: str = "all"):
         guild_id = require_guild_id(ctx)
-        user = await self.bot.db.get_profile(guild_id, ctx.author.id)
+        scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
+        user = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
         async with self.bot.db.lock:
             dirty = max(0, int(user.get("dirty_cash", 0) or 0))
             heat = max(0, int(user.get("heat", 0) or 0))
@@ -530,7 +563,7 @@ class Crime(commands.Cog):
             user["dirty_cash"] = dirty - outcome.dirty_spent
             user["grams"] = max(0, int(user.get("grams", 0))) + outcome.clean_received
             add_heat(user, 5)
-            self.bot.db.mark_profile_dirty(guild_id, ctx.author.id)
+            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
         embed = discord.Embed(
             title="🧼 Money Laundered",
@@ -545,13 +578,15 @@ class Crime(commands.Cog):
     @commands.command(name="heat")
     async def heat(self, ctx):
         guild_id = require_guild_id(ctx)
-        user = await self.bot.db.get_profile(guild_id, ctx.author.id)
+        scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
+        user = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
         heat_level = max(0, min(100, int(user.get("heat", 0) or 0)))
         dirty_cash = max(0, int(user.get("dirty_cash", 0) or 0))
         filled = heat_level // 10
         bar = "🟥" * filled + "⬜" * (10 - filled)
         status = "WANTED 🚓" if heat_level > 80 else "Hot 🔥" if heat_level > 50 else "Suspicious" if heat_level > 20 else "Chill"
         embed = discord.Embed(title="🚓 Police Heat Level", color=0xE74C3C)
+        embed.description = f"**Active save:** {scope.emoji} {scope.label}"
         embed.add_field(name="Heat", value=f"{bar} ({heat_level}%)", inline=False)
         embed.add_field(name="Status", value=status, inline=True)
         embed.add_field(name="💼 Dirty Cash", value=f"${dirty_cash:,}", inline=True)
@@ -562,9 +597,11 @@ class Crime(commands.Cog):
     async def heiststats(self, ctx, member: discord.Member = None):
         guild_id = require_guild_id(ctx)
         target = member or ctx.author
-        profile = await self.bot.db.get_profile(guild_id, target.id)
+        scope = await resolve_game_scope(self.bot.db, guild_id, target.id)
+        profile = await self.bot.db.get_profile(scope.scope_id, target.id)
         stats = profile.get("stats", {})
         embed = discord.Embed(title=f"🏆 Heist Stats: {target.display_name}", color=0x3498DB)
+        embed.description = f"**Active save:** {scope.emoji} {scope.label}"
         embed.add_field(name="Solo", value=f"Won: {stats.get('heists_won', 0)}\nRun: {stats.get('heists_run', 0)}", inline=True)
         embed.add_field(name="Raids", value=f"Won: {stats.get('raids_won', 0)}\nRun: {stats.get('raids_run', 0)}", inline=True)
         embed.add_field(name="Payouts", value=f"${stats.get('heist_profit', 0):,}", inline=False)
@@ -573,14 +610,20 @@ class Crime(commands.Cog):
     @commands.command(name="topheists", aliases=["lbheists"])
     async def topheists(self, ctx):
         guild_id = require_guild_id(ctx)
-        rows = await self.bot.db.list_guild_heist_leaderboard(guild_id, limit=10)
+        scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
+        try:
+            require_multiplayer(scope, "leaderboard")
+        except WorldModeDenied as exc:
+            return await ctx.send(str(exc))
+        rows = await self.bot.db.list_guild_heist_leaderboard(scope.scope_id, limit=10)
         lines = []
         for index, (user_id, score) in enumerate(rows, 1):
             member = ctx.guild.get_member(user_id)
             name = member.display_name if member else f"User {user_id}"
             lines.append(f"**{index}.** {name} — {score} wins")
+        title = "🏆 Open World Heisters" if scope.cross_server else "🏆 Top Heisters"
         await ctx.send(embed=discord.Embed(
-            title="🏆 Top Heisters",
+            title=title,
             description="\n".join(lines) or "None",
             color=0xF1C40F,
         ))
