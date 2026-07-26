@@ -41,12 +41,104 @@ GAME_EXTENSIONS = (
     "world_modes",
 )
 
+COMMAND_SYNC_ATTEMPTS = 3
+COMMAND_SYNC_RETRY_SECONDS = 5
+REQUIRED_PUBLIC_COMMANDS = frozenset(
+    {
+        "setup",
+        "start",
+        "help",
+        "notifications",
+        "world-mode",
+    }
+)
+STALE_PUBLIC_COMMANDS = frozenset({"sesh_setup"})
+
+
+async def sync_global_commands(
+    tree: app_commands.CommandTree,
+) -> list[app_commands.AppCommand]:
+    """Publish the complete global command tree once before the bot connects."""
+    local_commands = list(tree.get_commands())
+    local_names = {command.name for command in local_commands}
+    if not local_names:
+        raise RuntimeError("Local application-command tree is empty; refusing startup")
+
+    missing_local = REQUIRED_PUBLIC_COMMANDS - local_names
+    if missing_local:
+        raise RuntimeError(
+            "Required public commands were not registered locally: "
+            + ", ".join(sorted(missing_local))
+        )
+
+    stale_local = STALE_PUBLIC_COMMANDS & local_names
+    if stale_local:
+        raise RuntimeError(
+            "Stale commands remain in the local command tree: "
+            + ", ".join(sorted(stale_local))
+        )
+
+    last_error: discord.HTTPException | None = None
+    for attempt in range(1, COMMAND_SYNC_ATTEMPTS + 1):
+        try:
+            synced = list(await tree.sync())
+        except discord.HTTPException as exc:
+            last_error = exc
+            if attempt >= COMMAND_SYNC_ATTEMPTS:
+                break
+            delay = COMMAND_SYNC_RETRY_SECONDS * attempt
+            logger.warning(
+                "Global command sync failed on attempt %s/%s; retrying in %ss: %s",
+                attempt,
+                COMMAND_SYNC_ATTEMPTS,
+                delay,
+                exc,
+            )
+            await asyncio.sleep(delay)
+            continue
+
+        synced_names = {command.name for command in synced}
+        if not synced_names:
+            raise RuntimeError("Discord returned an empty global command set; refusing startup")
+
+        missing_remote = REQUIRED_PUBLIC_COMMANDS - synced_names
+        if missing_remote:
+            raise RuntimeError(
+                "Discord sync omitted required public commands: "
+                + ", ".join(sorted(missing_remote))
+            )
+
+        stale_remote = STALE_PUBLIC_COMMANDS & synced_names
+        if stale_remote:
+            raise RuntimeError(
+                "Discord sync retained stale commands: "
+                + ", ".join(sorted(stale_remote))
+            )
+
+        logger.info(
+            "Synced %s global application commands: %s",
+            len(synced),
+            ", ".join(sorted(synced_names)),
+        )
+        return synced
+
+    raise RuntimeError(
+        f"Global application-command sync failed after {COMMAND_SYNC_ATTEMPTS} attempts"
+    ) from last_error
+
+
+class IdleGrowBot(commands.Bot):
+    async def setup_hook(self) -> None:
+        """Use Discord.py's one-time startup hook to publish slash commands."""
+        await sync_global_commands(self.tree)
+
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.presences = True
 
-bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
+bot = IdleGrowBot(command_prefix="!", intents=intents, help_command=None)
 
 
 async def _configured_error_channel(guild_id: int | None):
