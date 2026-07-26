@@ -5,9 +5,9 @@ Fix the live bot showing only stale `/sesh_setup` by publishing the complete can
 
 ## Root Cause and Confirmed Findings
 - All current extensions load before `bot.start()` and register their hybrid/slash commands in the local command tree.
-- `main.py` never calls `bot.tree.sync()` during startup.
-- The only existing sync path is the hidden owner-only prefix command `!sync` in `admin.py`.
-- Discord therefore keeps the previously published global command set even when newer commands exist in Python.
+- `main.py` never called `bot.tree.sync()` during startup.
+- The only existing sync path was the hidden owner-only prefix command `!sync` in `admin.py`.
+- Discord therefore kept the previously published global command set even when newer commands existed in Python.
 - `/sesh_setup` is not present in the current source command surface; it is an orphaned remote command from an older deployment.
 - A successful global `CommandTree.sync()` bulk-replaces the remote global command set, publishing current commands and removing stale ones.
 
@@ -27,21 +27,38 @@ Fix the live bot showing only stale `/sesh_setup` by publishing the complete can
 - `/notifications`
 - `/world-mode`
 
-## Validation Requirements
-- Runtime test for successful startup synchronization.
-- Runtime test for bounded retry after a Discord HTTP failure.
-- Runtime test proving final synchronization failure blocks startup.
-- Full extension-load test proving required public commands exist locally and stale `/sesh_setup` does not.
-- Static ordering test proving extensions load before `bot.start()`.
-- Python compilation, complete pytest, command uniqueness, cleanup checks, and every extension loading together.
+## Implementation Status
+Completed:
+- Added `IdleGrowBot.setup_hook()` using Discord.py's native one-time startup lifecycle.
+- Added one canonical global sync path after all extensions load and before the gateway connection starts.
+- Added three bounded sync attempts with short backoff for Discord HTTP failures.
+- Added local-tree validation before publication.
+- Added remote-result validation after publication.
+- Added a hard startup failure for empty, incomplete, failed, or stale command publication.
+- Kept `!sync` as an owner-only manual repair path.
+- Kept `on_ready` free of repeated command synchronization.
 
-## Cleanup Requirements
-- No temporary sync workflow, startup guard module, environment variable, or hardcoded guild ID.
-- No repeated sync in `on_ready`.
-- No duplicate command-registration path.
+## Validation Status
+Completed:
+- Successful one-pass publication test.
+- Temporary HTTP failure retry test.
+- Final failure blocks startup test.
+- Native `setup_hook` invocation test.
+- Full extension-load test proving `/setup`, `/start`, `/help`, `/notifications`, and `/world-mode` are registered locally.
+- Full extension-load test proving `/sesh_setup` is absent.
+- Startup-order and no-`on_ready`-sync contracts.
+- Full CI run 647 passed, including Python compilation, complete pytest, command uniqueness, cleanup checks, and every Enterprise extension loading together.
+- Final exact-head CI on this status commit remains the merge gate.
+
+## Cleanup Status
+- No temporary workflow, startup guard module, environment variable, hardcoded guild ID, or compatibility shim.
+- No second registration system.
+- Final diff contains only `main.py`, focused tests, and this task record.
 
 ## Blockers
 - None.
 
 ## Deployment Note
-- After merge, Discloud must fetch the new `main` commit and restart the process. Startup will then publish the canonical global command set; Discord global command visibility may still take a short propagation window.
+- After merge, Discloud must fetch the new `main` commit and restart the process.
+- Startup will publish the canonical global command set and remove orphaned `/sesh_setup`.
+- Discord's global command cache may still need a short propagation window after the successful startup sync.
