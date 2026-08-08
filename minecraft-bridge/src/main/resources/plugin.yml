@@ -1,0 +1,10 @@
+name: ThePlugBridge
+version: '1.0.0'
+main: com.the420server.theplugbridge.ThePlugBridge
+description: Secure Minecraft telemetry bridge for The Plug Discord companion.
+author: The 420 Server
+api-version: '26.2'
+softdepend:
+  - DiscordSRV
+  - floodgate
+  - AuraSkills

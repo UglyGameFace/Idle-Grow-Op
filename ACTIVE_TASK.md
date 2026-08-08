@@ -1,64 +1,110 @@
-# Active Task: Restore the Public Slash-Command Surface
+# Active Task: Build The Plug Minecraft Companion
 
 ## Scope
-Fix the live bot showing only stale `/sesh_setup` by publishing the complete canonical application-command tree automatically during the native Discord.py startup lifecycle.
+Add one production Minecraft companion surface to the existing The Plug / Idle Grow Op
+Discloud bot, backed by a small Paper bridge on the Shockbyte server. Provide live server
+status, player identity/linking, profiles, stats, last-seen, playtime, leaderboards,
+records, activity, and manager health/setup controls without colliding with the existing
+Idle Grow or DiscordSRV command surfaces.
 
 ## Root Cause and Confirmed Findings
-- All current extensions load before `bot.start()` and register their hybrid/slash commands in the local command tree.
-- `main.py` never called `bot.tree.sync()` during startup.
-- The only existing sync path was the hidden owner-only prefix command `!sync` in `admin.py`.
-- Discord therefore kept the previously published global command set even when newer commands existed in Python.
-- `/sesh_setup` is not present in the current source command surface; it is an orphaned remote command from an older deployment.
-- A successful global `CommandTree.sync()` bulk-replaces the remote global command set, publishing current commands and removing stale ones.
+- The current production-capable The Plug codebase is `UglyGameFace/Idle-Grow-Op`;
+  it already has `discloud.config`, Supabase persistence, CI, and automatic slash sync.
+- `social.py` already owns the generic `profile`/`stats` game command surface, so
+  Minecraft commands must be namespaced rather than registering duplicate `/profile`,
+  `!profile`, `/stats`, or `!stats`.
+- DiscordSRV already owns simple `!players`, `!help`, `!mc`, `!link`, and `!discord`
+  behavior in the live Minecraft chat channel.
+- A Discloud process cannot safely read Shockbyte-local Bukkit/DiscordSRV/AuraSkills
+  files, so full player data needs a server-side bridge.
+- Minecraft Query is not suitable because Geyser already uses UDP port 27002; exposing
+  RCON just for stats would add unnecessary remote-control risk.
+- DiscordSRV exposes its UUID -> Discord account-link manager, Floodgate exposes Bedrock
+  identity, and AuraSkills exposes loaded player skill data.
+- Paper 26.2 plugins target Java 25 and the current Paper API version format.
+- The bridge must not store player IP addresses or receive the Supabase service-role key.
 
-## Architecture Decision
-- Use a real `commands.Bot` subclass and its native `setup_hook`; do not monkey patch the bot or sync from `on_ready`.
-- Keep extension loading before `bot.start()` so the complete command tree exists before `setup_hook` runs.
-- Sync global application commands once per process startup, not on every reconnect.
-- Retry brief Discord HTTP failures a small bounded number of times.
-- Refuse startup if synchronization ultimately fails, returns no commands, omits required public entry points, or somehow retains stale `/sesh_setup`.
-- Keep owner-only `!sync` as a manual repair command, not the normal deployment path.
-- Add no environment toggle, guild IDs, compatibility shim, or second registration system.
+## Architecture
+- One canonical Discord extension: `minecraft.py`.
+- One dependency-free Java Server List Ping implementation: `minecraft_service.py`.
+- One `/minecraft` slash/hybrid group plus collision-safe `!mc...` prefix shortcuts.
+- One Paper plugin: `ThePlugBridge`, installed on Shockbyte.
+- One Supabase migration with four Minecraft tables and one SECURITY DEFINER ingest RPC.
+- The Discloud bot keeps the trusted service-role key it already has.
+- The Paper plugin uses only the Supabase public anon/publishable key plus a rotatable
+  per-guild bridge secret.
+- Bukkit/AuraSkills state is captured on the main server thread; HTTP ingest runs async.
+- The bridge sends UUID, username, Java/Bedrock platform, DiscordSRV linked account ID,
+  playtime, vanilla stats, AuraSkills, and bounded recent activity. It never sends IPs.
 
-## Required Public Entry Points
-- `/setup`
-- `/start`
-- `/help`
-- `/notifications`
-- `/world-mode`
+## Planned Command Surface
+Public:
+- `/minecraft status`
+- `/minecraft players`
+- `/minecraft profile [player]`
+- `/minecraft stats [player]`
+- `/minecraft seen [player]`
+- `/minecraft playtime [player]`
+- `/minecraft top [metric]`
+- `/minecraft records`
+- `/minecraft activity`
+- `/minecraft whois <player or @member>`
+- `/minecraft commands`
+
+Manager:
+- `/minecraft health`
+- `/minecraft setup`
+- `/minecraft bridgekey`
+- `/minecraft panel`
+
+Prefix compatibility:
+- `!mcstatus`, `!mcplayers`, `!mcprofile`, `!mcstats`, `!mcseen`, `!mcplaytime`,
+  `!mctop`, `!mcrecords`, `!mcactivity`, `!mcwhois`, `!mchealth`, `!mccommands`.
 
 ## Implementation Status
-Completed:
-- Added `IdleGrowBot.setup_hook()` using Discord.py's native one-time startup lifecycle.
-- Added one canonical global sync path after all extensions load and before the gateway connection starts.
-- Added three bounded sync attempts with short backoff for Discord HTTP failures.
-- Added local-tree validation before publication.
-- Added remote-result validation after publication.
-- Added a hard startup failure for empty, incomplete, failed, or stale command publication.
-- Kept `!sync` as an owner-only manual repair path.
-- Kept `on_ready` free of repeated command synchronization.
+In progress on `feature/minecraft-companion`.
 
-## Validation Status
-Completed:
-- Successful one-pass publication test.
-- Temporary HTTP failure retry test.
-- Final failure blocks startup test.
-- Native `setup_hook` invocation test.
-- Full extension-load test proving `/setup`, `/start`, `/help`, `/notifications`, and `/world-mode` are registered locally.
-- Full extension-load test proving `/sesh_setup` is absent.
-- Startup-order and no-`on_ready`-sync contracts.
-- Full CI run 647 passed, including Python compilation, complete pytest, command uniqueness, cleanup checks, and every Enterprise extension loading together.
-- Final exact-head CI on this status commit remains the merge gate.
+Implemented in the working change set:
+- Namespaced Discord command module and public guide/panel.
+- Direct Java server ping fallback with no extra Python dependency.
+- Supabase-backed server/player/activity repository helpers.
+- Secure bridge-key rotation command with ephemeral secret delivery.
+- Migration 003 with RLS, private bridge-auth storage, and restricted ingest RPC.
+- Paper 26.2 / Java 25 ThePlugBridge with async HTTP transport.
+- DiscordSRV linked-account lookup, Floodgate Bedrock detection, and AuraSkills capture.
+- Join/quit/death/advancement activity feed.
+- No player IP collection.
+- Focused Python tests and dedicated Java bridge CI artifact build.
+- Deployment documentation.
 
-## Cleanup Status
-- No temporary workflow, startup guard module, environment variable, hardcoded guild ID, or compatibility shim.
-- No second registration system.
-- Final diff contains only `main.py`, focused tests, and this task record.
+Still required before task closure:
+- Commit/push implementation and open PR.
+- Run Python CI, command-tree load checks, and Java 25 Maven build.
+- Fix any CI/compiler failures.
+- Merge only after exact-head CI is green.
+- Apply migration 003 in the user's Supabase project.
+- Deploy/restart The Plug on Discloud.
+- Upload/configure ThePlugBridge on Shockbyte and restart normally.
+- Verify a fresh bridge heartbeat and real Java + Bedrock player rows.
+- Verify DiscordSRV account link resolution and AuraSkills values on live users.
+- Post/pin the public `/minecraft panel` after runtime validation.
+
+## Cleanup / Conflict Checks
+- No generic `!profile`, `!stats`, `!help`, `!players`, or `!mc` aliases added.
+- No RCON or Minecraft Query.
+- No service-role key in the Paper plugin.
+- No player IP collection.
+- No second Discord linking database; DiscordSRV remains authoritative for account links.
+- No Boar dependency. Boar 2.0.1 was isolated as the Bedrock movement rubber-banding
+  source and was removed from the Minecraft server before this force switch.
 
 ## Blockers
-- None.
+- Supabase migration and live Shockbyte/Discloud deployment require the user's connected
+  infrastructure/manual host steps after code validation.
+- Exact public Minecraft hostname is intentionally not hardcoded; `/minecraft setup`
+  stores it per Discord guild at deployment time.
 
-## Deployment Note
-- After merge, Discloud must fetch the new `main` commit and restart the process.
-- Startup will publish the canonical global command set and remove orphaned `/sesh_setup`.
-- Discord's global command cache may still need a short propagation window after the successful startup sync.
+## Backlog Locked Behind This Task
+- Java-client compatibility/direct-connection troubleshooting.
+- Paper build update.
+- Any remaining DiscordSRV role-sync/presence polish not required by this companion.

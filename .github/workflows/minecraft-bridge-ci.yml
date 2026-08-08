@@ -1,0 +1,56 @@
+name: Minecraft Bridge CI
+
+on:
+  pull_request:
+    paths:
+      - "minecraft-bridge/**"
+      - ".github/workflows/minecraft-bridge-ci.yml"
+  push:
+    branches:
+      - main
+      - "feature/**"
+      - "fix/**"
+    paths:
+      - "minecraft-bridge/**"
+      - ".github/workflows/minecraft-bridge-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+
+      - name: Reject server-side secrets in bridge source
+        run: |
+          ! grep -R -nE 'SERVICE_ROLE|service-role|IDLE_SUPABASE_SERVICE_ROLE_KEY' minecraft-bridge
+
+      - name: Build ThePlugBridge
+        run: mvn -B -f minecraft-bridge/pom.xml clean package
+
+      - name: Verify plugin artifact
+        run: |
+          test -s minecraft-bridge/target/ThePlugBridge.jar
+          jar tf minecraft-bridge/target/ThePlugBridge.jar | grep -q '^plugin.yml$'
+          jar tf minecraft-bridge/target/ThePlugBridge.jar | grep -q '^config.yml$'
+          jar tf minecraft-bridge/target/ThePlugBridge.jar | grep -q 'com/the420server/theplugbridge/ThePlugBridge.class'
+
+      - name: Upload ThePlugBridge
+        uses: actions/upload-artifact@v4
+        with:
+          name: ThePlugBridge
+          path: minecraft-bridge/target/ThePlugBridge.jar
+          if-no-files-found: error
+          retention-days: 14

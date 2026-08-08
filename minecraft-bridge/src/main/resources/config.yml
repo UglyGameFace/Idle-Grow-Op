@@ -1,0 +1,21 @@
+# The Plug Minecraft bridge
+#
+# 1) Apply migrations/003_minecraft_companion.sql in the same Supabase project
+#    already used by The Plug.
+# 2) In Discord run /minecraft setup, then /minecraft bridgekey.
+# 3) Paste your Supabase project URL, public anon/publishable key, bridge secret,
+#    and Discord guild ID below.
+#
+# IMPORTANT:
+# - Use the public anon/publishable key here, NOT the service-role key.
+# - Never post bridge-secret publicly.
+# - The bridge never collects player IP addresses.
+
+supabase-url: ""
+supabase-anon-key: ""
+bridge-secret: ""
+guild-id: 0
+
+# 15 seconds is responsive without hammering the server or Supabase.
+# Allowed range: 5-300 seconds.
+heartbeat-seconds: 15
