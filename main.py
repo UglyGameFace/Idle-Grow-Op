@@ -29,6 +29,7 @@ GAME_EXTENSIONS = (
     "farming",
     "gambling",
     "lab",
+    "minecraft",
     "notification_preferences",
     "onboarding",
     "progression",
