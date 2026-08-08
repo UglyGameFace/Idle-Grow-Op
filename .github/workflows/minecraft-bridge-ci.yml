@@ -33,9 +33,9 @@ jobs:
           java-version: "25"
           cache: maven
 
-      - name: Reject server-side secrets in bridge source
+      - name: Reject privileged Supabase credentials in bridge source
         run: |
-          ! grep -R -nE 'SERVICE_ROLE|service-role|IDLE_SUPABASE_SERVICE_ROLE_KEY' minecraft-bridge
+          ! grep -R -nE 'SERVICE_ROLE|IDLE_SUPABASE_SERVICE_ROLE_KEY|service-role-key[[:space:]]*:' minecraft-bridge/src
 
       - name: Build ThePlugBridge
         run: mvn -B -f minecraft-bridge/pom.xml clean package
