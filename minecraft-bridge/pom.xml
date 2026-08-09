@@ -26,7 +26,6 @@
   </repositories>
 
   <dependencies>
-    <!-- Paper's current 26.2 Maven range; Java 25 is required by this server line. -->
     <dependency>
       <groupId>io.papermc.paper</groupId>
       <artifactId>paper-api</artifactId>
@@ -34,7 +33,6 @@
       <scope>provided</scope>
     </dependency>
 
-    <!-- Official Floodgate API for authoritative Bedrock/XUID detection. -->
     <dependency>
       <groupId>org.geysermc.floodgate</groupId>
       <artifactId>api</artifactId>
@@ -42,7 +40,6 @@
       <scope>provided</scope>
     </dependency>
 
-    <!-- AuraSkills API is stable across the running 2.3.x implementation. -->
     <dependency>
       <groupId>dev.aurelium</groupId>
       <artifactId>auraskills-api-bukkit</artifactId>
@@ -68,7 +65,7 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-shade-plugin</artifactId>
-        <version>3.6.1</version>
+        <version>3.6.2</version>
         <executions>
           <execution>
             <phase>package</phase>
