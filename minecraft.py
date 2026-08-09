@@ -17,18 +17,15 @@ from minecraft_service import (
     aura_total_level,
     discord_timestamp,
     format_duration_from_ticks,
-    metric_value,
     ping_java_server,
 )
 
 
 logger = logging.getLogger(__name__)
-
 GUIDE_COLOR = 0x57F287
 INFO_COLOR = 0x5865F2
 WARN_COLOR = 0xFEE75C
 ERROR_COLOR = 0xED4245
-
 DISCORD_ID_RE = re.compile(r"^<@!?(\d+)>$")
 
 
@@ -37,10 +34,6 @@ def _trim(value: Any, limit: int = 1024) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 3)] + "..."
-
-
-def _bool_icon(value: bool) -> str:
-    return "🟢" if value else "⚫"
 
 
 def _player_platform(row: dict[str, Any]) -> str:
@@ -53,12 +46,11 @@ def _stats(row: dict[str, Any]) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _aura_summary(row: dict[str, Any], *, limit: int = 5) -> str:
+def _aura_summary(row: dict[str, Any], *, limit: int = 6) -> str:
     value = row.get("aura_skills")
     if not isinstance(value, dict) or not value:
-        return "No AuraSkills data yet."
-
-    pairs = []
+        return "No AuraSkills snapshot yet."
+    pairs: list[tuple[str, int]] = []
     for name, entry in value.items():
         if not isinstance(entry, dict):
             continue
@@ -69,34 +61,36 @@ def _aura_summary(row: dict[str, Any], *, limit: int = 5) -> str:
         pairs.append((str(name), level))
     pairs.sort(key=lambda item: (-item[1], item[0].lower()))
     if not pairs:
-        return "No AuraSkills data yet."
-    return "\n".join(
-        f"• **{name.title()}** — Lv. {level}"
-        for name, level in pairs[:limit]
-    )
+        return "No AuraSkills snapshot yet."
+    return "\n".join(f"• **{name.title()}** — Lv. {level}" for name, level in pairs[:limit])
 
 
 def _metric_display(metric: str, value: int) -> str:
-    if metric == "playtime":
-        return format_duration_from_ticks(value)
-    return f"{value:,}"
+    return format_duration_from_ticks(value) if metric == "playtime" else f"{value:,}"
 
 
 class Minecraft(commands.Cog):
-    """The Plug's Minecraft companion surface."""
+    """The Plug's Discord-side Minecraft companion."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.data = MinecraftDataService(self._supabase_client)
+        self.data = MinecraftDataService()
 
-    def _supabase_client(self):
-        database = getattr(self.bot, "db", None)
-        backend = getattr(database, "backend", None)
-        return getattr(backend, "client", None)
+    async def cog_load(self) -> None:
+        if not self.data.configured:
+            logger.warning(
+                "Minecraft companion loaded without Turso credentials; commands remain registered but data setup is unavailable"
+            )
+            return
+        await self.data.ensure_schema()
+        logger.info("Minecraft companion Turso schema is ready")
+
+    async def cog_unload(self) -> None:
+        await self.data.close()
 
     async def cog_check(self, ctx: commands.Context) -> bool:
         if ctx.guild is None:
-            await ctx.send("❌ Minecraft companion commands only work inside a server.")
+            await ctx.send("❌ Minecraft companion commands only work inside a Discord server.")
             return False
         return True
 
@@ -108,18 +102,30 @@ class Minecraft(commands.Cog):
     async def _need_manager(self, ctx: commands.Context) -> bool:
         if self._is_manager(ctx):
             return True
-        await ctx.send("❌ You need **Manage Server** to use that Minecraft admin command.")
+        await ctx.send("⛔ You need **Manage Server** to use that Minecraft manager command.")
         return False
+
+    async def _data_error(self, ctx: commands.Context, exc: Exception) -> None:
+        text = str(exc)
+        if "not configured" in text.lower() or "must both be set" in text.lower():
+            await ctx.send(
+                "🗄️ **The Plug's Minecraft database isn't connected yet.**\n"
+                "Add `MINECRAFT_TURSO_DATABASE_URL` and `MINECRAFT_TURSO_AUTH_TOKEN` "
+                "to the Discloud app, then restart The Plug."
+            )
+            return
+        logger.warning("Minecraft data operation failed: %s", exc)
+        await ctx.send("❌ The Minecraft data service is temporarily unavailable.")
 
     async def _server_or_message(self, ctx: commands.Context) -> dict[str, Any] | None:
         try:
             server = await self.data.get_server(ctx.guild.id)
         except MinecraftDataUnavailable as exc:
-            await ctx.send(f"❌ {exc}")
+            await self._data_error(ctx, exc)
             return None
         if server is None:
             await ctx.send(
-                "⚙️ Minecraft companion setup is not finished yet. "
+                "⚙️ **Minecraft isn't configured for this Discord server yet.**\n"
                 "A manager can run `/minecraft setup`."
             )
             return None
@@ -131,46 +137,47 @@ class Minecraft(commands.Cog):
         player: str | None,
     ) -> dict[str, Any] | None:
         try:
-            if player:
+            if player and player.strip():
                 row = await self.data.player_by_name(ctx.guild.id, player)
             else:
                 row = await self.data.player_by_discord(ctx.guild.id, ctx.author.id)
         except MinecraftDataUnavailable as exc:
-            await ctx.send(f"❌ {exc}")
+            await self._data_error(ctx, exc)
             return None
 
-        if row is None:
-            if player:
-                await ctx.send(f"🔎 I don't have Minecraft data for **{_trim(player, 80)}** yet.")
-            else:
-                await ctx.send(
-                    "🔗 I couldn't match your Discord account to a Minecraft player yet.\n"
-                    "Join Minecraft and run `/discord link`, then try again after the bridge syncs."
-                )
-            return None
-        return row
+        if row is not None:
+            return row
+        if player:
+            await ctx.send(f"🔎 I don't have Minecraft data for **{_trim(player, 80)}** yet.")
+        else:
+            await ctx.send(
+                "🔗 I couldn't match your Discord account to a Minecraft player yet. "
+                "During the migration, existing DiscordSRV links can be imported by ThePlugBridge; "
+                "native The Plug linking comes before DiscordSRV is removed."
+            )
+        return None
 
     def _guide_embed(self) -> discord.Embed:
         embed = discord.Embed(
-            title="🎮 The Plug — Minecraft Commands",
+            title="🎮 The Plug — Minecraft Companion",
             description=(
-                "Live server info, linked-player profiles, stats, leaderboards, "
-                "recent activity, and server health — without making you memorize a wall of commands."
+                "Live information for **The 420 Server** without mixing it into the Idle Grow profile system. "
+                "Java and Bedrock players use the same command surface."
             ),
             color=GUIDE_COLOR,
         )
         embed.add_field(
-            name="Quick",
+            name="Server",
             value=(
-                "`/minecraft status` — server + player count\n"
-                "`/minecraft players` — who's online\n"
-                "`/minecraft profile` — your linked profile\n"
-                "`/minecraft commands` — this guide"
+                "`/minecraft status` — live server-list status\n"
+                "`/minecraft players` — named online roster\n"
+                "`/minecraft activity` — recent joins/deaths/advancements\n"
+                "`/minecraft health` — Paper/TPS/MSPT health (manager)"
             ),
             inline=False,
         )
         embed.add_field(
-            name="Player Intel",
+            name="Players",
             value=(
                 "`/minecraft profile [player]`\n"
                 "`/minecraft stats [player]`\n"
@@ -181,35 +188,23 @@ class Minecraft(commands.Cog):
             inline=False,
         )
         embed.add_field(
-            name="Server Intel",
+            name="Leaderboards",
             value=(
-                "`/minecraft top [metric]` — `playtime`, `kills`, `mobs`, `deaths`, `jumps`, `aura`\n"
-                "`/minecraft records`\n"
-                "`/minecraft activity`\n"
-                "`/minecraft health` — managers"
+                "`/minecraft top [playtime|kills|mobs|deaths|jumps|aura]`\n"
+                "`/minecraft records`"
             ),
             inline=False,
         )
         embed.add_field(
-            name="Legacy Shortcuts",
+            name="Prefix shortcuts",
             value=(
-                "`!mcstatus` `!mcplayers` `!mcprofile` `!mcstats` "
-                "`!mcseen` `!mcplaytime` `!mctop` `!mcwhois` "
-                "`!mcrecords` `!mcactivity` `!mchealth` `!mccommands`"
-            ),
-            inline=False,
-        )
-        embed.add_field(
-            name="Minecraft ↔ Discord Link",
-            value=(
-                "Inside Minecraft run `/discord link`, then privately message the DiscordSRV bot "
-                "with the four-digit code. After the server bridge syncs, `/minecraft profile` "
-                "can find you automatically."
+                "`!mcstatus` `!mcplayers` `!mcprofile` `!mcstats` `!mcseen` "
+                "`!mcplaytime` `!mctop` `!mcrecords` `!mcactivity` `!mcwhois` `!mchealth`"
             ),
             inline=False,
         )
         embed.set_footer(
-            text="DiscordSRV's !players and live #minecraft-chat can stay enabled alongside The Plug."
+            text="DiscordSRV remains temporary during migration; The Plug will take features over one at a time."
         )
         return embed
 
@@ -219,12 +214,56 @@ class Minecraft(commands.Cog):
         description="The Plug's Minecraft companion commands.",
     )
     async def minecraft(self, ctx: commands.Context):
-        """Show the Minecraft command directory."""
         await ctx.send(embed=self._guide_embed())
 
-    @minecraft.command(name="commands", description="Show all Minecraft companion commands.")
+    @minecraft.command(name="commands", description="Show the Minecraft command guide.")
     async def minecraft_commands(self, ctx: commands.Context):
         await ctx.send(embed=self._guide_embed())
+
+    @minecraft.command(name="setup", description="Configure this Discord server's Minecraft address.")
+    async def minecraft_setup(
+        self,
+        ctx: commands.Context,
+        host: str,
+        java_port: int = DEFAULT_JAVA_PORT,
+        bedrock_port: int = DEFAULT_BEDROCK_PORT,
+        *,
+        display_name: str = "The 420 Server",
+    ):
+        if not await self._need_manager(ctx):
+            return
+        try:
+            row = await self.data.configure_server(
+                ctx.guild.id,
+                display_name=display_name or "The 420 Server",
+                host=host,
+                java_port=java_port,
+                bedrock_port=bedrock_port,
+            )
+        except (ValueError, MinecraftDataUnavailable) as exc:
+            if isinstance(exc, MinecraftDataUnavailable):
+                return await self._data_error(ctx, exc)
+            return await ctx.send(f"❌ {exc}")
+
+        ping_text = "⚠️ Java status ping did not answer yet."
+        try:
+            ping = await ping_java_server(row["host"], int(row["java_port"]))
+        except MinecraftPingError:
+            pass
+        else:
+            ping_text = (
+                f"✅ Java answered as **{ping['version_name']}** with "
+                f"**{ping['players_online']}/{ping['players_max']}** online."
+            )
+
+        await ctx.send(
+            "✅ **Minecraft companion server saved.**\n"
+            f"Java: `{row['host']}:{row['java_port']}`\n"
+            f"Bedrock: `{row['host']}:{row['bedrock_port']}`\n"
+            f"{ping_text}\n\n"
+            "The next deployment step is the restricted **Turso bridge token** for `ThePlugBridge.jar`. "
+            "No Supabase key or Discord bot token belongs in the Paper plugin."
+        )
 
     @minecraft.command(name="status", description="Show live Minecraft server status.")
     async def minecraft_status(self, ctx: commands.Context):
@@ -234,64 +273,38 @@ class Minecraft(commands.Cog):
         server = await self._server_or_message(ctx)
         if server is None:
             return
+        try:
+            ping = await ping_java_server(server["host"], int(server["java_port"]))
+        except MinecraftPingError as exc:
+            embed = discord.Embed(
+                title=f"🔴 {server.get('display_name') or 'Minecraft Server'}",
+                description="The Java Server List Ping endpoint did not answer this check.",
+                color=ERROR_COLOR,
+            )
+            embed.add_field(
+                name="Endpoint",
+                value=f"`{server['host']}:{server['java_port']}`",
+                inline=False,
+            )
+            embed.set_footer(text=_trim(exc, 200))
+            return await ctx.send(embed=embed)
 
-        host = str(server.get("host") or "").strip()
-        java_port = int(server.get("java_port") or DEFAULT_JAVA_PORT)
-        bedrock_port = int(server.get("bedrock_port") or DEFAULT_BEDROCK_PORT)
-        ping = None
-        ping_error = None
-        if host:
-            try:
-                ping = await ping_java_server(host, java_port)
-            except MinecraftPingError as exc:
-                ping_error = str(exc)
-
-        bridge_seen = server.get("bridge_last_seen")
         embed = discord.Embed(
-            title=f"🎮 {server.get('display_name') or ctx.guild.name}",
-            color=GUIDE_COLOR if ping else WARN_COLOR,
+            title=f"🟢 {server.get('display_name') or 'Minecraft Server'}",
+            description=ping.get("motd") or "Minecraft server is online.",
+            color=GUIDE_COLOR,
         )
-        if host:
+        embed.add_field(name="Players", value=f"**{ping['players_online']} / {ping['players_max']}**", inline=True)
+        embed.add_field(name="Version", value=_trim(ping["version_name"], 80), inline=True)
+        embed.add_field(name="Ping", value=f"{ping['latency_ms']:.1f} ms", inline=True)
+        embed.add_field(name="Java", value=f"`{server['host']}:{server['java_port']}`", inline=True)
+        embed.add_field(name="Bedrock", value=f"`{server['host']}:{server['bedrock_port']}`", inline=True)
+        if server.get("bridge_last_seen"):
             embed.add_field(
-                name="Connect",
-                value=f"☕ Java: `{host}:{java_port}`\n🟩 Bedrock: `{host}:{bedrock_port}`",
+                name="ThePlugBridge",
+                value=f"Last telemetry {discord_timestamp(server['bridge_last_seen'])}",
                 inline=False,
             )
-        if ping:
-            embed.add_field(
-                name="Live",
-                value=(
-                    f"🟢 Online • **{ping['players_online']}/{ping['players_max']}** players\n"
-                    f"Version: **{_trim(ping['version_name'], 80)}** • Ping: **{ping['latency_ms']} ms**"
-                ),
-                inline=False,
-            )
-            if ping.get("motd"):
-                embed.add_field(name="MOTD", value=_trim(ping["motd"]), inline=False)
-        else:
-            embed.add_field(
-                name="Live",
-                value=f"🔴 Direct Java ping failed: `{_trim(ping_error or 'not configured', 300)}`",
-                inline=False,
-            )
-
-        bridge_line = (
-            f"Last bridge sync {discord_timestamp(bridge_seen)}"
-            if bridge_seen
-            else "Bridge has not reported yet."
-        )
-        runtime = []
-        if server.get("tps") is not None:
-            runtime.append(f"TPS **{float(server['tps']):.2f}**")
-        if server.get("mspt") is not None:
-            runtime.append(f"MSPT **{float(server['mspt']):.2f}**")
-        if server.get("minecraft_version"):
-            runtime.append(f"MC **{_trim(server['minecraft_version'], 40)}**")
-        embed.add_field(
-            name="The Plug Bridge",
-            value=bridge_line + (f"\n{' • '.join(runtime)}" if runtime else ""),
-            inline=False,
-        )
         await ctx.send(embed=embed)
 
     @minecraft.command(name="players", description="Show Minecraft players currently online.")
@@ -299,51 +312,39 @@ class Minecraft(commands.Cog):
         await self._send_players(ctx)
 
     async def _send_players(self, ctx: commands.Context):
+        server = await self._server_or_message(ctx)
+        if server is None:
+            return
         try:
             rows = await self.data.list_players(ctx.guild.id, online_only=True, limit=100)
         except MinecraftDataUnavailable as exc:
-            await ctx.send(f"❌ {exc}")
-            return
+            return await self._data_error(ctx, exc)
 
         if not rows:
-            server = await self._server_or_message(ctx)
-            if server and server.get("host"):
-                try:
-                    ping = await ping_java_server(
-                        server["host"],
-                        int(server.get("java_port") or DEFAULT_JAVA_PORT),
-                    )
-                    sample = ping.get("sample_names") or []
-                    detail = (
-                        "\n" + ", ".join(f"`{_trim(name, 40)}`" for name in sample[:20])
-                        if sample
-                        else ""
-                    )
-                    return await ctx.send(
-                        f"👥 **{ping['players_online']}/{ping['players_max']}** online.{detail}\n"
-                        "_The bridge has not supplied individual player rows yet._"
-                    )
-                except MinecraftPingError:
-                    pass
-            return await ctx.send("🌙 Nobody is reported online right now.")
+            try:
+                ping = await ping_java_server(server["host"], int(server["java_port"]))
+            except MinecraftPingError:
+                return await ctx.send("🌙 No players are currently reported online.")
+            sample = ping.get("sample_names") or []
+            names = "\n" + ", ".join(f"`{_trim(name, 40)}`" for name in sample[:20]) if sample else ""
+            return await ctx.send(
+                f"👥 **{ping['players_online']}/{ping['players_max']}** online.{names}\n"
+                "_ThePlugBridge has not supplied the full named roster yet._"
+            )
 
         lines = []
         for row in rows[:40]:
             linked = " 🔗" if row.get("discord_user_id") else ""
-            lines.append(
-                f"{_bool_icon(bool(row.get('online')))} **{_trim(row.get('username') or 'Unknown', 60)}** "
-                f"• {_player_platform(row)}{linked}"
-            )
+            lines.append(f"{'🟩' if str(row.get('platform')).lower() == 'bedrock' else '☕'} **{_trim(row.get('username') or 'Unknown', 60)}**{linked}")
         embed = discord.Embed(
             title=f"👥 Minecraft Online — {len(rows)}",
             description="\n".join(lines),
-            color=GUIDE_COLOR,
+            color=INFO_COLOR,
         )
-        if len(rows) > 40:
-            embed.set_footer(text=f"Showing 40 of {len(rows)} online players.")
+        embed.set_footer(text="🟩 Bedrock • ☕ Java • 🔗 linked to Discord")
         await ctx.send(embed=embed)
 
-    @minecraft.command(name="profile", description="Show a linked Minecraft player profile.")
+    @minecraft.command(name="profile", description="Show a Minecraft player profile.")
     async def minecraft_profile(self, ctx: commands.Context, player: str | None = None):
         await self._send_profile(ctx, player)
 
@@ -351,23 +352,17 @@ class Minecraft(commands.Cog):
         row = await self._resolve_player(ctx, player)
         if row is None:
             return
-
         stats = _stats(row)
         username = str(row.get("username") or "Unknown")
-        status_text = "🟢 Online" if row.get("online") else f"Last seen {discord_timestamp(row.get('last_seen'))}"
+        status = "🟢 Online" if row.get("online") else f"Last seen {discord_timestamp(row.get('last_seen'))}"
         embed = discord.Embed(
             title=f"⛏️ {username}",
-            description=f"{_player_platform(row)} • {status_text}",
+            description=f"{_player_platform(row)} • {status}",
             color=INFO_COLOR,
         )
-        discord_id = row.get("discord_user_id")
-        if discord_id:
-            embed.add_field(name="Discord", value=f"<@{int(discord_id)}>", inline=True)
-        embed.add_field(
-            name="Playtime",
-            value=format_duration_from_ticks(row.get("playtime_ticks")),
-            inline=True,
-        )
+        if row.get("discord_user_id"):
+            embed.add_field(name="Discord", value=f"<@{int(row['discord_user_id'])}>", inline=True)
+        embed.add_field(name="Playtime", value=format_duration_from_ticks(row.get("playtime_ticks")), inline=True)
         embed.add_field(
             name="Combat",
             value=(
@@ -379,7 +374,7 @@ class Minecraft(commands.Cog):
         )
         if row.get("online"):
             embed.add_field(
-                name="Right Now",
+                name="Right now",
                 value=(
                     f"World **{_trim(row.get('world') or 'Unknown', 60)}**\n"
                     f"Mode **{_trim(row.get('game_mode') or 'Unknown', 30)}**\n"
@@ -388,7 +383,7 @@ class Minecraft(commands.Cog):
                 inline=True,
             )
         embed.add_field(
-            name=f"AuraSkills • Total {aura_total_level(row)}",
+            name=f"✨ AuraSkills • Total {aura_total_level(row)}",
             value=_aura_summary(row),
             inline=False,
         )
@@ -404,21 +399,15 @@ class Minecraft(commands.Cog):
         if row is None:
             return
         stats = _stats(row)
-        embed = discord.Embed(
-            title=f"📊 {_trim(row.get('username') or 'Unknown', 80)} — Minecraft Stats",
-            color=INFO_COLOR,
-        )
-        embed.add_field(
-            name="Time",
-            value=f"Playtime **{format_duration_from_ticks(row.get('playtime_ticks'))}**",
-            inline=False,
-        )
+        embed = discord.Embed(title=f"📊 {row.get('username') or 'Unknown'} — Minecraft Stats", color=INFO_COLOR)
+        embed.add_field(name="Playtime", value=format_duration_from_ticks(row.get("playtime_ticks")), inline=False)
         embed.add_field(
             name="Combat",
             value=(
                 f"👤 Player kills: **{int(stats.get('player_kills') or 0):,}**\n"
                 f"👾 Mob kills: **{int(stats.get('mob_kills') or 0):,}**\n"
-                f"💀 Deaths: **{int(stats.get('deaths') or 0):,}**"
+                f"💀 Deaths: **{int(stats.get('deaths') or 0):,}**\n"
+                f"⚔️ Damage dealt: **{int(stats.get('damage_dealt') or 0):,}**"
             ),
             inline=True,
         )
@@ -427,15 +416,12 @@ class Minecraft(commands.Cog):
             value=(
                 f"🦘 Jumps: **{int(stats.get('jumps') or 0):,}**\n"
                 f"🚶 Walked: **{int(stats.get('walk_cm') or 0) / 100000:.1f} km**\n"
-                f"🏃 Sprinted: **{int(stats.get('sprint_cm') or 0) / 100000:.1f} km**"
+                f"🏃 Sprinted: **{int(stats.get('sprint_cm') or 0) / 100000:.1f} km**\n"
+                f"🏊 Swam: **{int(stats.get('swim_cm') or 0) / 100000:.1f} km**"
             ),
             inline=True,
         )
-        embed.add_field(
-            name="AuraSkills",
-            value=_aura_summary(row, limit=11),
-            inline=False,
-        )
+        embed.add_field(name="AuraSkills", value=_aura_summary(row, limit=11), inline=False)
         embed.set_footer(text=f"Last synchronized {discord_timestamp(row.get('updated_at'))}")
         await ctx.send(embed=embed)
 
@@ -447,13 +433,10 @@ class Minecraft(commands.Cog):
         row = await self._resolve_player(ctx, player)
         if row is None:
             return
-        username = str(row.get("username") or "Unknown")
         if row.get("online"):
-            await ctx.send(f"🟢 **{username}** is online right now.")
+            await ctx.send(f"🟢 **{row['username']}** is online right now.")
         else:
-            await ctx.send(
-                f"👀 **{username}** was last seen {discord_timestamp(row.get('last_seen'))}."
-            )
+            await ctx.send(f"👀 **{row['username']}** was last seen {discord_timestamp(row.get('last_seen'))}.")
 
     @minecraft.command(name="playtime", description="Show a Minecraft player's total playtime.")
     async def minecraft_playtime(self, ctx: commands.Context, player: str | None = None):
@@ -463,46 +446,29 @@ class Minecraft(commands.Cog):
         row = await self._resolve_player(ctx, player)
         if row is None:
             return
-        await ctx.send(
-            f"⏱️ **{row.get('username') or 'Unknown'}** — "
-            f"**{format_duration_from_ticks(row.get('playtime_ticks'))}** total playtime."
-        )
+        await ctx.send(f"⏱️ **{row['username']}** — **{format_duration_from_ticks(row.get('playtime_ticks'))}** total playtime.")
 
     @minecraft.command(name="top", description="Show a Minecraft leaderboard.")
     async def minecraft_top(self, ctx: commands.Context, metric: str = "playtime"):
         await self._send_top(ctx, metric)
 
     async def _send_top(self, ctx: commands.Context, metric: str):
-        metric = str(metric or "playtime").lower()
-        if metric not in TOP_METRICS:
-            return await ctx.send(
-                "❌ Metric must be one of: "
-                + ", ".join(f"`{name}`" for name in sorted(TOP_METRICS))
-            )
+        key = str(metric or "playtime").lower()
+        if key not in TOP_METRICS:
+            return await ctx.send("❌ Metric must be one of: " + ", ".join(f"`{name}`" for name in sorted(TOP_METRICS)))
         try:
-            ranked = await self.data.top_players(ctx.guild.id, metric, limit=10)
+            ranked = await self.data.top_players(ctx.guild.id, key, limit=10)
         except MinecraftDataUnavailable as exc:
-            return await ctx.send(f"❌ {exc}")
-
+            return await self._data_error(ctx, exc)
         if not ranked:
-            return await ctx.send("📭 No Minecraft leaderboard data has been collected yet.")
-
-        _, label = TOP_METRICS[metric]
-        lines = []
+            return await ctx.send("📭 No Minecraft leaderboard snapshots exist yet.")
+        _, label = TOP_METRICS[key]
         medals = ("🥇", "🥈", "🥉")
+        lines = []
         for index, (row, value) in enumerate(ranked, start=1):
             prefix = medals[index - 1] if index <= 3 else f"`#{index}`"
-            lines.append(
-                f"{prefix} **{_trim(row.get('username') or 'Unknown', 60)}** — "
-                f"{_metric_display(metric, value)}"
-            )
-        await ctx.send(
-            embed=discord.Embed(
-                title=f"🏆 Minecraft Top — {label}",
-                description="\n".join(lines),
-                color=WARN_COLOR,
-            )
-        )
+            lines.append(f"{prefix} **{_trim(row.get('username') or 'Unknown', 60)}** — {_metric_display(key, value)}")
+        await ctx.send(embed=discord.Embed(title=f"🏆 Minecraft Top — {label}", description="\n".join(lines), color=WARN_COLOR))
 
     @minecraft.command(name="records", description="Show current Minecraft server records.")
     async def minecraft_records(self, ctx: commands.Context):
@@ -512,34 +478,24 @@ class Minecraft(commands.Cog):
         try:
             records = await self.data.records(ctx.guild.id)
         except MinecraftDataUnavailable as exc:
-            return await ctx.send(f"❌ {exc}")
+            return await self._data_error(ctx, exc)
         if not any(records.values()):
-            return await ctx.send("📭 No Minecraft record data has been collected yet.")
-
+            return await ctx.send("📭 No Minecraft record snapshots exist yet.")
+        labels = {
+            "playtime": "⏱️ Playtime",
+            "kills": "⚔️ Player Kills",
+            "mobs": "👾 Mob Kills",
+            "deaths": "💀 Deaths",
+            "jumps": "🦘 Jumps",
+            "aura": "✨ AuraSkills",
+        }
         lines = []
-        for metric, label in (
-            ("playtime", "⏱️ Playtime"),
-            ("kills", "⚔️ Player Kills"),
-            ("mobs", "👾 Mob Kills"),
-            ("deaths", "💀 Deaths"),
-            ("jumps", "🦘 Jumps"),
-            ("aura", "✨ AuraSkills"),
-        ):
+        for metric, label in labels.items():
             item = records.get(metric)
-            if item is None:
-                continue
-            row, value = item
-            lines.append(
-                f"{label}: **{_trim(row.get('username') or 'Unknown', 60)}** — "
-                f"{_metric_display(metric, value)}"
-            )
-        await ctx.send(
-            embed=discord.Embed(
-                title="🏅 Minecraft Server Records",
-                description="\n".join(lines),
-                color=WARN_COLOR,
-            )
-        )
+            if item:
+                row, value = item
+                lines.append(f"{label}: **{row.get('username') or 'Unknown'}** — {_metric_display(metric, value)}")
+        await ctx.send(embed=discord.Embed(title="🏅 Minecraft Server Records", description="\n".join(lines), color=WARN_COLOR))
 
     @minecraft.command(name="activity", description="Show recent Minecraft activity.")
     async def minecraft_activity(self, ctx: commands.Context):
@@ -549,33 +505,20 @@ class Minecraft(commands.Cog):
         try:
             rows = await self.data.recent_activity(ctx.guild.id, limit=12)
         except MinecraftDataUnavailable as exc:
-            return await ctx.send(f"❌ {exc}")
+            return await self._data_error(ctx, exc)
         if not rows:
             return await ctx.send("📭 No recent Minecraft activity has been captured yet.")
-
-        icons = {
-            "join": "➡️",
-            "quit": "⬅️",
-            "death": "💀",
-            "advancement": "🏆",
-        }
+        icons = {"join": "➡️", "quit": "⬅️", "death": "💀", "advancement": "🏆", "kick": "⚠️"}
         lines = []
         for row in rows:
             kind = str(row.get("event_type") or "event").lower()
-            icon = icons.get(kind, "•")
-            username = _trim(row.get("username") or "Unknown", 50)
             detail = str(row.get("detail") or "").strip()
             suffix = f" — {_trim(detail, 120)}" if detail else ""
             lines.append(
-                f"{icon} **{username}** {kind}{suffix} • {discord_timestamp(row.get('occurred_at'))}"
+                f"{icons.get(kind, '•')} **{_trim(row.get('username') or 'Server', 50)}** "
+                f"{kind}{suffix} • {discord_timestamp(row.get('occurred_at'))}"
             )
-        await ctx.send(
-            embed=discord.Embed(
-                title="🛰️ Recent Minecraft Activity",
-                description="\n".join(lines),
-                color=INFO_COLOR,
-            )
-        )
+        await ctx.send(embed=discord.Embed(title="🛰️ Recent Minecraft Activity", description="\n".join(lines), color=INFO_COLOR))
 
     @minecraft.command(name="whois", description="Resolve a Minecraft player or linked Discord member.")
     async def minecraft_whois(self, ctx: commands.Context, query: str):
@@ -584,40 +527,23 @@ class Minecraft(commands.Cog):
     async def _send_whois(self, ctx: commands.Context, query: str):
         raw = str(query or "").strip()
         match = DISCORD_ID_RE.match(raw)
-        discord_id = None
-        if match:
-            discord_id = int(match.group(1))
-        elif raw.isdigit() and len(raw) >= 15:
-            discord_id = int(raw)
-
+        discord_id = int(match.group(1)) if match else (int(raw) if raw.isdigit() and len(raw) >= 15 else None)
         try:
-            if discord_id:
-                row = await self.data.player_by_discord(ctx.guild.id, discord_id)
-            else:
-                row = await self.data.player_by_name(ctx.guild.id, raw)
+            row = (
+                await self.data.player_by_discord(ctx.guild.id, discord_id)
+                if discord_id
+                else await self.data.player_by_name(ctx.guild.id, raw)
+            )
         except MinecraftDataUnavailable as exc:
-            return await ctx.send(f"❌ {exc}")
-
+            return await self._data_error(ctx, exc)
         if row is None:
-            return await ctx.send(f"🔎 No linked Minecraft identity matched **{_trim(raw, 80)}**.")
-
+            return await ctx.send(f"🔎 No Minecraft identity matched **{_trim(raw, 80)}**.")
         linked = row.get("discord_user_id")
-        embed = discord.Embed(
-            title="🔎 Minecraft Identity",
-            color=INFO_COLOR,
-        )
+        embed = discord.Embed(title="🔎 Minecraft Identity", color=INFO_COLOR)
         embed.add_field(name="Minecraft", value=f"**{row.get('username') or 'Unknown'}**", inline=True)
         embed.add_field(name="Platform", value=_player_platform(row), inline=True)
-        embed.add_field(
-            name="Discord",
-            value=f"<@{int(linked)}>" if linked else "Not linked through DiscordSRV",
-            inline=False,
-        )
-        embed.add_field(
-            name="Last Seen",
-            value="Online now" if row.get("online") else discord_timestamp(row.get("last_seen")),
-            inline=True,
-        )
+        embed.add_field(name="Discord", value=f"<@{int(linked)}>" if linked else "Not linked yet", inline=False)
+        embed.add_field(name="Last Seen", value="Online now" if row.get("online") else discord_timestamp(row.get("last_seen")), inline=True)
         embed.set_footer(text=f"UUID: {row.get('player_uuid') or 'unknown'}")
         await ctx.send(embed=embed)
 
@@ -631,133 +557,62 @@ class Minecraft(commands.Cog):
         server = await self._server_or_message(ctx)
         if server is None:
             return
+        try:
+            ping = await ping_java_server(server["host"], int(server["java_port"]))
+            ping_text = f"✅ {ping['latency_ms']:.1f} ms • {ping['players_online']}/{ping['players_max']} online"
+        except MinecraftPingError as exc:
+            ping_text = f"❌ {_trim(exc, 220)}"
 
-        ping_text = "Not tested"
-        host = str(server.get("host") or "").strip()
-        if host:
-            try:
-                ping = await ping_java_server(
-                    host,
-                    int(server.get("java_port") or DEFAULT_JAVA_PORT),
-                )
-                ping_text = (
-                    f"✅ Java ping: {ping['latency_ms']} ms • "
-                    f"{ping['players_online']}/{ping['players_max']} online"
-                )
-            except MinecraftPingError as exc:
-                ping_text = f"❌ Java ping: {_trim(exc, 250)}"
-
-        bridge = server.get("bridge_last_seen")
         embed = discord.Embed(title="🩺 Minecraft Server Health", color=INFO_COLOR)
-        embed.add_field(name="Network", value=ping_text, inline=False)
-        embed.add_field(
-            name="Bridge",
-            value=(
-                f"Last heartbeat {discord_timestamp(bridge)}"
-                if bridge
-                else "❌ ThePlugBridge has never reported."
-            ),
-            inline=False,
-        )
-        embed.add_field(
-            name="Server Runtime",
-            value=(
-                f"TPS: **{float(server.get('tps') or 0):.2f}**\n"
-                f"MSPT: **{float(server.get('mspt') or 0):.2f}**\n"
-                f"Memory: **{int(server.get('memory_used_mb') or 0):,}/"
-                f"{int(server.get('memory_max_mb') or 0):,} MB**\n"
-                f"Players: **{int(server.get('online_players') or 0)}/"
-                f"{int(server.get('max_players') or 0)}**"
-            ),
-            inline=True,
-        )
-        embed.add_field(
-            name="Versions",
-            value=(
-                f"Minecraft: **{_trim(server.get('minecraft_version') or 'Unknown', 50)}**\n"
-                f"Paper: **{_trim(server.get('paper_version') or 'Unknown', 80)}**\n"
-                f"Bridge: **{_trim(server.get('bridge_version') or 'Unknown', 30)}**"
-            ),
-            inline=True,
-        )
+        embed.add_field(name="Java endpoint", value=ping_text, inline=False)
+        if server.get("bridge_last_seen"):
+            embed.add_field(name="ThePlugBridge", value=f"Last heartbeat {discord_timestamp(server['bridge_last_seen'])}", inline=False)
+            embed.add_field(
+                name="TPS • 1/5/15m",
+                value=" / ".join(
+                    f"{float(server.get(key)):.2f}" if server.get(key) is not None else "?"
+                    for key in ("tps_1m", "tps_5m", "tps_15m")
+                ),
+                inline=False,
+            )
+            embed.add_field(name="MSPT", value=f"{float(server.get('mspt') or 0):.2f} ms", inline=True)
+            embed.add_field(
+                name="Memory",
+                value=f"{float(server.get('memory_used_mb') or 0):.0f}/{float(server.get('memory_max_mb') or 0):.0f} MB",
+                inline=True,
+            )
+            embed.add_field(name="Bedrock online", value=str(int(server.get("bedrock_online") or 0)), inline=True)
+            embed.add_field(
+                name="Runtime",
+                value=(
+                    f"Minecraft: **{_trim(server.get('minecraft_version') or 'Unknown', 50)}**\n"
+                    f"Paper: **{_trim(server.get('paper_version') or 'Unknown', 80)}**\n"
+                    f"Bridge: **{_trim(server.get('bridge_version') or 'Unknown', 30)}**"
+                ),
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="Paper telemetry",
+                value="Waiting for `ThePlugBridge.jar`; TPS/MSPT/memory will appear after its first Turso heartbeat.",
+                inline=False,
+            )
         await ctx.send(embed=embed)
 
-    @minecraft.command(name="setup", description="Configure this Discord server's Minecraft address.")
-    async def minecraft_setup(
-        self,
-        ctx: commands.Context,
-        host: str,
-        java_port: int = DEFAULT_JAVA_PORT,
-        bedrock_port: int = DEFAULT_BEDROCK_PORT,
-        *,
-        display_name: str = "",
-    ):
-        if not await self._need_manager(ctx):
-            return
-        try:
-            row = await self.data.configure_server(
-                ctx.guild.id,
-                display_name=display_name or ctx.guild.name,
-                host=host,
-                java_port=java_port,
-                bedrock_port=bedrock_port,
-            )
-        except (ValueError, MinecraftDataUnavailable) as exc:
-            return await ctx.send(f"❌ {exc}")
-
-        await ctx.send(
-            "✅ **Minecraft companion server saved.**\n"
-            f"Java: `{row['host']}:{row['java_port']}`\n"
-            f"Bedrock: `{row['host']}:{row['bedrock_port']}`\n\n"
-            "Next: run `/minecraft bridgekey` once, put that secret into "
-            "`plugins/ThePlugBridge/config.yml`, then restart Minecraft."
-        )
-
-    @minecraft.command(
-        name="bridgekey",
-        description="Rotate the private ThePlugBridge ingest secret.",
-    )
-    async def minecraft_bridgekey(self, ctx: commands.Context):
-        if not await self._need_manager(ctx):
-            return
-        if ctx.interaction is None:
-            return await ctx.send(
-                "🔐 For safety, use the slash command `/minecraft bridgekey` so the secret is private."
-            )
-        try:
-            secret = await self.data.rotate_bridge_secret(ctx.guild.id)
-        except MinecraftDataUnavailable as exc:
-            return await ctx.send(f"❌ {exc}", ephemeral=True)
-
-        await ctx.send(
-            "🔐 **New ThePlugBridge secret generated.**\n"
-            "Copy it now into `plugins/ThePlugBridge/config.yml` under `bridge-secret`.\n"
-            "Generating another key immediately invalidates this one.\n\n"
-            f"```{secret}```",
-            ephemeral=True,
-        )
-
-    @minecraft.command(
-        name="panel",
-        description="Post a public Minecraft command guide for members.",
-    )
+    @minecraft.command(name="panel", description="Post and pin a public Minecraft command guide.")
     async def minecraft_panel(self, ctx: commands.Context):
         if not await self._need_manager(ctx):
             return
         sent = await ctx.send(embed=self._guide_embed())
         try:
             member = ctx.guild.me
-            if (
-                member
-                and isinstance(ctx.channel, discord.TextChannel)
-                and ctx.channel.permissions_for(member).manage_messages
-            ):
-                await sent.pin(reason="Minecraft command guide")
+            if member and isinstance(ctx.channel, discord.TextChannel) and ctx.channel.permissions_for(member).manage_messages:
+                await sent.pin(reason="The Plug Minecraft command guide")
         except (discord.DiscordException, AttributeError):
             pass
 
-    # Prefix-only shortcuts. They deliberately avoid !mc, !help, !players, !profile,
-    # and !stats so DiscordSRV and Idle Grow's existing command surface cannot collide.
+    # Prefix-only compatibility shortcuts. Generic !help, !players, !profile and !stats
+    # remain untouched so DiscordSRV and Idle Grow cannot collide with this module.
     @commands.command(name="mccommands")
     async def mccommands(self, ctx: commands.Context):
         await ctx.send(embed=self._guide_embed())
