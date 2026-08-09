@@ -15,7 +15,6 @@ from minecraft_storage import (
     MinecraftStoreError,
     MinecraftTursoStore,
     aura_total_level,
-    metric_value,
     sort_player_rows,
 )
 
@@ -33,11 +32,11 @@ TOP_METRICS = {
 
 
 class MinecraftServiceError(RuntimeError):
-    """Base error surfaced by the Discord Minecraft command layer."""
+    pass
 
 
 class MinecraftDataUnavailable(MinecraftServiceError):
-    """Raised when the dedicated Minecraft Turso store cannot be used."""
+    pass
 
 
 def normalize_host(value: str) -> str:
@@ -52,17 +51,28 @@ def format_duration_from_ticks(value: Any) -> str:
     return format_playtime(value)
 
 
+def metric_value(row: dict[str, Any], metric: str) -> int:
+    key = str(metric or "playtime").lower()
+    if key == "playtime":
+        return max(0, int(row.get("playtime_ticks") or 0))
+    if key == "aura":
+        return aura_total_level(row)
+    stat_key = {
+        "kills": "player_kills",
+        "mobs": "mob_kills",
+        "deaths": "deaths",
+        "jumps": "jumps",
+    }.get(key)
+    if stat_key is None:
+        raise ValueError("metric must be playtime, kills, mobs, deaths, jumps, or aura")
+    stats = row.get("stats") if isinstance(row.get("stats"), dict) else {}
+    return max(0, int(stats.get(stat_key) or 0))
+
+
 class MinecraftDataService:
-    """Compatibility facade over the dedicated Turso Minecraft store.
+    """Small command-layer facade over The Plug's dedicated Turso Minecraft store."""
 
-    The existing Idle Grow Supabase persistence remains untouched. Minecraft data is
-    intentionally isolated in its own Turso database so neither project can corrupt
-    or authorize the other by accident.
-    """
-
-    def __init__(self, _legacy_client_provider=None, *, store: MinecraftTursoStore | None = None):
-        # `_legacy_client_provider` is accepted temporarily so the command cog can be
-        # migrated without a second command implementation. It is intentionally ignored.
+    def __init__(self, *, store: MinecraftTursoStore | None = None):
         self.store = store or MinecraftTursoStore.from_env()
 
     @property
@@ -107,12 +117,6 @@ class MinecraftDataService:
         except MinecraftStoreError as exc:
             raise MinecraftDataUnavailable(str(exc)) from exc
 
-    async def rotate_bridge_secret(self, guild_id: Any) -> str:
-        raise MinecraftDataUnavailable(
-            "Bridge secrets were retired when Minecraft persistence moved to Turso. "
-            "Use a dedicated fine-grained Turso bridge token instead."
-        )
-
     async def list_players(
         self,
         guild_id: Any,
@@ -129,35 +133,21 @@ class MinecraftDataService:
         except MinecraftStoreError as exc:
             raise MinecraftDataUnavailable(str(exc)) from exc
 
-    async def player_by_name(
-        self,
-        guild_id: Any,
-        username: str,
-    ) -> dict[str, Any] | None:
+    async def player_by_name(self, guild_id: Any, username: str):
         try:
             return await self.store.get_player_by_name(int(guild_id), username)
         except MinecraftStoreError as exc:
             raise MinecraftDataUnavailable(str(exc)) from exc
 
-    async def player_by_discord(
-        self,
-        guild_id: Any,
-        discord_user_id: Any,
-    ) -> dict[str, Any] | None:
+    async def player_by_discord(self, guild_id: Any, discord_user_id: Any):
         try:
             return await self.store.get_player_by_discord(
-                int(guild_id),
-                int(discord_user_id),
+                int(guild_id), int(discord_user_id)
             )
         except MinecraftStoreError as exc:
             raise MinecraftDataUnavailable(str(exc)) from exc
 
-    async def recent_activity(
-        self,
-        guild_id: Any,
-        *,
-        limit: int = 12,
-    ) -> list[dict[str, Any]]:
+    async def recent_activity(self, guild_id: Any, *, limit: int = 12):
         try:
             return await self.store.recent_activity(int(guild_id), limit=limit)
         except MinecraftStoreError as exc:
@@ -178,10 +168,7 @@ class MinecraftDataService:
         rows = await self.list_players(guild_id, limit=500)
         return sort_player_rows(rows, key)[: max(1, min(int(limit), 25))]
 
-    async def records(
-        self,
-        guild_id: Any,
-    ) -> dict[str, tuple[dict[str, Any], int] | None]:
+    async def records(self, guild_id: Any):
         rows = await self.list_players(guild_id, limit=500)
         result: dict[str, tuple[dict[str, Any], int] | None] = {}
         for metric in TOP_METRICS:
