@@ -63,7 +63,6 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
     @Override
     public void onEnable() {
         saveDefaultConfig();
-
         String tursoUrl = getConfig().getString("turso-http-url", "");
         this.tursoAuthToken = getConfig().getString("turso-bridge-token", "").trim();
         this.guildId = getConfig().getLong("guild-id", 0L);
@@ -72,9 +71,7 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
             Math.min(MAX_HEARTBEAT_SECONDS, getConfig().getLong("heartbeat-seconds", 15L))
         );
         this.instanceId = UUID.randomUUID().toString();
-        this.httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(8))
-            .build();
+        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8)).build();
 
         try {
             this.tursoPipelineUri = normalizeTursoPipelineUri(tursoUrl);
@@ -96,7 +93,6 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
         for (Player player : Bukkit.getOnlinePlayers()) {
             joinedAt.put(player.getUniqueId(), Instant.now());
         }
-
         Bukkit.getPluginManager().registerEvents(this, this);
         this.heartbeatTask = Bukkit.getScheduler().runTaskTimer(
             this,
@@ -104,7 +100,6 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
             40L,
             heartbeatSeconds * 20L
         );
-
         getLogger().info(
             "ThePlugBridge " + BRIDGE_VERSION + " enabled; Turso heartbeat every "
                 + heartbeatSeconds + "s. No player IP addresses are collected."
@@ -161,8 +156,9 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
 
     private void enqueueEvent(Player player, String eventType, String detail) {
         Map<String, Object> event = new LinkedHashMap<>();
+        FloodgatePlayer floodgatePlayer = floodgatePlayer(player.getUniqueId());
         event.put("player_uuid", player.getUniqueId().toString());
-        event.put("username", resolveUsername(player));
+        event.put("username", resolveUsername(player, floodgatePlayer));
         event.put("event_type", eventType);
         event.put("detail", detail);
         event.put("occurred_at", Instant.now().toString());
@@ -176,32 +172,22 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
         }
     }
 
-    /**
-     * Runs on Paper's server thread. Bukkit, Floodgate and AuraSkills state is copied
-     * here, then all network I/O occurs on an async scheduler worker.
-     */
     private void captureAndDispatch() {
         if (!isEnabled() || !requestInFlight.compareAndSet(false, true)) {
             return;
         }
-
         Map<String, Object> server = captureServer();
         List<Map<String, Object>> players = new ArrayList<>();
         for (Player player : Bukkit.getOnlinePlayers()) {
             players.add(capturePlayer(player));
         }
-
         List<Map<String, Object>> events = new ArrayList<>();
         Map<String, Object> event;
         while ((event = pendingEvents.poll()) != null) {
             events.add(event);
         }
-
         String requestBody = gson.toJson(buildPipeline(server, players, events));
-        Bukkit.getScheduler().runTaskAsynchronously(
-            this,
-            () -> sendPipeline(requestBody, events)
-        );
+        Bukkit.getScheduler().runTaskAsynchronously(this, () -> sendPipeline(requestBody, events));
     }
 
     private Map<String, Object> buildPipeline(
@@ -257,9 +243,6 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
             server.get("bedrock_online"),
             gson.toJson(server.get("plugins"))
         ));
-
-        // Every heartbeat is a full authoritative online roster. Mark the old roster
-        // offline first, then upsert the players Paper currently reports online.
         requests.add(execute(
             "UPDATE minecraft_players SET online = 0 WHERE guild_id = ? AND online = 1",
             guildId
@@ -327,12 +310,10 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
                 event.get("occurred_at")
             ));
         }
-
         requests.add(execute("COMMIT"));
         Map<String, Object> close = new LinkedHashMap<>();
         close.put("type", "close");
         requests.add(close);
-
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("requests", requests);
         return body;
@@ -358,25 +339,19 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
         Map<String, Object> argument = new LinkedHashMap<>();
         if (value == null) {
             argument.put("type", "null");
-            return argument;
-        }
-        if (value instanceof Byte || value instanceof Short || value instanceof Integer || value instanceof Long) {
-            argument.put("type", "integer");
-            argument.put("value", value.toString());
-            return argument;
-        }
-        if (value instanceof Number) {
-            argument.put("type", "float");
-            argument.put("value", value.toString());
-            return argument;
-        }
-        if (value instanceof Boolean booleanValue) {
+        } else if (value instanceof Boolean booleanValue) {
             argument.put("type", "integer");
             argument.put("value", booleanValue ? "1" : "0");
-            return argument;
+        } else if (value instanceof Byte || value instanceof Short || value instanceof Integer || value instanceof Long) {
+            argument.put("type", "integer");
+            argument.put("value", value.toString());
+        } else if (value instanceof Number) {
+            argument.put("type", "float");
+            argument.put("value", value.toString());
+        } else {
+            argument.put("type", "text");
+            argument.put("value", value.toString());
         }
-        argument.put("type", "text");
-        argument.put("value", value.toString());
         return argument;
     }
 
@@ -388,11 +363,7 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                 .build();
-
-            HttpResponse<String> response = httpClient.send(
-                request,
-                HttpResponse.BodyHandlers.ofString()
-            );
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 restoreEvents(events);
                 getLogger().warning(
@@ -405,7 +376,7 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
                 restoreEvents(events);
                 getLogger().warning(
                     "Turso accepted the HTTP request but rejected one or more SQL statements. "
-                        + "Check that the bot created the schema and the bridge token has add/update permissions."
+                        + "Check that The Plug created the schema and the bridge token has add/update permissions."
                 );
             }
         } catch (InterruptedException exc) {
@@ -420,7 +391,6 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
         }
     }
 
-    @SuppressWarnings("unchecked")
     private boolean pipelineSucceeded(String responseBody) {
         try {
             Object decoded = gson.fromJson(responseBody, Object.class);
@@ -432,10 +402,8 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
                 return false;
             }
             for (Object item : results) {
-                if (!(item instanceof Map<?, ?> result)) {
-                    return false;
-                }
-                if (!"ok".equals(String.valueOf(result.get("type")))) {
+                if (!(item instanceof Map<?, ?> result)
+                    || !"ok".equals(String.valueOf(result.get("type")))) {
                     return false;
                 }
             }
@@ -460,7 +428,6 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
         row.put("paper_version", Bukkit.getVersion());
         row.put("geyser_version", pluginVersion("Geyser-Spigot"));
         row.put("floodgate_version", pluginVersion("floodgate"));
-
         double[] tps = Bukkit.getServer().getTPS();
         row.put("tps_1m", tps.length > 0 ? tps[0] : 20.0D);
         row.put("tps_5m", tps.length > 1 ? tps[1] : 20.0D);
@@ -473,7 +440,6 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
         row.put("memory_max_mb", runtime.maxMemory() / (1024.0D * 1024.0D));
         row.put("online_players", Bukkit.getOnlinePlayers().size());
         row.put("max_players", Bukkit.getMaxPlayers());
-
         int bedrockOnline = 0;
         for (Player player : Bukkit.getOnlinePlayers()) {
             if (isBedrock(player.getUniqueId())) {
@@ -502,13 +468,11 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
         Map<String, Object> row = new LinkedHashMap<>();
         UUID uuid = player.getUniqueId();
         FloodgatePlayer floodgatePlayer = floodgatePlayer(uuid);
-
         row.put("player_uuid", uuid.toString());
         row.put("username", resolveUsername(player, floodgatePlayer));
         row.put("platform", floodgatePlayer == null ? "java" : "bedrock");
         row.put("xuid", floodgatePlayer == null ? null : String.valueOf(floodgatePlayer.getXuid()));
         row.put("discord_user_id", linkedDiscordId(uuid));
-
         long firstPlayed = player.getFirstPlayed();
         row.put(
             "first_seen",
@@ -542,10 +506,7 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
 
     private long playtimeTicks(Player player) {
         long value = statisticByName(player, "PLAY_TIME");
-        if (value <= 0L) {
-            value = statisticByName(player, "PLAY_ONE_MINUTE");
-        }
-        return Math.max(0L, value);
+        return Math.max(0L, value > 0L ? value : statisticByName(player, "PLAY_ONE_MINUTE"));
     }
 
     private long statistic(Player player, Statistic statistic) {
@@ -570,7 +531,6 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
         if (plugin == null || !plugin.isEnabled()) {
             return output;
         }
-
         try {
             AuraSkillsApi api = AuraSkillsApi.get();
             SkillsUser user = api.getUser(player.getUniqueId());
@@ -592,10 +552,7 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
     private FloodgatePlayer floodgatePlayer(UUID uuid) {
         try {
             FloodgateApi api = FloodgateApi.getInstance();
-            if (api == null || !api.isFloodgatePlayer(uuid)) {
-                return null;
-            }
-            return api.getPlayer(uuid);
+            return api != null && api.isFloodgatePlayer(uuid) ? api.getPlayer(uuid) : null;
         } catch (Throwable ignored) {
             return null;
         }
@@ -616,11 +573,6 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
         return name.startsWith(".") ? name.substring(1) : name;
     }
 
-    /**
-     * Transitional only: while DiscordSRV is still installed, import its existing link
-     * so The Plug can preserve user identity during the migration. Native The Plug
-     * linking replaces this before DiscordSRV is removed.
-     */
     private Long linkedDiscordId(UUID uuid) {
         try {
             Plugin plugin = Bukkit.getPluginManager().getPlugin("DiscordSRV");
@@ -645,9 +597,7 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
     }
 
     private boolean configurationReady() {
-        return guildId > 0L
-            && tursoPipelineUri != null
-            && !tursoAuthToken.isBlank();
+        return guildId > 0L && tursoPipelineUri != null && !tursoAuthToken.isBlank();
     }
 
     private URI normalizeTursoPipelineUri(String rawValue) {
