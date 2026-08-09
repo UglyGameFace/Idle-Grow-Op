@@ -6,6 +6,7 @@ Build one production Minecraft companion for The Plug, with a Paper 26.2 bridge 
 ## Confirmed Architecture
 - Existing bot repo: `UglyGameFace/Idle-Grow-Op`.
 - Feature branch: `feature/minecraft-companion`.
+- Draft merge gate: PR #29.
 - Canonical Discord command namespace: `/minecraft` plus collision-safe `!mc...` shortcuts.
 - Existing Idle Grow persistence remains separate and unchanged.
 - Minecraft persistence uses its own Turso database.
@@ -34,21 +35,23 @@ Completed on the feature branch:
 - Updated focused Minecraft tests for URL normalization, typed 64-bit IDs, schema isolation, metrics, MOTD parsing, status protocol, and command collision guards.
 
 ## Current Validation
-- Python compilation has passed on intermediate branch commits.
-- Earlier focused CI exposed one stale source-contract assertion; the legacy reference was removed and a new exact-head CI run is pending.
-- Java 25 bridge build must pass on the exact current head before merge.
-- No production deployment has happened yet.
+- Exact bridge-code head `7336c9f` passed Java 25 Minecraft Bridge CI.
+- Maven resolved current Paper/Floodgate/AuraSkills APIs and produced `ThePlugBridge.jar`.
+- Maven Shade Plugin was raised to current 3.6.2 after Java 25 bytecode exposed the older shader incompatibility.
+- Artifact verification passed for `plugin.yml`, `config.yml`, and the bridge class.
+- Credential guard passed: the bridge source contains no Discord token or unrelated privileged database credential.
+- General Python CI passed on the same bridge-code head, including compilation, pytest and extension loading.
+- Draft PR #29 is open and deliberately not merge-ready until live Turso/Discloud/Paper validation is complete.
 
 ## Remaining Before Merge
-1. Get exact-head Python CI green.
-2. Get exact-head Minecraft Bridge CI green and fix any Paper/Floodgate/AuraSkills API compile issues.
-3. Inspect the final branch diff for duplicate/obsolete Minecraft implementations and credentials.
-4. Create the dedicated Turso database and configure the two credential scopes.
-5. Start The Plug once to create the Turso schema.
-6. Configure `/minecraft setup` with the live Minecraft endpoint.
-7. Install ThePlugBridge.jar and validate live Turso heartbeat/player snapshots.
-8. Confirm `/minecraft health`, profiles, stats, players and activity against live Paper data.
-9. Only then merge/deploy the feature branch.
+1. Create the dedicated Turso database and configure the two credential scopes.
+2. Start The Plug once to create the Turso schema.
+3. Configure `/minecraft setup` with the live Minecraft endpoint.
+4. Install the validated ThePlugBridge.jar and configure its restricted Turso token.
+5. Validate live Turso heartbeat/player snapshots from Paper.
+6. Confirm `/minecraft health`, profiles, stats, players and activity against live Paper data.
+7. Inspect final live logs for duplicate senders, permission failures, stale snapshots or bridge retries.
+8. Only then mark PR #29 ready and merge/deploy.
 
 ## DiscordSRV Replacement Backlog Inside This Task
 After telemetry/profile parity is live:
