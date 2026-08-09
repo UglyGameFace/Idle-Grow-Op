@@ -1,21 +1,22 @@
 # The Plug Minecraft bridge
 #
-# 1) Apply migrations/003_minecraft_companion.sql in the same Supabase project
-#    already used by The Plug.
-# 2) In Discord run /minecraft setup, then /minecraft bridgekey.
-# 3) Paste your Supabase project URL, public anon/publishable key, bridge secret,
-#    and Discord guild ID below.
+# This Paper plugin writes only Minecraft telemetry/activity to a dedicated Turso
+# database. It never needs your Discord bot token, Idle Grow Supabase credentials,
+# or any other bot's database secret.
 #
-# IMPORTANT:
-# - Use the public anon/publishable key here, NOT the service-role key.
-# - Never post bridge-secret publicly.
-# - The bridge never collects player IP addresses.
+# SETUP ORDER
+# 1) Start The Plug once with MINECRAFT_TURSO_DATABASE_URL and
+#    MINECRAFT_TURSO_AUTH_TOKEN so it creates the Minecraft tables.
+# 2) Create a separate fine-grained Turso token for this Paper bridge.
+# 3) Paste the database/HTTP URL, restricted bridge token, and Discord guild ID below.
+# 4) Restart Paper normally. Do not use /reload.
+#
+# The bridge never collects player IP addresses.
 
-supabase-url: ""
-supabase-anon-key: ""
-bridge-secret: ""
+turso-http-url: ""
+turso-bridge-token: ""
 guild-id: 0
 
-# 15 seconds is responsive without hammering the server or Supabase.
+# Responsive enough for status/player snapshots without excessive database writes.
 # Allowed range: 5-300 seconds.
 heartbeat-seconds: 15
