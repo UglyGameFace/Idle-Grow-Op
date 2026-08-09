@@ -1,16 +1,60 @@
-# The Plug — Minecraft Companion
+# The Plug Minecraft Companion
 
-The Plug runs on Discloud. `ThePlugBridge.jar` runs on Paper/Shockbyte and sends a
-small, structured telemetry snapshot to the same Supabase project already used by
-Idle Grow Op.
+## Architecture
 
-The bridge exists because the Discloud process cannot read Shockbyte's local
-plugin files. It does **not** expose RCON, does **not** enable Minecraft Query, and
-does **not** collect player IP addresses.
+The Minecraft companion is intentionally isolated from the Idle Grow database.
 
-## Command surface
+```text
+Paper 26.2
+  └─ ThePlugBridge.jar
+       ├─ Paper server/player/stat APIs
+       ├─ Floodgate API for Bedrock + XUID
+       ├─ AuraSkills API while players are online
+       ├─ transitional DiscordSRV link import
+       └─ Turso SQL-over-HTTP writes (restricted bridge token)
 
-Slash commands:
+Dedicated Turso database
+  ├─ minecraft_servers      # Discord-side config
+  ├─ minecraft_runtime      # latest Paper/Geyser health heartbeat
+  ├─ minecraft_players      # latest player/stat/AuraSkills snapshots
+  ├─ minecraft_activity     # joins/quits/deaths/advancements
+  └─ minecraft_links        # native The Plug links later
+
+The Plug on Discloud
+  └─ Turso SQL-over-HTTP reads/writes (bot token)
+       └─ Discord /minecraft commands
+```
+
+Turso is durable storage, **not** the future low-latency chat/proximity transport. Live chat and proximity voice will move to an authenticated realtime connection when The Plug has a public endpoint or a dedicated relay.
+
+## Turso credentials
+
+Use one dedicated database, recommended name: `the-plug-minecraft`.
+
+### The Plug / Discloud
+
+Set these environment variables on The Plug:
+
+- `MINECRAFT_TURSO_DATABASE_URL`
+- `MINECRAFT_TURSO_AUTH_TOKEN`
+
+The bot token needs enough permission to create the Minecraft schema and read/write the Minecraft tables. The Plug automatically creates its tables on startup; no manual SQL migration is required.
+
+### Paper bridge / Shockbyte
+
+Create a **different fine-grained database token** for `ThePlugBridge.jar`. It should not receive schema permissions or broad read access. The bridge only needs:
+
+- `minecraft_runtime:data_add,data_update`
+- `minecraft_players:data_add,data_update`
+- `minecraft_activity:data_add`
+
+The bridge config accepts the Turso database URL or HTTP URL and normalizes it to `/v2/pipeline`.
+
+Never put the Discord token, another bot's database credential, or Floodgate `key.pem` in ThePlugBridge.
+
+## Discord commands
+
+Public:
 
 - `/minecraft status`
 - `/minecraft players`
@@ -23,94 +67,42 @@ Slash commands:
 - `/minecraft activity`
 - `/minecraft whois <player or @member>`
 - `/minecraft commands`
-- `/minecraft health` — Manage Server
-- `/minecraft setup` — Manage Server
-- `/minecraft bridgekey` — Manage Server, slash-only secret delivery
-- `/minecraft panel` — Manage Server; posts/pins the public command guide
 
-Prefix compatibility shortcuts are deliberately namespaced so they do not steal
-DiscordSRV or Idle Grow commands:
+Manager:
 
-`!mcstatus`, `!mcplayers`, `!mcprofile`, `!mcstats`, `!mcseen`,
-`!mcplaytime`, `!mctop`, `!mcrecords`, `!mcactivity`, `!mcwhois`,
-`!mchealth`, `!mccommands`.
+- `/minecraft setup`
+- `/minecraft health`
+- `/minecraft panel`
 
-DiscordSRV can continue owning its existing `!players`, `!help`, `!mc`, `!link`,
-and `!discord` canned responses.
+Prefix compatibility shortcuts are namespaced as `!mcstatus`, `!mcplayers`, `!mcprofile`, etc. Generic `!help`, `!players`, `!profile`, and `!stats` are deliberately not claimed.
 
-## One-time database setup
+## DiscordSRV migration
 
-Run `migrations/003_minecraft_companion.sql` in the Supabase SQL editor for the
-project used by The Plug.
+DiscordSRV stays installed until The Plug owns each replacement feature. Only one system may own a feature at a time.
 
-The migration creates:
+Migration order:
 
-- `minecraft_servers`
-- `minecraft_bridge_auth`
-- `minecraft_players`
-- `minecraft_activity`
-- `the_plug_bridge_ingest(...)`
+1. Minecraft telemetry / profiles / health
+2. Native account linking
+3. LuckPerms ↔ Discord role sync
+4. Minecraft ↔ Discord chat and events
+5. Proximity voice
+6. Disable the matching DiscordSRV modules
+7. Remove DiscordSRV only after live parity is proven
 
-The Paper plugin never needs the Supabase service-role key. It calls only the
-restricted ingest RPC using the project's public anon/publishable key plus a
-rotatable bridge secret. Direct anon/authenticated table access is revoked.
+The first bridge version may read existing DiscordSRV account links locally to preserve identity during migration. That lookup is transitional and is removed after native The Plug linking is live.
 
-## Discord / Discloud setup
+## ThePlugBridge install
 
-After the migration and after The Plug is deployed:
+1. Start The Plug once with its Turso environment variables. This creates the schema.
+2. Build/download `ThePlugBridge.jar` from the Minecraft Bridge CI artifact.
+3. Stop Paper.
+4. Put the JAR in `/plugins/`.
+5. Start once to generate `/plugins/ThePlugBridge/config.yml`, then stop again.
+6. Fill `turso-http-url`, `turso-bridge-token`, and `guild-id`.
+7. Start Paper normally. Do not use `/reload`.
+8. Confirm the log says `ThePlugBridge 1.1.0 enabled` and `/minecraft health` begins showing bridge telemetry.
 
-1. Run:
-   `/minecraft setup host:<public-host> java_port:27002 bedrock_port:27002 display_name:The 420 Server`
-2. Run `/minecraft bridgekey`.
-3. Copy the private secret from the ephemeral response.
-4. Keep the existing Discloud-only `IDLE_SUPABASE_URL`,
-   `IDLE_SUPABASE_SERVICE_ROLE_KEY`, and `DISCORD_TOKEN` environment values.
-   Do not put those secrets in GitHub.
+## Data safety
 
-## Shockbyte / Paper setup
-
-Build or download the `ThePlugBridge` GitHub Actions artifact.
-
-1. Stop the Minecraft server.
-2. Upload `ThePlugBridge.jar` to `/plugins/`.
-3. Start once so `/plugins/ThePlugBridge/config.yml` is generated, then stop.
-4. Fill:
-   - `supabase-url`
-   - `supabase-anon-key` — public anon/publishable key only
-   - `bridge-secret` — from `/minecraft bridgekey`
-   - `guild-id`
-5. Start normally. Do not use `/reload`.
-
-Expected startup line:
-
-`ThePlugBridge 1.0.0 enabled; heartbeat every 15s. No player IP addresses are collected.`
-
-Within roughly 15 seconds, `/minecraft health` should show a recent bridge
-heartbeat and `/minecraft players` should show online Java and Bedrock users.
-
-## Data collected
-
-For online players the bridge sends:
-
-- Minecraft UUID and username
-- Java/Bedrock platform classification
-- Discord user ID when DiscordSRV already has that UUID linked
-- first/last seen and current join time
-- playtime
-- world, game mode, health, food, XP level
-- vanilla deaths/kills/jumps/movement statistics
-- loaded AuraSkills levels/XP
-- join, quit, death, and advancement activity
-
-No IP address is collected or stored.
-
-## Failure behavior
-
-- If Supabase migration 003 is missing, Minecraft commands explain that the
-  companion schema is unavailable; the existing Idle Grow bot remains intact.
-- If the bridge secret is wrong, the Paper plugin logs an HTTP ingest failure and
-  restores unsent activity events to its bounded queue.
-- If the bridge is offline, `/minecraft status` still attempts a direct Java
-  Server List Ping using the configured public host.
-- Bridge requests are asynchronous; Bukkit/AuraSkills state is captured on the
-  server thread before network I/O starts.
+The bridge does not collect player IP addresses. Player snapshots contain Minecraft identity, edition/XUID where available, current gameplay state, selected vanilla statistics, and online AuraSkills snapshots. Network/database work is sent off the Paper server thread.
