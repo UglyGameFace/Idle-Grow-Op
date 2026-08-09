@@ -6,7 +6,7 @@
 
   <groupId>com.the420server</groupId>
   <artifactId>the-plug-bridge</artifactId>
-  <version>1.0.0</version>
+  <version>1.1.0</version>
   <name>ThePlugBridge</name>
 
   <properties>
@@ -19,9 +19,14 @@
       <id>papermc</id>
       <url>https://repo.papermc.io/repository/maven-public/</url>
     </repository>
+    <repository>
+      <id>opencollab-main</id>
+      <url>https://repo.opencollab.dev/main/</url>
+    </repository>
   </repositories>
 
   <dependencies>
+    <!-- Paper's current 26.2 Maven range; Java 25 is required by this server line. -->
     <dependency>
       <groupId>io.papermc.paper</groupId>
       <artifactId>paper-api</artifactId>
@@ -29,6 +34,15 @@
       <scope>provided</scope>
     </dependency>
 
+    <!-- Official Floodgate API for authoritative Bedrock/XUID detection. -->
+    <dependency>
+      <groupId>org.geysermc.floodgate</groupId>
+      <artifactId>api</artifactId>
+      <version>2.2.5-SNAPSHOT</version>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- AuraSkills API is stable across the running 2.3.x implementation. -->
     <dependency>
       <groupId>dev.aurelium</groupId>
       <artifactId>auraskills-api-bukkit</artifactId>
