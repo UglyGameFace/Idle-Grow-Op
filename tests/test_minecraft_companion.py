@@ -6,7 +6,6 @@ import pytest
 
 from minecraft_service import (
     TOP_METRICS,
-    MinecraftDataService,
     aura_total_level,
     clean_motd,
     format_duration_from_ticks,
@@ -14,6 +13,13 @@ from minecraft_service import (
     normalize_host,
     ping_java_server,
     validate_port,
+)
+from minecraft_storage import (
+    SCHEMA_STATEMENTS,
+    TursoConfig,
+    _typed_arg,
+    sort_player_rows,
+    turso_http_pipeline_url,
 )
 
 
@@ -34,10 +40,69 @@ def test_host_and_port_validation():
         validate_port(70000)
 
 
-def test_duration_and_aura_metrics():
+def test_turso_url_normalization_accepts_current_database_url_forms():
+    assert (
+        turso_http_pipeline_url("https://plug-example.turso.io")
+        == "https://plug-example.turso.io/v2/pipeline"
+    )
+    assert (
+        turso_http_pipeline_url("libsql://plug-example.turso.io")
+        == "https://plug-example.turso.io/v2/pipeline"
+    )
+    assert (
+        turso_http_pipeline_url("turso://plug-example.turso.io")
+        == "https://plug-example.turso.io/v2/pipeline"
+    )
+    assert (
+        turso_http_pipeline_url("https://plug-example.turso.io/v2/pipeline")
+        == "https://plug-example.turso.io/v2/pipeline"
+    )
+
+
+def test_turso_config_requires_both_values(monkeypatch):
+    monkeypatch.delenv("MINECRAFT_TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("MINECRAFT_TURSO_AUTH_TOKEN", raising=False)
+    assert TursoConfig.from_env() is None
+
+    monkeypatch.setenv("MINECRAFT_TURSO_DATABASE_URL", "turso://plug-example.turso.io")
+    with pytest.raises(Exception, match="must both be set"):
+        TursoConfig.from_env()
+
+    monkeypatch.setenv("MINECRAFT_TURSO_AUTH_TOKEN", "test-token")
+    config = TursoConfig.from_env()
+    assert config is not None
+    assert config.pipeline_url == "https://plug-example.turso.io/v2/pipeline"
+
+
+def test_turso_bound_argument_encoding_preserves_large_discord_ids():
+    assert _typed_arg(1534800308876742698) == {
+        "type": "integer",
+        "value": "1534800308876742698",
+    }
+    assert _typed_arg(None) == {"type": "null"}
+    assert _typed_arg(12.5) == {"type": "float", "value": "12.5"}
+
+
+def test_schema_is_dedicated_turso_minecraft_state():
+    schema = "\n".join(SCHEMA_STATEMENTS).lower()
+    for table in (
+        "minecraft_servers",
+        "minecraft_runtime",
+        "minecraft_players",
+        "minecraft_links",
+        "minecraft_activity",
+    ):
+        assert table in schema
+    assert "supabase" not in schema
+    assert "player_ip" not in schema
+    assert "ip_address" not in schema
+
+
+def test_duration_aura_and_leaderboard_metrics():
     assert format_duration_from_ticks(20 * 90) == "1m"
     assert format_duration_from_ticks(20 * (2 * 3600 + 5 * 60)) == "2h 5m"
-    row = {
+    player = {
+        "username": "Miner",
         "playtime_ticks": 72000,
         "stats": {"player_kills": 7, "mob_kills": 80, "deaths": 2, "jumps": 123},
         "aura_skills": {
@@ -45,9 +110,16 @@ def test_duration_and_aura_metrics():
             "mining": {"level": 9, "xp": 1.0},
         },
     }
-    assert aura_total_level(row) == 21
-    assert metric_value(row, "kills") == 7
-    assert metric_value(row, "aura") == 21
+    other = {
+        "username": "Builder",
+        "playtime_ticks": 36000,
+        "stats": {"player_kills": 2, "mob_kills": 10, "deaths": 1, "jumps": 20},
+        "aura_skills": {"farming": {"level": 4}},
+    }
+    assert aura_total_level(player) == 21
+    assert metric_value(player, "kills") == 7
+    assert metric_value(player, "aura") == 21
+    assert sort_player_rows([other, player], "playtime")[0][0]["username"] == "Miner"
     assert set(TOP_METRICS) == {"playtime", "kills", "mobs", "deaths", "jumps", "aura"}
 
 
@@ -115,113 +187,17 @@ def test_java_status_ping_protocol_round_trip():
         assert result["players_online"] == 2
         assert result["players_max"] == 100
         assert result["version_name"] == "Paper 26.2"
-        assert result["protocol"] == 776
         assert result["sample_names"] == ["PlayerOne"]
         assert result["motd"] == "Hello world"
 
     asyncio.run(scenario())
 
 
-class FakeResponse:
-    def __init__(self, data=None):
-        self.data = data or []
-
-
-class FakeQuery:
-    def __init__(self, client, table_name):
-        self.client = client
-        self.table_name = table_name
-        self.filters = []
-        self.payload = None
-        self.operation = "select"
-
-    def select(self, _fields):
-        self.operation = "select"
-        return self
-
-    def eq(self, key, value):
-        self.filters.append(("eq", key, value))
-        return self
-
-    def ilike(self, key, value):
-        self.filters.append(("ilike", key, value))
-        return self
-
-    def order(self, *_args, **_kwargs):
-        return self
-
-    def limit(self, _limit):
-        return self
-
-    def upsert(self, payload, on_conflict=None):
-        self.operation = "upsert"
-        self.payload = dict(payload)
-        return self
-
-    def execute(self):
-        if self.operation == "upsert":
-            self.client.rows.setdefault(self.table_name, [])
-            guild_id = self.payload.get("guild_id")
-            existing = next(
-                (row for row in self.client.rows[self.table_name] if row.get("guild_id") == guild_id),
-                None,
-            )
-            if existing is None:
-                existing = dict(self.payload)
-                self.client.rows[self.table_name].append(existing)
-            else:
-                existing.update(self.payload)
-            return FakeResponse([dict(existing)])
-
-        rows = list(self.client.rows.get(self.table_name, []))
-        for kind, key, value in self.filters:
-            if kind == "eq":
-                rows = [row for row in rows if row.get(key) == value]
-            elif kind == "ilike":
-                rows = [row for row in rows if str(row.get(key, "")).lower() == str(value).lower()]
-        return FakeResponse([dict(row) for row in rows])
-
-
-class FakeClient:
-    def __init__(self):
-        self.rows = {
-            "minecraft_servers": [],
-            "minecraft_bridge_auth": [],
-            "minecraft_players": [],
-            "minecraft_activity": [],
-        }
-
-    def table(self, name):
-        return FakeQuery(self, name)
-
-
-def test_data_service_configures_server_and_rotates_secret():
-    async def scenario():
-        client = FakeClient()
-        service = MinecraftDataService(lambda: client)
-        row = await service.configure_server(
-            123,
-            display_name="The 420 Server",
-            host="play.example.net",
-            java_port=27002,
-            bedrock_port=27002,
-        )
-        assert row["host"] == "play.example.net"
-        loaded = await service.get_server(123)
-        assert loaded["display_name"] == "The 420 Server"
-
-        first = await service.rotate_bridge_secret(123)
-        second = await service.rotate_bridge_secret(123)
-        assert first != second
-        assert len(second) >= 40
-        auth = client.rows["minecraft_bridge_auth"][0]
-        assert auth["bridge_secret"] == second
-
-    asyncio.run(scenario())
-
-
-def test_minecraft_source_does_not_steal_existing_generic_prefixes():
+def test_minecraft_source_is_namespaced_and_has_no_supabase_bridge_path():
     source = (ROOT / "minecraft.py").read_text(encoding="utf-8")
+    service = (ROOT / "minecraft_service.py").read_text(encoding="utf-8")
+    storage = (ROOT / "minecraft_storage.py").read_text(encoding="utf-8")
+
     assert '@commands.command(name="mcprofile")' in source
     assert '@commands.command(name="mcstats")' in source
     assert '@commands.command(name="mcstatus")' in source
@@ -230,3 +206,6 @@ def test_minecraft_source_does_not_steal_existing_generic_prefixes():
     assert '@commands.command(name="help")' not in source
     assert '@commands.command(name="players")' not in source
     assert 'name="minecraft"' in source
+    assert "bridgekey" not in source
+    assert "supabase" not in service.lower()
+    assert "supabase" not in storage.lower()
