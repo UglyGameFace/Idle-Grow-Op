@@ -33,9 +33,15 @@ jobs:
           java-version: "25"
           cache: maven
 
-      - name: Reject privileged Supabase credentials in bridge source
+      - name: Reject unrelated privileged credentials in bridge source
         run: |
-          ! grep -R -nE 'SERVICE_ROLE|IDLE_SUPABASE_SERVICE_ROLE_KEY|service-role-key[[:space:]]*:' minecraft-bridge/src
+          ! grep -R -nE 'SUPABASE|SERVICE_ROLE|DISCORD_TOKEN|BOT_TOKEN|key\.pem|database-password' minecraft-bridge/src
+
+      - name: Require Turso SQL-over-HTTP transport
+        run: |
+          grep -R -q 'turso-http-url' minecraft-bridge/src/main/resources/config.yml
+          grep -R -q '/v2/pipeline' minecraft-bridge/src/main/java
+          grep -R -q 'Authorization' minecraft-bridge/src/main/java
 
       - name: Build ThePlugBridge
         run: mvn -B -f minecraft-bridge/pom.xml clean package
