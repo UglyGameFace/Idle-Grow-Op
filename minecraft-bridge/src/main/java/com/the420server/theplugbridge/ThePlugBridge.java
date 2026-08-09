@@ -19,6 +19,8 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
+import org.geysermc.floodgate.api.FloodgateApi;
+import org.geysermc.floodgate.api.player.FloodgatePlayer;
 
 import java.lang.reflect.Method;
 import java.net.URI;
@@ -40,9 +42,10 @@ import java.util.logging.Level;
 
 
 public final class ThePlugBridge extends JavaPlugin implements Listener {
-    private static final String BRIDGE_VERSION = "1.0.0";
+    private static final String BRIDGE_VERSION = "1.1.0";
     private static final long MIN_HEARTBEAT_SECONDS = 5L;
     private static final long MAX_HEARTBEAT_SECONDS = 300L;
+    private static final int MAX_PENDING_EVENTS = 250;
 
     private final Gson gson = new GsonBuilder().disableHtmlEscaping().create();
     private final ConcurrentLinkedQueue<Map<String, Object>> pendingEvents = new ConcurrentLinkedQueue<>();
@@ -50,9 +53,8 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
     private final AtomicBoolean requestInFlight = new AtomicBoolean(false);
 
     private HttpClient httpClient;
-    private String supabaseUrl;
-    private String supabaseAnonKey;
-    private String bridgeSecret;
+    private URI tursoPipelineUri;
+    private String tursoAuthToken;
     private long guildId;
     private long heartbeatSeconds;
     private String instanceId;
@@ -62,9 +64,8 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
     public void onEnable() {
         saveDefaultConfig();
 
-        this.supabaseUrl = cleanUrl(getConfig().getString("supabase-url", ""));
-        this.supabaseAnonKey = getConfig().getString("supabase-anon-key", "").trim();
-        this.bridgeSecret = getConfig().getString("bridge-secret", "").trim();
+        String tursoUrl = getConfig().getString("turso-http-url", "");
+        this.tursoAuthToken = getConfig().getString("turso-bridge-token", "").trim();
         this.guildId = getConfig().getLong("guild-id", 0L);
         this.heartbeatSeconds = Math.max(
             MIN_HEARTBEAT_SECONDS,
@@ -75,10 +76,18 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
             .connectTimeout(Duration.ofSeconds(8))
             .build();
 
+        try {
+            this.tursoPipelineUri = normalizeTursoPipelineUri(tursoUrl);
+        } catch (IllegalArgumentException exc) {
+            getLogger().severe("Invalid turso-http-url: " + exc.getMessage());
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
+
         if (!configurationReady()) {
             getLogger().severe(
-                "ThePlugBridge is not configured. Fill supabase-url, supabase-anon-key, "
-                    + "bridge-secret, and guild-id in plugins/ThePlugBridge/config.yml."
+                "ThePlugBridge is not configured. Fill turso-http-url, turso-bridge-token, "
+                    + "and guild-id in plugins/ThePlugBridge/config.yml."
             );
             getServer().getPluginManager().disablePlugin(this);
             return;
@@ -89,17 +98,15 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
         }
 
         Bukkit.getPluginManager().registerEvents(this, this);
-
-        long periodTicks = heartbeatSeconds * 20L;
         this.heartbeatTask = Bukkit.getScheduler().runTaskTimer(
             this,
             this::captureAndDispatch,
             40L,
-            periodTicks
+            heartbeatSeconds * 20L
         );
 
         getLogger().info(
-            "ThePlugBridge " + BRIDGE_VERSION + " enabled; heartbeat every "
+            "ThePlugBridge " + BRIDGE_VERSION + " enabled; Turso heartbeat every "
                 + heartbeatSeconds + "s. No player IP addresses are collected."
         );
     }
@@ -134,7 +141,8 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
     @EventHandler
     public void onDeath(PlayerDeathEvent event) {
         Player player = event.getEntity();
-        String detail = ChatColor.stripColor(event.getDeathMessage() == null ? "" : event.getDeathMessage());
+        String message = event.getDeathMessage();
+        String detail = ChatColor.stripColor(message == null ? "" : message);
         enqueueEvent(player, "death", detail);
         scheduleFastSync();
     }
@@ -143,8 +151,7 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
     public void onAdvancement(PlayerAdvancementDoneEvent event) {
         Player player = event.getPlayer();
         Advancement advancement = event.getAdvancement();
-        String detail = advancement.getKey().toString();
-        enqueueEvent(player, "advancement", detail);
+        enqueueEvent(player, "advancement", advancement.getKey().toString());
         scheduleFastSync();
     }
 
@@ -153,22 +160,25 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
     }
 
     private void enqueueEvent(Player player, String eventType, String detail) {
-        Map<String, Object> row = new LinkedHashMap<>();
-        row.put("player_uuid", player.getUniqueId().toString());
-        row.put("username", resolveUsername(player));
-        row.put("event_type", eventType);
-        row.put("detail", detail);
-        row.put("occurred_at", Instant.now().toString());
-        pendingEvents.add(row);
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("player_uuid", player.getUniqueId().toString());
+        event.put("username", resolveUsername(player));
+        event.put("event_type", eventType);
+        event.put("detail", detail);
+        event.put("occurred_at", Instant.now().toString());
+        pendingEvents.add(event);
+        trimPendingEvents();
+    }
 
-        while (pendingEvents.size() > 250) {
+    private void trimPendingEvents() {
+        while (pendingEvents.size() > MAX_PENDING_EVENTS) {
             pendingEvents.poll();
         }
     }
 
     /**
-     * Runs on the server thread. Bukkit/AuraSkills state is captured here before the
-     * network request is handed to an async worker.
+     * Runs on Paper's server thread. Bukkit, Floodgate and AuraSkills state is copied
+     * here, then all network I/O occurs on an async scheduler worker.
      */
     private void captureAndDispatch() {
         if (!isEnabled() || !requestInFlight.compareAndSet(false, true)) {
@@ -187,49 +197,251 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
             events.add(event);
         }
 
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("p_guild_id", guildId);
-        body.put("p_secret", bridgeSecret);
-        body.put("p_server", server);
-        body.put("p_players", players);
-        body.put("p_events", events);
-        String jsonBody = gson.toJson(body);
-
-        Bukkit.getScheduler().runTaskAsynchronously(this, () -> sendSnapshot(jsonBody, events));
+        String requestBody = gson.toJson(buildPipeline(server, players, events));
+        Bukkit.getScheduler().runTaskAsynchronously(
+            this,
+            () -> sendPipeline(requestBody, events)
+        );
     }
 
-    private void sendSnapshot(String jsonBody, List<Map<String, Object>> events) {
+    private Map<String, Object> buildPipeline(
+        Map<String, Object> server,
+        List<Map<String, Object>> players,
+        List<Map<String, Object>> events
+    ) {
+        List<Map<String, Object>> requests = new ArrayList<>();
+        requests.add(execute("BEGIN"));
+        requests.add(execute(
+            """
+            INSERT INTO minecraft_runtime (
+                guild_id, bridge_instance_id, bridge_version, heartbeat_at,
+                minecraft_version, paper_version, geyser_version, floodgate_version,
+                tps_1m, tps_5m, tps_15m, mspt,
+                memory_used_mb, memory_max_mb, online_players, max_players,
+                bedrock_online, plugins_json
+            ) VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                bridge_instance_id = excluded.bridge_instance_id,
+                bridge_version = excluded.bridge_version,
+                heartbeat_at = CURRENT_TIMESTAMP,
+                minecraft_version = excluded.minecraft_version,
+                paper_version = excluded.paper_version,
+                geyser_version = excluded.geyser_version,
+                floodgate_version = excluded.floodgate_version,
+                tps_1m = excluded.tps_1m,
+                tps_5m = excluded.tps_5m,
+                tps_15m = excluded.tps_15m,
+                mspt = excluded.mspt,
+                memory_used_mb = excluded.memory_used_mb,
+                memory_max_mb = excluded.memory_max_mb,
+                online_players = excluded.online_players,
+                max_players = excluded.max_players,
+                bedrock_online = excluded.bedrock_online,
+                plugins_json = excluded.plugins_json
+            """,
+            guildId,
+            server.get("bridge_instance_id"),
+            server.get("bridge_version"),
+            server.get("minecraft_version"),
+            server.get("paper_version"),
+            server.get("geyser_version"),
+            server.get("floodgate_version"),
+            server.get("tps_1m"),
+            server.get("tps_5m"),
+            server.get("tps_15m"),
+            server.get("mspt"),
+            server.get("memory_used_mb"),
+            server.get("memory_max_mb"),
+            server.get("online_players"),
+            server.get("max_players"),
+            server.get("bedrock_online"),
+            gson.toJson(server.get("plugins"))
+        ));
+
+        // Every heartbeat is a full authoritative online roster. Mark the old roster
+        // offline first, then upsert the players Paper currently reports online.
+        requests.add(execute(
+            "UPDATE minecraft_players SET online = 0 WHERE guild_id = ? AND online = 1",
+            guildId
+        ));
+
+        for (Map<String, Object> player : players) {
+            requests.add(execute(
+                """
+                INSERT INTO minecraft_players (
+                    guild_id, player_uuid, username, platform, xuid, discord_user_id,
+                    online, first_seen, last_seen, joined_at, playtime_ticks,
+                    world, game_mode, health, food, experience_level,
+                    stats_json, aura_skills_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(guild_id, player_uuid) DO UPDATE SET
+                    username = excluded.username,
+                    platform = excluded.platform,
+                    xuid = COALESCE(excluded.xuid, minecraft_players.xuid),
+                    discord_user_id = COALESCE(excluded.discord_user_id, minecraft_players.discord_user_id),
+                    online = 1,
+                    first_seen = COALESCE(minecraft_players.first_seen, excluded.first_seen),
+                    last_seen = CURRENT_TIMESTAMP,
+                    joined_at = excluded.joined_at,
+                    playtime_ticks = excluded.playtime_ticks,
+                    world = excluded.world,
+                    game_mode = excluded.game_mode,
+                    health = excluded.health,
+                    food = excluded.food,
+                    experience_level = excluded.experience_level,
+                    stats_json = excluded.stats_json,
+                    aura_skills_json = excluded.aura_skills_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                guildId,
+                player.get("player_uuid"),
+                player.get("username"),
+                player.get("platform"),
+                player.get("xuid"),
+                player.get("discord_user_id"),
+                player.get("first_seen"),
+                player.get("joined_at"),
+                player.get("playtime_ticks"),
+                player.get("world"),
+                player.get("game_mode"),
+                player.get("health"),
+                player.get("food"),
+                player.get("experience_level"),
+                gson.toJson(player.get("stats")),
+                gson.toJson(player.get("aura_skills"))
+            ));
+        }
+
+        for (Map<String, Object> event : events) {
+            requests.add(execute(
+                """
+                INSERT INTO minecraft_activity (
+                    guild_id, player_uuid, username, event_type, detail, occurred_at
+                ) VALUES (?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+                """,
+                guildId,
+                event.get("player_uuid"),
+                event.get("username"),
+                event.get("event_type"),
+                event.get("detail"),
+                event.get("occurred_at")
+            ));
+        }
+
+        requests.add(execute("COMMIT"));
+        Map<String, Object> close = new LinkedHashMap<>();
+        close.put("type", "close");
+        requests.add(close);
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("requests", requests);
+        return body;
+    }
+
+    private Map<String, Object> execute(String sql, Object... arguments) {
+        Map<String, Object> statement = new LinkedHashMap<>();
+        statement.put("sql", sql);
+        if (arguments.length > 0) {
+            List<Map<String, Object>> args = new ArrayList<>();
+            for (Object argument : arguments) {
+                args.add(sqlArgument(argument));
+            }
+            statement.put("args", args);
+        }
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("type", "execute");
+        request.put("stmt", statement);
+        return request;
+    }
+
+    private Map<String, Object> sqlArgument(Object value) {
+        Map<String, Object> argument = new LinkedHashMap<>();
+        if (value == null) {
+            argument.put("type", "null");
+            return argument;
+        }
+        if (value instanceof Byte || value instanceof Short || value instanceof Integer || value instanceof Long) {
+            argument.put("type", "integer");
+            argument.put("value", value.toString());
+            return argument;
+        }
+        if (value instanceof Number) {
+            argument.put("type", "float");
+            argument.put("value", value.toString());
+            return argument;
+        }
+        if (value instanceof Boolean booleanValue) {
+            argument.put("type", "integer");
+            argument.put("value", booleanValue ? "1" : "0");
+            return argument;
+        }
+        argument.put("type", "text");
+        argument.put("value", value.toString());
+        return argument;
+    }
+
+    private void sendPipeline(String requestBody, List<Map<String, Object>> events) {
         try {
-            URI endpoint = URI.create(supabaseUrl + "/rest/v1/rpc/the_plug_bridge_ingest");
-            HttpRequest request = HttpRequest.newBuilder(endpoint)
+            HttpRequest request = HttpRequest.newBuilder(tursoPipelineUri)
                 .timeout(Duration.ofSeconds(12))
-                .header("apikey", supabaseAnonKey)
-                .header("Authorization", "Bearer " + supabaseAnonKey)
+                .header("Authorization", "Bearer " + tursoAuthToken)
                 .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                 .build();
 
             HttpResponse<String> response = httpClient.send(
                 request,
                 HttpResponse.BodyHandlers.ofString()
             );
-
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 restoreEvents(events);
                 getLogger().warning(
-                    "Bridge ingest failed with HTTP " + response.statusCode()
-                        + ". Check the Supabase migration, guild ID, and bridge secret."
+                    "Turso bridge write failed with HTTP " + response.statusCode()
+                        + ". Check the database URL and bridge token."
+                );
+                return;
+            }
+            if (!pipelineSucceeded(response.body())) {
+                restoreEvents(events);
+                getLogger().warning(
+                    "Turso accepted the HTTP request but rejected one or more SQL statements. "
+                        + "Check that the bot created the schema and the bridge token has add/update permissions."
                 );
             }
         } catch (InterruptedException exc) {
             Thread.currentThread().interrupt();
             restoreEvents(events);
-            getLogger().log(Level.WARNING, "Bridge ingest interrupted", exc);
+            getLogger().log(Level.WARNING, "Turso bridge request interrupted", exc);
         } catch (Exception exc) {
             restoreEvents(events);
-            getLogger().log(Level.WARNING, "Bridge ingest request failed", exc);
+            getLogger().log(Level.WARNING, "Turso bridge request failed", exc);
         } finally {
             requestInFlight.set(false);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean pipelineSucceeded(String responseBody) {
+        try {
+            Object decoded = gson.fromJson(responseBody, Object.class);
+            if (!(decoded instanceof Map<?, ?> root)) {
+                return false;
+            }
+            Object rawResults = root.get("results");
+            if (!(rawResults instanceof List<?> results)) {
+                return false;
+            }
+            for (Object item : results) {
+                if (!(item instanceof Map<?, ?> result)) {
+                    return false;
+                }
+                if (!"ok".equals(String.valueOf(result.get("type")))) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (Exception ignored) {
+            return false;
         }
     }
 
@@ -237,9 +449,7 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
         for (Map<String, Object> event : events) {
             pendingEvents.add(event);
         }
-        while (pendingEvents.size() > 250) {
-            pendingEvents.poll();
-        }
+        trimPendingEvents();
     }
 
     private Map<String, Object> captureServer() {
@@ -248,15 +458,29 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
         row.put("bridge_version", BRIDGE_VERSION);
         row.put("minecraft_version", Bukkit.getMinecraftVersion());
         row.put("paper_version", Bukkit.getVersion());
-        row.put("tps", readServerMetric("getTPS", 20.0D, true));
-        row.put("mspt", readServerMetric("getAverageTickTime", 0.0D, false));
+        row.put("geyser_version", pluginVersion("Geyser-Spigot"));
+        row.put("floodgate_version", pluginVersion("floodgate"));
+
+        double[] tps = Bukkit.getServer().getTPS();
+        row.put("tps_1m", tps.length > 0 ? tps[0] : 20.0D);
+        row.put("tps_5m", tps.length > 1 ? tps[1] : 20.0D);
+        row.put("tps_15m", tps.length > 2 ? tps[2] : 20.0D);
+        row.put("mspt", Bukkit.getServer().getAverageTickTime());
 
         Runtime runtime = Runtime.getRuntime();
         long used = runtime.totalMemory() - runtime.freeMemory();
-        row.put("memory_used_mb", used / (1024L * 1024L));
-        row.put("memory_max_mb", runtime.maxMemory() / (1024L * 1024L));
+        row.put("memory_used_mb", used / (1024.0D * 1024.0D));
+        row.put("memory_max_mb", runtime.maxMemory() / (1024.0D * 1024.0D));
         row.put("online_players", Bukkit.getOnlinePlayers().size());
         row.put("max_players", Bukkit.getMaxPlayers());
+
+        int bedrockOnline = 0;
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (isBedrock(player.getUniqueId())) {
+                bedrockOnline++;
+            }
+        }
+        row.put("bedrock_online", bedrockOnline);
 
         List<String> plugins = new ArrayList<>();
         for (Plugin plugin : Bukkit.getPluginManager().getPlugins()) {
@@ -266,29 +490,23 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
         return row;
     }
 
-    private double readServerMetric(String methodName, double fallback, boolean arrayResult) {
-        try {
-            Method method = Bukkit.getServer().getClass().getMethod(methodName);
-            Object result = method.invoke(Bukkit.getServer());
-            if (arrayResult && result instanceof double[] values && values.length > 0) {
-                return values[0];
-            }
-            if (result instanceof Number number) {
-                return number.doubleValue();
-            }
-        } catch (Exception ignored) {
-            // Version-safe fallback. The bridge continues even if Paper renames a metric.
+    private String pluginVersion(String pluginName) {
+        Plugin plugin = Bukkit.getPluginManager().getPlugin(pluginName);
+        if (plugin == null || !plugin.isEnabled()) {
+            return null;
         }
-        return fallback;
+        return plugin.getPluginMeta().getVersion();
     }
 
     private Map<String, Object> capturePlayer(Player player) {
         Map<String, Object> row = new LinkedHashMap<>();
         UUID uuid = player.getUniqueId();
+        FloodgatePlayer floodgatePlayer = floodgatePlayer(uuid);
 
         row.put("player_uuid", uuid.toString());
-        row.put("username", resolveUsername(player));
-        row.put("platform", isBedrock(uuid) ? "bedrock" : "java");
+        row.put("username", resolveUsername(player, floodgatePlayer));
+        row.put("platform", floodgatePlayer == null ? "java" : "bedrock");
+        row.put("xuid", floodgatePlayer == null ? null : String.valueOf(floodgatePlayer.getXuid()));
         row.put("discord_user_id", linkedDiscordId(uuid));
 
         long firstPlayed = player.getFirstPlayed();
@@ -296,10 +514,7 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
             "first_seen",
             firstPlayed > 0L ? Instant.ofEpochMilli(firstPlayed).toString() : Instant.now().toString()
         );
-        row.put(
-            "joined_at",
-            joinedAt.getOrDefault(uuid, Instant.now()).toString()
-        );
+        row.put("joined_at", joinedAt.getOrDefault(uuid, Instant.now()).toString());
         row.put("playtime_ticks", playtimeTicks(player));
         row.put("world", player.getWorld().getName());
         row.put("game_mode", player.getGameMode().name());
@@ -313,30 +528,37 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
 
     private Map<String, Object> vanillaStats(Player player) {
         Map<String, Object> stats = new LinkedHashMap<>();
-        stats.put("player_kills", statistic(player, "PLAYER_KILLS"));
-        stats.put("mob_kills", statistic(player, "MOB_KILLS"));
-        stats.put("deaths", statistic(player, "DEATHS"));
-        stats.put("jumps", statistic(player, "JUMP"));
-        stats.put("walk_cm", statistic(player, "WALK_ONE_CM"));
-        stats.put("sprint_cm", statistic(player, "SPRINT_ONE_CM"));
-        stats.put("swim_cm", statistic(player, "SWIM_ONE_CM"));
-        stats.put("damage_dealt", statistic(player, "DAMAGE_DEALT"));
-        stats.put("damage_taken", statistic(player, "DAMAGE_TAKEN"));
+        stats.put("player_kills", statistic(player, Statistic.PLAYER_KILLS));
+        stats.put("mob_kills", statistic(player, Statistic.MOB_KILLS));
+        stats.put("deaths", statistic(player, Statistic.DEATHS));
+        stats.put("jumps", statistic(player, Statistic.JUMP));
+        stats.put("walk_cm", statisticByName(player, "WALK_ONE_CM"));
+        stats.put("sprint_cm", statisticByName(player, "SPRINT_ONE_CM"));
+        stats.put("swim_cm", statisticByName(player, "SWIM_ONE_CM"));
+        stats.put("damage_dealt", statisticByName(player, "DAMAGE_DEALT"));
+        stats.put("damage_taken", statisticByName(player, "DAMAGE_TAKEN"));
         return stats;
     }
 
     private long playtimeTicks(Player player) {
-        long value = statistic(player, "PLAY_ONE_MINUTE");
+        long value = statisticByName(player, "PLAY_TIME");
         if (value <= 0L) {
-            value = statistic(player, "PLAY_TIME");
+            value = statisticByName(player, "PLAY_ONE_MINUTE");
         }
         return Math.max(0L, value);
     }
 
-    private long statistic(Player player, String statisticName) {
+    private long statistic(Player player, Statistic statistic) {
         try {
-            Statistic statistic = Statistic.valueOf(statisticName);
             return Math.max(0, player.getStatistic(statistic));
+        } catch (IllegalArgumentException ignored) {
+            return 0L;
+        }
+    }
+
+    private long statisticByName(Player player, String statisticName) {
+        try {
+            return statistic(player, Statistic.valueOf(statisticName));
         } catch (IllegalArgumentException ignored) {
             return 0L;
         }
@@ -362,50 +584,43 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
                 output.put(key.toLowerCase(Locale.ROOT), value);
             }
         } catch (Throwable exc) {
-            getLogger().log(Level.FINE, "AuraSkills data unavailable for " + player.getName(), exc);
+            getLogger().log(Level.FINE, "AuraSkills snapshot unavailable for " + player.getName(), exc);
         }
         return output;
     }
 
-    private boolean isBedrock(UUID uuid) {
+    private FloodgatePlayer floodgatePlayer(UUID uuid) {
         try {
-            Class<?> apiClass = Class.forName("org.geysermc.floodgate.api.FloodgateApi");
-            Object api = apiClass.getMethod("getInstance").invoke(null);
-            Object result = apiClass.getMethod("isFloodgatePlayer", UUID.class).invoke(api, uuid);
-            return result instanceof Boolean value && value;
-        } catch (Throwable ignored) {
-            return false;
-        }
-    }
-
-    private String resolveUsername(Player player) {
-        if (!isBedrock(player.getUniqueId())) {
-            return player.getName();
-        }
-
-        try {
-            Class<?> apiClass = Class.forName("org.geysermc.floodgate.api.FloodgateApi");
-            Object api = apiClass.getMethod("getInstance").invoke(null);
-            Object floodgatePlayer = apiClass.getMethod("getPlayer", UUID.class)
-                .invoke(api, player.getUniqueId());
-            if (floodgatePlayer != null) {
-                Method usernameMethod = floodgatePlayer.getClass().getMethod("getUsername");
-                Object username = usernameMethod.invoke(floodgatePlayer);
-                if (username != null && !username.toString().isBlank()) {
-                    return username.toString();
-                }
+            FloodgateApi api = FloodgateApi.getInstance();
+            if (api == null || !api.isFloodgatePlayer(uuid)) {
+                return null;
             }
+            return api.getPlayer(uuid);
         } catch (Throwable ignored) {
-            // Fall through to the server-side Floodgate name.
+            return null;
         }
-
-        String name = player.getName();
-        if (name.startsWith(".")) {
-            return name.substring(1);
-        }
-        return name;
     }
 
+    private boolean isBedrock(UUID uuid) {
+        return floodgatePlayer(uuid) != null;
+    }
+
+    private String resolveUsername(Player player, FloodgatePlayer floodgatePlayer) {
+        if (floodgatePlayer != null) {
+            String username = floodgatePlayer.getUsername();
+            if (username != null && !username.isBlank()) {
+                return username;
+            }
+        }
+        String name = player.getName();
+        return name.startsWith(".") ? name.substring(1) : name;
+    }
+
+    /**
+     * Transitional only: while DiscordSRV is still installed, import its existing link
+     * so The Plug can preserve user identity during the migration. Native The Plug
+     * linking replaces this before DiscordSRV is removed.
+     */
     private Long linkedDiscordId(UUID uuid) {
         try {
             Plugin plugin = Bukkit.getPluginManager().getPlugin("DiscordSRV");
@@ -423,10 +638,7 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
                 return null;
             }
             String raw = result.toString().trim();
-            if (raw.isEmpty()) {
-                return null;
-            }
-            return Long.parseLong(raw);
+            return raw.isEmpty() ? null : Long.parseLong(raw);
         } catch (Throwable ignored) {
             return null;
         }
@@ -434,16 +646,27 @@ public final class ThePlugBridge extends JavaPlugin implements Listener {
 
     private boolean configurationReady() {
         return guildId > 0L
-            && !supabaseUrl.isBlank()
-            && !supabaseAnonKey.isBlank()
-            && bridgeSecret.length() >= 24;
+            && tursoPipelineUri != null
+            && !tursoAuthToken.isBlank();
     }
 
-    private String cleanUrl(String value) {
-        String url = value == null ? "" : value.trim();
-        while (url.endsWith("/")) {
-            url = url.substring(0, url.length() - 1);
+    private URI normalizeTursoPipelineUri(String rawValue) {
+        String value = rawValue == null ? "" : rawValue.trim();
+        if (value.isBlank()) {
+            throw new IllegalArgumentException("URL is empty");
         }
-        return url;
+        value = value.replaceFirst("^libsql://", "https://");
+        value = value.replaceFirst("^turso://", "https://");
+        while (value.endsWith("/")) {
+            value = value.substring(0, value.length() - 1);
+        }
+        if (!value.endsWith("/v2/pipeline")) {
+            value += "/v2/pipeline";
+        }
+        URI uri = URI.create(value);
+        if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null) {
+            throw new IllegalArgumentException("use the Turso database/HTTP URL");
+        }
+        return uri;
     }
 }
