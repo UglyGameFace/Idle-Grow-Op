@@ -116,7 +116,7 @@ def make_default_world() -> dict[str, Any]:
         "district": {
             "owner_crew_id": None,
             "owner_name": None,
-            "multiplier": 1.10,
+            "multiplier": 1.0,
             "expires_at": 0,
         },
         "auctions": {},
