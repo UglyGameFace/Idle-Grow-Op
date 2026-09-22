@@ -15,6 +15,26 @@ This audit covers the complete Idle Grow repository and deployed behavior:
 ## Status
 IN PROGRESS
 
+## Phase 1 Complete: Command Surface and Runtime Baseline
+Validated on exact head cae20b52d942a6a21137005f53a5778ad03d2149 with CI run 690 successful.
+
+Completed:
+- Fixed the confirmed /calc runtime NameError by retaining the resolved GameScope.
+- Added a real callback regression proving /calc uses the active scope's effective market multiplier.
+- Added a CI undefined-name gate for production modules.
+- Converted public gameplay prefix-only commands/groups to hybrid ownership while preserving prefix compatibility.
+- Consolidated heist, laundering/heat/stats, concentrate sales/status, auction/bid, crew/district, and related configuration commands onto slash + prefix hybrid callbacks.
+- Removed stale player-facing ! command instructions from crime, economy, social, and casino usage surfaces.
+- Added regression coverage forbidding future prefix-only top-level gameplay commands and stale prefix guidance.
+- Extended real extension-load/tree coverage to require the consolidated gameplay commands.
+- Strengthened startup command sync so Discord's returned top-level command set must exactly match the complete local tree, not merely contain five required commands.
+
+Cleanup:
+- No duplicate slash wrappers were added.
+- Admin maintenance commands remain intentionally prefix-only and hidden/owner-oriented.
+- Command consolidation changed existing authoritative callbacks rather than creating parallel implementations.
+
+
 ## Confirmed Findings
 - Current main head at audit start: af81d32378afdc46a6da9915b06985d8777d0f79.
 - No open pull requests existed at audit start.
@@ -84,4 +104,4 @@ Pending. Every affected subsystem will be checked after its behavioral audit for
 - No open PR at audit start.
 
 ## Next Step
-Build a complete command/feature ownership map, then audit command execution paths against help/setup advertising before making the first behavioral fix.
+Audit persistence and legacy compatibility ownership end-to-end: identify which migration/compatibility paths are runtime-authoritative, which are one-time operational tooling, and whether any duplicate or superseded save logic still affects production.
