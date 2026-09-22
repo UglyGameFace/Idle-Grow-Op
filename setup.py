@@ -6,9 +6,24 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from ai import AI_CONFIG_KEY, AI_ENABLED_KEY
+from guild_config import (
+    ANNOUNCEMENT_CHANNEL_KEY,
+    ERROR_LOG_CHANNEL_KEY,
+    GAME_CHANNEL_KEY,
+    WORLD_WORLD_SETTINGS_KEY,
+)
 from notification_preferences import (
     ANNOUNCEMENT_ROLE_KEY,
     role_is_mentionable_by_bot,
+)
+from sesh import (
+    ALLOW_ALL_VOICE_ROOMS_KEY as SESH_ALLOW_ALL_KEY,
+    PING_ROLE_ID_KEY as SESH_PING_ROLE_KEY,
+    PRIVATE_CATEGORY_ID_KEY as SESH_PRIVATE_CATEGORY_KEY,
+    SESH_CONFIG_KEY,
+    SESH_ENABLED_KEY,
+    VOICE_CHANNELS_KEY as SESH_VOICE_CHANNELS_KEY,
 )
 from profile_signatures import (
     ALL_PROFILE_FIELDS,
@@ -26,18 +41,6 @@ from world_modes import (
 )
 
 
-SETTINGS_KEY = "settings"
-SESH_CONFIG_KEY = "sesh_config"
-AI_CONFIG_KEY = "ai_config"
-AI_ENABLED_KEY = "enabled"
-ERROR_LOG_CHANNEL_KEY = "error_log_channel_id"
-GAME_CHANNEL_KEY = "game_channel_id"
-ANNOUNCEMENT_CHANNEL_KEY = "announcement_channel_id"
-SESH_ENABLED_KEY = "enabled"
-SESH_ALLOW_ALL_KEY = "allow_all_voice_rooms"
-SESH_VOICE_CHANNELS_KEY = "voice_channels"
-SESH_PING_ROLE_KEY = "ping_role_id"
-SESH_PRIVATE_CATEGORY_KEY = "private_category_id"
 REQUIRED_CHANNEL_PERMISSIONS = (
     "view_channel",
     "send_messages",
@@ -1412,7 +1415,7 @@ class Setup(commands.Cog):
     ) -> None:
         async with self.bot.db.lock:
             world = await self.bot.db.get_world(int(guild_id))
-            settings = world.setdefault(SETTINGS_KEY, {})
+            settings = world.setdefault(WORLD_SETTINGS_KEY, {})
             if channel_id is None:
                 settings.pop(key, None)
             else:
@@ -1421,7 +1424,7 @@ class Setup(commands.Cog):
 
     async def get_channel_setting_id(self, guild_id: int, key: str) -> int | None:
         world = await self.bot.db.get_world(int(guild_id))
-        channel_id = world.get(SETTINGS_KEY, {}).get(key)
+        channel_id = world.get(WORLD_SETTINGS_KEY, {}).get(key)
         return int(channel_id) if channel_id else None
 
     async def get_configured_channel(
