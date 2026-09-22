@@ -6,10 +6,10 @@ from discord.ext import commands
 
 from economy_integrity import calculate_harvest_outcome
 from persistence_context import require_guild_id
+from progression_core import add_progress, check_achievements, credit_xp
 from world_modes import effective_pot_capacity, resolve_game_scope
 from utils import (
     GROWTH_CYCLES,
-    check_achievements,
     discord_relative_time,
     get_plant_grow_time,
     inv_get,
@@ -21,20 +21,6 @@ from utils import (
 class Farming(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-
-    async def _add_xp(self, ctx, user, amount):
-        """Add XP and handle level ups."""
-        if amount <= 0:
-            return
-
-        user["xp"] = int(user.get("xp", 0)) + int(amount)
-        current_level = int(user.get("level", 1))
-        required = int(100 * (current_level ** 1.5))
-
-        if user["xp"] >= required:
-            user["xp"] -= required
-            user["level"] = current_level + 1
-            await ctx.send(f"🎉 **LEVEL UP!** You are now Level **{user['level']}**!")
 
     @commands.hybrid_command(name="plant", aliases=["p", "grow"])
     async def plant(self, ctx, *, strain_name: str = ""):
@@ -86,6 +72,8 @@ class Farming(commands.Cog):
                 "quality": 1.0,
             }
             current_plants.append(new_plant)
+            add_progress(user, "plant", 1, user_id=ctx.author.id)
+            check_achievements(user)
             self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
         grow_time = get_plant_grow_time(user, world, new_plant)
@@ -117,6 +105,8 @@ class Farming(commands.Cog):
             if count == 0:
                 return await ctx.send("💧 Plants are already wet enough.")
 
+            add_progress(user, "water", count, user_id=ctx.author.id)
+            check_achievements(user)
             self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
         await ctx.send(f"💦 **Watered {count} plants.** Keep 'em happy!")
@@ -165,9 +155,20 @@ class Farming(commands.Cog):
             stats = user.setdefault("stats", {})
             stats["harvested"] = max(0, int(stats.get("harvested", 0))) + outcome["harvested_count"]
 
-            await self._add_xp(ctx, user, outcome["total_xp"])
-            await check_achievements(ctx, user)
+            level_before = max(1, int(user.get("level", 1) or 1))
+            credit_xp(user, outcome["total_xp"])
+            add_progress(
+                user,
+                "harvest",
+                outcome["harvested_count"],
+                user_id=ctx.author.id,
+            )
+            check_achievements(user)
+            level_after = max(1, int(user.get("level", 1) or 1))
             self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+
+        if level_after > level_before:
+            await ctx.send(f"🎉 **LEVEL UP!** You are now Level **{level_after}**!")
 
         harvested_summary = ", ".join(
             f"{strain.title()} ({amount}g)"

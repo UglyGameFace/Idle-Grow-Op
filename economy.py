@@ -10,6 +10,7 @@ from economy_integrity import (
     validate_bid_amount,
 )
 from persistence_context import GuildContextRequired, require_guild_id
+from progression_core import add_progress, check_achievements
 from utils import (
     CONCENTRATE_TYPES,
     GROWTH_CYCLES,
@@ -113,9 +114,9 @@ class Economy(commands.Cog):
             return await ctx.send(str(exc))
         rows = await self.bot.db.list_guild_leaderboard(scope.scope_id, limit=10)
         lines = []
-        for index, row in enumerate(rows):
-            user_id = int(row["user_id"])
-            amount = max(0, int(row.get("balance", 0)))
+        for index, (user_id, amount) in enumerate(rows):
+            user_id = int(user_id)
+            amount = max(0, int(amount))
             member = ctx.guild.get_member(user_id)
             name = member.display_name if member else f"User {user_id}"
             rank = "🥇" if index == 0 else "🥈" if index == 1 else "🥉" if index == 2 else f"#{index + 1}"
@@ -202,6 +203,8 @@ class Economy(commands.Cog):
             inv_add(user, clean_name, 1)
             if new_capacity is not None:
                 user["max_pots"] = new_capacity
+            add_progress(user, "buy", 1, user_id=ctx.author.id)
+            check_achievements(user)
             self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
         await ctx.send(f"✅ Bought **{clean_name.title()}** for ${cost:,}.")
 
@@ -254,6 +257,7 @@ class Economy(commands.Cog):
             user["grams"] = max(0, int(user.get("grams", 0))) + total_earnings
             stats = user.setdefault("stats", {})
             stats["total_earned"] = max(0, int(stats.get("total_earned", 0))) + total_earnings
+            check_achievements(user)
             self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
         embed = discord.Embed(title="🤝 Market Sale", color=discord.Color.green())
         embed.add_field(name="Sold", value="\n".join(sold_log), inline=False)
@@ -312,6 +316,7 @@ class Economy(commands.Cog):
             user["grams"] = max(0, int(user.get("grams", 0))) + total_earnings
             stats = user.setdefault("stats", {})
             stats["total_earned"] = max(0, int(stats.get("total_earned", 0))) + total_earnings
+            check_achievements(user)
             self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
         await ctx.send(f"🍯 Sold **{', '.join(sold_log)}** for **${total_earnings:,}**.")
 

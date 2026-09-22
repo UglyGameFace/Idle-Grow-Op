@@ -123,8 +123,10 @@ def update_gamble_stats(profile: dict, game: str, net_change: int, wagered: int)
         stats["casino_biggest_loss"] = max(int(stats.get("casino_biggest_loss", 0) or 0), abs(net_change))
 
 
-def _record_win(profile: dict, user_id: int) -> None:
-    add_progress(profile, "gamble_win", 1, user_id=user_id)
+def _record_game_progress(profile: dict, user_id: int, *, won: bool) -> None:
+    add_progress(profile, "casino_play", 1, user_id=user_id)
+    if won:
+        add_progress(profile, "gamble_win", 1, user_id=user_id)
     check_achievements(profile)
 
 
@@ -192,6 +194,8 @@ class BlackjackView(discord.ui.View):
                 else:
                     update_gamble_stats(profile, "blackjack", -self.bet, self.bet)
                     title, color = f"🃏 Lost {_fmt_cash(self.bet)}", discord.Color.red()
+                if not timeout_refund:
+                    _record_game_progress(profile, self.user_id, won=result == "win")
                 self.cog.bot.db.mark_profile_dirty(self.scope_id, self.user_id)
             self.clear_items()
             embed = discord.Embed(title=title, color=color)
@@ -268,8 +272,7 @@ class Gambling(commands.Cog):
             profile["grams"] += payout
             net = payout - bet
             update_gamble_stats(profile, game, net, bet)
-            if net > 0:
-                _record_win(profile, ctx.author.id)
+            _record_game_progress(profile, ctx.author.id, won=net > 0)
             self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
         return bet, result
 
@@ -444,8 +447,7 @@ class Gambling(commands.Cog):
                 profile = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
                 profile["grams"] = int(profile.get("grams", 0) or 0) + payout
                 update_gamble_stats(profile, "blackjack", payout - wager, wager)
-                if result == "win":
-                    _record_win(profile, ctx.author.id)
+                _record_game_progress(profile, ctx.author.id, won=result == "win")
                 self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
             if result == "tie":
                 await ctx.send("🃏 **PUSH!** Both have 21. Wager returned.")

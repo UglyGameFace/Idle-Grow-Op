@@ -138,7 +138,6 @@ DAILY_QUEST_TEMPLATES = [
     DailyQuestTemplate("dq_water", "💧 Water Plants", "Keep your garden alive.", "water", 2, 6),
     DailyQuestTemplate("dq_harvest", "✂️ Harvest", "Harvest ready plants.", "harvest", 1, 4),
     DailyQuestTemplate("dq_collect", "📦 Collect Lab Output", "Collect finished lab batches.", "collect_dabs", 10, 60, 5),
-    DailyQuestTemplate("dq_breed", "🧬 Breed Seeds", "Run breeding experiments.", "breed", 1, 3, 12),
     DailyQuestTemplate("dq_steal", "🔫 Rob Players", "Attempt robberies.", "steal", 1, 4, 3),
     DailyQuestTemplate("dq_heist", "🏦 Run Heists", "Pull bigger jobs.", "heist", 1, 3, 5),
     DailyQuestTemplate("dq_raid", "⚔️ Raid Farms", "Attack other farms.", "raid", 1, 2, 8),
@@ -146,6 +145,5 @@ DAILY_QUEST_TEMPLATES = [
     DailyQuestTemplate("dq_casino_play", "🎲 Hit the Casino", "Play casino games.", "casino_play", 3, 8),
     DailyQuestTemplate("dq_casino_win", "🏁 Win a Casino Game", "Win one casino game.", "gamble_win", 1, 1),
     DailyQuestTemplate("dq_crew_bank", "🏛️ Crew Contribution", "Deposit into your crew bank.", "crew_deposit_cash", 5_000, 25_000, 5),
-    DailyQuestTemplate("dq_contract", "📜 Complete a Contract", "Finish and claim a market contract.", "contract_complete", 1, 1, 3),
     DailyQuestTemplate("dq_shop", "🛒 Stock Up", "Buy something from the shop.", "buy", 1, 2),
 ]

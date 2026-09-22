@@ -14,6 +14,7 @@ from economy_integrity import (
     split_reservation_penalty,
 )
 from persistence_context import require_guild_id
+from progression_core import add_progress, check_achievements, credit_xp
 from world_modes import (
     effective_market_multiplier,
     processing_queue_limit,
@@ -22,8 +23,6 @@ from world_modes import (
 from utils import (
     CONCENTRATE_TYPES,
     SafeView,
-    _xp_needed_for_level,
-    add__progress,
     has_item,
     jail_guard,
 )
@@ -57,17 +56,6 @@ def _lab_market_value(user, world, base_value, scope):
         district_mult = float(district.get("multiplier", 1.10))
     return int(base_value * market_mult * prestige_mult * district_mult)
 
-
-def _credit_xp(user, amount):
-    """Credit XP under the caller's mutation lock and report a level-up."""
-    user["xp"] = int(user.get("xp", 0)) + int(amount)
-    level = max(1, int(user.get("level", 1)))
-    needed = _xp_needed_for_level(level)
-    if user["xp"] >= needed:
-        user["xp"] -= needed
-        user["level"] = level + 1
-        return user["level"]
-    return None
 
 
 class LabMinigameView(SafeView):
@@ -181,7 +169,6 @@ class Lab(commands.Cog):
                     "flower_sources": reservation,
                 }
             )
-            add__progress(user, "process_dabs", qty)
             self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
         embed = discord.Embed(
@@ -230,9 +217,10 @@ class Lab(commands.Cog):
             for c_type, qty in collected.items():
                 concentrates[c_type] = max(0, int(concentrates.get(c_type, 0))) + qty
             stats = user.setdefault("stats", {})
-            stats["concentrate_made"] = max(0, int(stats.get("concentrate_made", 0))) + sum(
-                collected.values()
-            )
+            collected_total = sum(collected.values())
+            stats["concentrate_made"] = max(0, int(stats.get("concentrate_made", 0))) + collected_total
+            add_progress(user, "collect_dabs", collected_total, user_id=ctx.author.id)
+            check_achievements(user)
             self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
         summary = "\n".join(f"• **{qty}g {name.title()}**" for name, qty in collected.items())
@@ -354,7 +342,7 @@ class Lab(commands.Cog):
                 break
             await asyncio.sleep(0.5 if progress < 50 else 0.3)
 
-        level_up = None
+        level_up_to = None
         if not view.pressed:
             async with self.bot.db.lock:
                 restore_flower(user.setdefault("flower_stash", {}), reservation)
@@ -366,14 +354,17 @@ class Lab(commands.Cog):
             async with self.bot.db.lock:
                 concentrates = user.setdefault("concentrates", {})
                 concentrates[c_type] = max(0, int(concentrates.get(c_type, 0))) + qty
-                level_up = _credit_xp(user, qty * 5)
-                add__progress(user, "process_dabs", qty)
+                level_before = max(1, int(user.get("level", 1) or 1))
+                credit_xp(user, qty * 5)
                 stats = user.setdefault("stats", {})
                 stats["concentrate_made"] = max(0, int(stats.get("concentrate_made", 0))) + qty
+                check_achievements(user)
+                level_after = max(1, int(user.get("level", 1) or 1))
+                level_up_to = level_after if level_after > level_before else None
                 self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
             await ctx.send(f"💎 **Success!** Created **{qty}g {c_type.title()}**.")
-            if level_up:
-                await ctx.send(f"🎉 **Level Up!** You are now level {level_up}!")
+            if level_up_to:
+                await ctx.send(f"🎉 **Level Up!** You are now level {level_up_to}!")
             return
 
         penalty = min(needed_flower, max(1, ceil(needed_flower * 0.2)))

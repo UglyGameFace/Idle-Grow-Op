@@ -15,6 +15,7 @@ from crime_integrity import (
 )
 from economy_integrity import require_positive_amount
 from persistence_context import require_guild_id
+from progression_core import add_progress, check_achievements, credit_xp
 from utils import add_heat, has_item, jail_guard
 from world_modes import (
     WorldModeDenied,
@@ -45,6 +46,15 @@ _ACTIVE_HEISTS: dict[str, dict] = {}
 class Crime(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    @staticmethod
+    def _record_heist_progress(user: dict, user_id: int, success: bool) -> None:
+        stats = user.setdefault("stats", {})
+        stats["heists_run"] = max(0, int(stats.get("heists_run", 0))) + 1
+        if success:
+            stats["heists_won"] = max(0, int(stats.get("heists_won", 0))) + 1
+        add_progress(user, "heist", 1, user_id=user_id)
+        check_achievements(user)
 
     def _now(self) -> float:
         return time.time()
@@ -225,16 +235,14 @@ class Crime(commands.Cog):
 
                 user["grams"] = balance - config["buyin"]
                 stats = user.setdefault("stats", {})
-                stats["heists_run"] = max(0, int(stats.get("heists_run", 0))) + 1
                 success = self._roll(config["chance"])
 
                 if success:
                     payout = random.randint(*config["reward"])
                     xp = random.randint(*config["xp"])
                     user["grams"] += payout
-                    user["xp"] = max(0, int(user.get("xp", 0))) + xp
+                    credit_xp(user, xp)
                     add_heat(user, HEAT_GAIN_WIN + config["heat_mod"])
-                    stats["heists_won"] = max(0, int(stats.get("heists_won", 0))) + 1
                     stats["heist_profit"] = max(0, int(stats.get("heist_profit", 0))) + payout
                     jail_minutes = 0
                     loss = 0
@@ -249,6 +257,7 @@ class Crime(commands.Cog):
                     payout = 0
                     xp = 0
 
+                self._record_heist_progress(user, ctx.author.id, success)
                 self._set_user_cooldown(user, "heist_solo", self._now())
                 self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
         finally:
@@ -366,6 +375,10 @@ class Crime(commands.Cog):
                 bank_gain = 0
                 member_gain = 0
 
+            for member_id, member in valid_members:
+                self._record_heist_progress(member, member_id, success)
+                self.bot.db.mark_profile_dirty(scope.scope_id, member_id)
+
             self._set_crew_cooldown(crew, "heist")
             self.bot.db.mark_world_dirty(scope.scope_id)
 
@@ -458,6 +471,8 @@ class Crime(commands.Cog):
             stats["raids_run"] = max(0, int(stats.get("raids_run", 0))) + 1
             if success:
                 stats["raids_won"] = max(0, int(stats.get("raids_won", 0))) + 1
+            add_progress(user, "raid", 1, user_id=ctx.author.id)
+            check_achievements(user)
             self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
             self.bot.db.mark_world_dirty(scope.scope_id)
 
@@ -529,6 +544,8 @@ class Crime(commands.Cog):
                 add_heat(robber, 25)
                 amount = 0
                 success = False
+            add_progress(robber, "steal", 1, user_id=ctx.author.id)
+            check_achievements(robber)
             self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
         if success:
@@ -563,6 +580,10 @@ class Crime(commands.Cog):
             user["dirty_cash"] = dirty - outcome.dirty_spent
             user["grams"] = max(0, int(user.get("grams", 0))) + outcome.clean_received
             add_heat(user, 5)
+            stats = user.setdefault("stats", {})
+            stats["laundered"] = max(0, int(stats.get("laundered", 0))) + outcome.dirty_spent
+            add_progress(user, "launder", 1, user_id=ctx.author.id)
+            check_achievements(user)
             self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
         embed = discord.Embed(
