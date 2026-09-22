@@ -514,23 +514,6 @@ class Economy(commands.Cog):
         if bid_error:
             return await ctx.send(bid_error)
         if bought_out:
-                seller_id = int(auction["seller_id"])
-                seller = await self.bot.db.get_profile(scope.scope_id, seller_id)
-
-            user["grams"] = bidder_balance - required_funds
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
-            if previous_bidder is not None and previous_id is not None:
-                previous_bidder["grams"] = max(0, int(previous_bidder.get("grams", 0))) + current_bid
-                self.bot.db.mark_profile_dirty(scope.scope_id, previous_id)
-            auction["current_bid"] = valid_bid
-            auction["highest_bidder"] = ctx.author.id
-            if bought_out:
-                inv_add(user, auction["item_name"], 1)
-                seller["grams"] = max(0, int(seller.get("grams", 0))) + valid_bid
-                self.bot.db.mark_profile_dirty(scope.scope_id, seller_id)
-                del auctions[auction_id]
-            self.bot.db.mark_world_dirty(scope.scope_id)
-        if bought_out:
             await ctx.send(f"🔨 **BOOM!** You bought out the item for ${valid_bid:,}!")
         else:
             await ctx.send(f"✅ **Bid Placed!** You are leading with ${valid_bid:,}.")
