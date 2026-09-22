@@ -850,6 +850,7 @@ class ProfileSignatures(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self._pending: dict[tuple[int, int], asyncio.Task] = {}
+        self._cleanup_tasks: set[asyncio.Task] = set()
         self._channel_generation: dict[tuple[int, int], int] = {}
         self._channel_locks: dict[tuple[int, int], asyncio.Lock] = {}
         self._channel_last_update: dict[tuple[int, int], float] = {}
@@ -858,9 +859,11 @@ class ProfileSignatures(commands.Cog):
         self._reconciled = False
 
     def cog_unload(self) -> None:
-        for task in list(self._pending.values()):
-            task.cancel()
+        for task in [*self._pending.values(), *self._cleanup_tasks]:
+            if not task.done():
+                task.cancel()
         self._pending.clear()
+        self._cleanup_tasks.clear()
         self._channel_generation.clear()
 
     def _lock_for(self, guild_id: int, channel_id: int) -> asyncio.Lock:
@@ -914,8 +917,10 @@ class ProfileSignatures(commands.Cog):
             runner(),
             name=f"profile-signature-privacy-cleanup-{user_id}",
         )
+        self._cleanup_tasks.add(task)
 
         def report_failure(done: asyncio.Task) -> None:
+            self._cleanup_tasks.discard(done)
             if done.cancelled():
                 return
             try:
