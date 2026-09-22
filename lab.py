@@ -136,41 +136,44 @@ class Lab(commands.Cog):
         now = time.time()
         duration = 300 * qty
 
+        process_error = None
         async with self.bot.db.lock:
             queue = user.setdefault("processing_queue", [])
             queue_cap = processing_queue_limit(scope)
             if queue_cap is not None and len(queue) >= queue_cap:
-                return await ctx.send(
+                process_error = (
                     f"🔒 Solo Grow allows **{queue_cap} active lab batches** at a time. "
                     "Collect a completed batch before starting another."
                 )
-            if int(user.get("level", 1)) < required_level:
-                return await ctx.send(f"🔒 **Level {required_level} Required.**")
-            if required_tool and not has_item(user, required_tool):
-                return await ctx.send(f"🛠️ You need a **{required_tool.title()}** to make this.")
+            elif int(user.get("level", 1)) < required_level:
+                process_error = f"🔒 **Level {required_level} Required.**"
+            elif required_tool and not has_item(user, required_tool):
+                process_error = f"🛠️ You need a **{required_tool.title()}** to make this."
+            else:
+                stash = user.setdefault("flower_stash", {})
+                try:
+                    reservation = reserve_flower(stash, needed_flower)
+                except ValueError:
+                    total_flower = sum(max(0, int(value)) for value in stash.values())
+                    process_error = (
+                        f"🌿 **Not enough flower.** Need {needed_flower}g total "
+                        f"(You have {total_flower}g)."
+                    )
+                else:
+                    queue.append(
+                        {
+                            "type": c_type,
+                            "amount": qty,
+                            "start_time": now,
+                            "finish_time": now + duration,
+                            "flower_used": needed_flower,
+                            "flower_sources": reservation,
+                        }
+                    )
+                    self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
-            stash = user.setdefault("flower_stash", {})
-            try:
-                reservation = reserve_flower(stash, needed_flower)
-            except ValueError:
-                total_flower = sum(max(0, int(value)) for value in stash.values())
-                return await ctx.send(
-                    f"🌿 **Not enough flower.** Need {needed_flower}g total "
-                    f"(You have {total_flower}g)."
-                )
-
-            queue.append(
-                {
-                    "type": c_type,
-                    "amount": qty,
-                    "start_time": now,
-                    "finish_time": now + duration,
-                    "flower_used": needed_flower,
-                    "flower_sources": reservation,
-                }
-            )
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
-
+        if process_error:
+            return await ctx.send(process_error)
         embed = discord.Embed(
             title="⚗️ **Extraction Started**",
             description=f"Processing **{needed_flower}g flower** into **{qty}g {c_type.title()}**.",
@@ -189,6 +192,7 @@ class Lab(commands.Cog):
         now = time.time()
         collected: dict[str, int] = {}
 
+        collect_error = None
         async with self.bot.db.lock:
             queue = user.setdefault("processing_queue", [])
             remaining = []
@@ -201,7 +205,6 @@ class Lab(commands.Cog):
                 try:
                     qty = require_positive_amount(item.get("amount", 0))
                 except ValueError:
-                    # Preserve malformed records for manual recovery instead of deleting them.
                     remaining.append(item)
                     continue
                 if c_type not in CONCENTRATE_TYPES:
@@ -210,19 +213,21 @@ class Lab(commands.Cog):
                 collected[c_type] = collected.get(c_type, 0) + qty
 
             if not collected:
-                return await ctx.send("⏳ No completed lab batches are ready to collect.")
+                collect_error = "⏳ No completed lab batches are ready to collect."
+            else:
+                user["processing_queue"] = remaining
+                concentrates = user.setdefault("concentrates", {})
+                for c_type, qty in collected.items():
+                    concentrates[c_type] = max(0, int(concentrates.get(c_type, 0))) + qty
+                stats = user.setdefault("stats", {})
+                collected_total = sum(collected.values())
+                stats["concentrate_made"] = max(0, int(stats.get("concentrate_made", 0))) + collected_total
+                add_progress(user, "collect_dabs", collected_total, user_id=ctx.author.id)
+                check_achievements(user)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
-            user["processing_queue"] = remaining
-            concentrates = user.setdefault("concentrates", {})
-            for c_type, qty in collected.items():
-                concentrates[c_type] = max(0, int(concentrates.get(c_type, 0))) + qty
-            stats = user.setdefault("stats", {})
-            collected_total = sum(collected.values())
-            stats["concentrate_made"] = max(0, int(stats.get("concentrate_made", 0))) + collected_total
-            add_progress(user, "collect_dabs", collected_total, user_id=ctx.author.id)
-            check_achievements(user)
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
-
+        if collect_error:
+            return await ctx.send(collect_error)
         summary = "\n".join(f"• **{qty}g {name.title()}**" for name, qty in collected.items())
         await ctx.send(f"📦 **Lab collection complete:**\n{summary}")
 
@@ -300,18 +305,24 @@ class Lab(commands.Cog):
 
         required_tool = info.get("req_item")
         required_level = int(info.get("level_req", 1))
+        lab_error = None
+        reservation = {}
         async with self.bot.db.lock:
             if required_tool and not has_item(user, required_tool):
-                return await ctx.send(f"❌ You need a **{required_tool.title()}**.")
-            if int(user.get("level", 1)) < required_level:
-                return await ctx.send(f"🔒 Level {required_level} required.")
-            stash = user.setdefault("flower_stash", {})
-            try:
-                reservation = reserve_flower(stash, needed_flower)
-            except ValueError:
-                return await ctx.send(f"🌿 **Not enough flower.** Need {needed_flower}g.")
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                lab_error = f"❌ You need a **{required_tool.title()}**."
+            elif int(user.get("level", 1)) < required_level:
+                lab_error = f"🔒 Level {required_level} required."
+            else:
+                stash = user.setdefault("flower_stash", {})
+                try:
+                    reservation = reserve_flower(stash, needed_flower)
+                except ValueError:
+                    lab_error = f"🌿 **Not enough flower.** Need {needed_flower}g."
+                else:
+                    self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
+        if lab_error:
+            return await ctx.send(lab_error)
         target = random.randint(40, 75)
         view = LabMinigameView(ctx.author.id, c_type, qty, target)
         msg = await ctx.send(
