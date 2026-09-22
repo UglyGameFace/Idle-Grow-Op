@@ -20,7 +20,6 @@ def _env_str(key, default):
 
 
 GAME_VERSION_DISPLAY = "4.2.0+TYCOON"
-THIRST_LIMIT = 86400
 
 POT_UPGRADE_LIMITS = {"clay pot": 3, "plastic pot": 5, "smart pot": 10}
 
@@ -30,14 +29,6 @@ STREAK_BONUSES = {
     30: {"mult": 1.5, "name": "Addict"},
     60: {"mult": 2.0, "name": "Legend"},
     100: {"mult": 3.0, "name": "Godlike"},
-}
-
-ITEM_DURABILITY_MAX = {
-    "led lights": 50,
-    "hydroponic": 100,
-    "lights": 30,
-    "bho setup": 40,
-    "rosin press": 60,
 }
 
 SKILLS_CONFIG = {
@@ -110,24 +101,15 @@ SHOP_ITEMS = {
     "clay pot": {"type": "pot_upgrade", "cost": 500, "description": "Increases max pot capacity by 1 (Limit 3).", "level_req": 1},
     "plastic pot": {"type": "pot_upgrade", "cost": 2000, "description": "Increases max pot capacity by 1 (Limit 5).", "level_req": 5},
     "smart pot": {"type": "pot_upgrade", "cost": 10000, "description": "Increases max pot capacity by 1 (Limit 10).", "level_req": 15},
-    "nutes": {"type": "consumable", "cost": 100, "description": "Reduces grow time by 50% for one plant.", "stackable": True},
-    "premium nutes": {"type": "consumable", "cost": 500, "description": "Instantly finishes one plant.", "stackable": True},
-    "lights": {"type": "equipment", "cost": 1500, "description": "+50% Yield. Requires electricity.", "level_req": 3},
-    "led lights": {"type": "equipment", "cost": 5000, "description": "+75% Yield. Efficient.", "level_req": 10},
-    "hydroponic": {"type": "equipment", "cost": 15000, "description": "Plants never need water. +100% Yield.", "level_req": 20},
-    "greenhouse": {"type": "equipment", "cost": 8000, "description": "Protects plants from storms and thirst.", "level_req": 12},
-    "harvest bot": {"type": "equipment", "cost": 25000, "description": "Auto-harvests plants (90% efficiency).", "level_req": 25},
-    "aqua globe": {"type": "consumable", "cost": 50, "description": "Saves a plant from dying of thirst once.", "stackable": True},
+    "nutes": {"type": "tool", "cost": 100, "description": "Cuts plant grow time by 50% while owned.", "level_req": 1},
+    "lights": {"type": "equipment", "cost": 1500, "description": "Cuts plant grow time by 10% while owned.", "level_req": 3},
+    "led lights": {"type": "equipment", "cost": 5000, "description": "Cuts grow time by 20% and adds +50% harvest yield.", "level_req": 10},
+    "hydroponic": {"type": "equipment", "cost": 15000, "description": "Adds +100% harvest yield.", "level_req": 20},
     "bho setup": {"type": "tool", "cost": 3000, "description": "Required to make Wax and Shatter.", "level_req": 5},
     "rosin press": {"type": "tool", "cost": 12000, "description": "Required to make Rosin and Live Resin.", "level_req": 15},
-    "burner phone": {"type": "tool", "cost": 750, "description": "Faster heat decay.", "level_req": 2},
-    "lockpick": {"type": "consumable", "cost": 150, "description": "Increases steal chance slightly.", "stackable": True},
-    "cam": {"type": "defense", "cost": 2000, "description": "Helps identify robbers.", "level_req": 5},
-    "dog": {"type": "defense", "cost": 5000, "description": "Protects against robberies (20% chance).", "level_req": 8},
-    "fake id": {"type": "consumable", "cost": 5000, "description": "Used for !appeal to reduce jail time.", "stackable": True},
-    "bribe pack": {"type": "consumable", "cost": 2500, "description": "Used for !bail.", "stackable": True},
-    "ice bath": {"type": "tool", "cost": 1500, "description": "Used to cool off heat instantly.", "level_req": 4},
-    "repair kit": {"type": "consumable", "cost": 500, "description": "Repairs broken equipment.", "stackable": True},
+    "lockpick": {"type": "tool", "cost": 150, "description": "Adds +10 percentage points to robbery success chance.", "level_req": 1},
+    "cam": {"type": "defense", "cost": 2000, "description": "Cuts an attacker's robbery success chance by 15 percentage points.", "level_req": 5},
+    "dog": {"type": "defense", "cost": 5000, "description": "Cuts an attacker's robbery success chance by 25 percentage points.", "level_req": 8},
     "pager": {"type": "tool", "cost": 2500, "description": "+20% Daily Rewards.", "level_req": 5},
     "lawyer": {"type": "tool", "cost": 50000, "description": "Reduces jail time by 25%.", "level_req": 30},
 }
