@@ -1,8 +1,10 @@
 import asyncio
+import time
 from copy import deepcopy
 from collections.abc import MutableMapping
 from typing import Any
 
+from casino_contracts import reconcile_expired_casino_escrow
 from guild_config import WORLD_SETTINGS_KEY
 from persistence_scope import (
     RecordKey,
@@ -155,7 +157,14 @@ class ScopedDatabaseManager:
         return await self.store.get(global_account_key(user_id))
 
     async def get_profile(self, guild_id: Any, user_id: Any) -> MutableMapping[str, Any]:
-        return await self.store.get(guild_profile_key(guild_id, user_id))
+        key = guild_profile_key(guild_id, user_id)
+        profile = await self.store.get(key)
+        if not self.lock.locked() and reconcile_expired_casino_escrow(
+            profile,
+            now=time.time(),
+        ):
+            self.store.mark_dirty(key)
+        return profile
 
     async def get_world(self, guild_id: Any) -> MutableMapping[str, Any]:
         return await self.store.get(guild_world_key(guild_id))
