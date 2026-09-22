@@ -167,7 +167,7 @@ class Crime(commands.Cog):
             ),
         }
 
-    @commands.command(name="heist", aliases=["heists"])
+    @commands.hybrid_command(name="heist", aliases=["heists"])
     async def heist(self, ctx, mode: str = "solo", arg: str = None):
         guild_id = require_guild_id(ctx)
         scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
@@ -197,7 +197,7 @@ class Crime(commands.Cog):
                 return await ctx.send(str(exc))
             await self._raid(ctx, scope, user, arg)
         else:
-            await ctx.send("Usage: `!heist solo [plan]`, `!heist crew`, `!heist join`, or `!heist raid <crew_id>`")
+            await ctx.send("Usage: `/heist mode:solo arg:<plan>`, `/heist mode:crew`, `/heist mode:join`, or `/heist mode:raid arg:<crew_id>`")
 
     async def _solo_heist(self, ctx, scope, user: dict, plan: str) -> None:
         key = self._session_key(scope.scope_id, "user", ctx.author.id)
@@ -296,7 +296,7 @@ class Crime(commands.Cog):
             if remaining > 0:
                 return await ctx.send(f"⏳ Crew cooldown: **{self._fmt_time(remaining)}**")
             if _ACTIVE_HEISTS.get(key, {}).get("join_until", 0) > self._now():
-                return await ctx.send("⏳ Crew heist already forming. Use `!heist join`.")
+                return await ctx.send("⏳ Crew heist already forming. Use `/heist mode:join`.")
             _ACTIVE_HEISTS[key] = {
                 "join_until": self._now() + HEIST_JOIN_WINDOW,
                 "members": {int(ctx.author.id): int(scope.guild_id)},
@@ -307,7 +307,7 @@ class Crime(commands.Cog):
             title="🧪 Crew Heist Forming",
             description=(
                 f"**{crew.get('name', 'Crew')}** is starting a job!\n"
-                f"Type `!heist join` within **{HEIST_JOIN_WINDOW}s**.\nNeed 2+ members."
+                f"Run `/heist mode:join` within **{HEIST_JOIN_WINDOW}s**.\nNeed 2+ members."
             ),
             color=0x9B59B6,
         ))
@@ -401,7 +401,7 @@ class Crime(commands.Cog):
         if not crew_id:
             return await ctx.send("❌ You need a crew.")
         if not target_id:
-            return await ctx.send("Usage: `!heist raid <target_crew_id>`")
+            return await ctx.send("Usage: `/heist mode:raid arg:<target_crew_id>`")
 
         async with self.bot.db.lock:
             world = await self.bot.db.get_world(scope.scope_id)
@@ -536,7 +536,7 @@ class Crime(commands.Cog):
         else:
             await ctx.send(f"🚓 **BUSTED!** Fined ${fine:,} and jailed for 5m.")
 
-    @commands.command(name="launder")
+    @commands.hybrid_command(name="launder")
     @commands.cooldown(1, 30, commands.BucketType.user)
     async def launder(self, ctx, amount: str = "all"):
         guild_id = require_guild_id(ctx)
@@ -575,7 +575,7 @@ class Crime(commands.Cog):
         embed.add_field(name="🔥 Heat", value=f"+5 (Total: {int(user.get('heat', 0))}%)", inline=True)
         await ctx.send(embed=embed)
 
-    @commands.command(name="heat")
+    @commands.hybrid_command(name="heat")
     async def heat(self, ctx):
         guild_id = require_guild_id(ctx)
         scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
@@ -590,10 +590,10 @@ class Crime(commands.Cog):
         embed.add_field(name="Heat", value=f"{bar} ({heat_level}%)", inline=False)
         embed.add_field(name="Status", value=status, inline=True)
         embed.add_field(name="💼 Dirty Cash", value=f"${dirty_cash:,}", inline=True)
-        embed.set_footer(text="Use !launder to clean dirty cash. High heat increases crime risk.")
+        embed.set_footer(text="Use /launder to clean dirty cash. High heat increases crime risk.")
         await ctx.send(embed=embed)
 
-    @commands.command(name="heiststats", aliases=["hst"])
+    @commands.hybrid_command(name="heiststats", aliases=["hst"])
     async def heiststats(self, ctx, member: discord.Member = None):
         guild_id = require_guild_id(ctx)
         target = member or ctx.author
@@ -607,7 +607,7 @@ class Crime(commands.Cog):
         embed.add_field(name="Payouts", value=f"${stats.get('heist_profit', 0):,}", inline=False)
         await ctx.send(embed=embed)
 
-    @commands.command(name="topheists", aliases=["lbheists"])
+    @commands.hybrid_command(name="topheists", aliases=["lbheists"])
     async def topheists(self, ctx):
         guild_id = require_guild_id(ctx)
         scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
@@ -628,7 +628,7 @@ class Crime(commands.Cog):
             color=0xF1C40F,
         ))
 
-    @commands.command(name="heistset", aliases=["heistsetchannel"])
+    @commands.hybrid_command(name="heistset", aliases=["heistsetchannel"])
     @commands.has_permissions(manage_guild=True)
     async def heistset(self, ctx, mode: str = "add"):
         guild_id = require_guild_id(ctx)
