@@ -118,6 +118,7 @@ class Social(commands.Cog):
             "ℹ️ **Crew Commands:**\n"
             "`/crew create name:<name>`\n"
             "`/crew join crew_id:<id>`\n"
+            "`/crew leave`\n"
             "`/crew info`\n"
             "`/crew deposit amount:<amount>`\n"
             "`/crew war` (Turf War)\n"
@@ -200,6 +201,85 @@ class Social(commands.Cog):
         if join_error:
             return await ctx.send(join_error)
         await ctx.send(f"✅ Joined **{crew['name']}**!")
+
+    @crew.command(name="leave")
+    async def crew_leave(self, ctx):
+        guild_id = require_guild_id(ctx)
+        scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
+        try:
+            require_multiplayer(scope, "crew")
+        except WorldModeDenied as exc:
+            return await ctx.send(str(exc))
+
+        leave_error = None
+        leave_message = None
+        async with self.bot.db.lock:
+            user = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
+            world = await self.bot.db.get_world(scope.scope_id)
+            crew_id = user.get("crew_id")
+            if not crew_id:
+                leave_error = "❌ You are not in a crew."
+            else:
+                crews = get_crews(world)
+                crew = crews.get(str(crew_id))
+                if not crew:
+                    user["crew_id"] = None
+                    self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                    leave_message = "✅ Cleared stale crew membership. You can join another crew now."
+                else:
+                    member_ids = []
+                    for value in crew.get("members", []):
+                        try:
+                            member_id = int(value)
+                        except (TypeError, ValueError):
+                            continue
+                        if member_id not in member_ids:
+                            member_ids.append(member_id)
+
+                    remaining = [member_id for member_id in member_ids if member_id != ctx.author.id]
+                    owner_id = int(crew.get("owner_id", 0) or 0)
+                    user["crew_id"] = None
+
+                    if owner_id == ctx.author.id and remaining:
+                        new_owner_id = remaining[0]
+                        crew["owner_id"] = new_owner_id
+                        crew["members"] = remaining
+                        leave_message = (
+                            f"✅ Left **{crew.get('name', 'the crew')}**. "
+                            f"Ownership transferred to <@{new_owner_id}>."
+                        )
+                    elif remaining:
+                        crew["members"] = remaining
+                        leave_message = f"✅ Left **{crew.get('name', 'the crew')}**."
+                    else:
+                        bank = max(0, int(crew.get("bank", 0) or 0))
+                        user["grams"] = max(0, int(user.get("grams", 0))) + bank
+                        crews.pop(str(crew_id), None)
+
+                        district = world.get("district")
+                        if (
+                            isinstance(district, dict)
+                            and str(district.get("owner_crew_id")) == str(crew_id)
+                        ):
+                            district.update(
+                                {
+                                    "owner_crew_id": None,
+                                    "owner_name": None,
+                                    "multiplier": 1.0,
+                                    "expires_at": 0,
+                                }
+                            )
+                        leave_message = (
+                            f"✅ Disbanded **{crew.get('name', 'the crew')}**. "
+                            f"Returned **${bank:,}** from the crew bank."
+                        )
+
+                    self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                    self.bot.db.mark_world_dirty(scope.scope_id)
+
+        if leave_error:
+            return await ctx.send(leave_error)
+        await ctx.send(leave_message)
 
     @crew.command(name="info")
     async def crew_info(self, ctx, crew_id: str = None):
