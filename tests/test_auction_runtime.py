@@ -145,3 +145,75 @@ def test_first_bid_can_match_starting_price_but_repeat_bid_must_increase():
         assert "higher than the current bid" in ctx.sent[-1][0][0]
 
     asyncio.run(scenario())
+
+
+def test_expired_unbid_auction_returns_item_to_seller(monkeypatch):
+    async def scenario():
+        db = AuctionDatabase()
+        auction = db.world["auctions"]["1001"]
+        auction["end_time"] = 100
+        db.profiles[77]["items"] = {}
+
+        monkeypatch.setattr("economy.time.time", lambda: 200)
+
+        cog = Economy(SimpleNamespace(db=db))
+        changed = await cog._settle_expired_auctions(123, db.world)
+
+        assert changed is True
+        assert db.profiles[77]["items"]["pager"] == 1
+        assert db.profiles[77]["grams"] == 100
+        assert "1001" not in db.world["auctions"]
+        assert db.dirty_profiles == {(123, 77)}
+        assert db.dirty_worlds == {123}
+
+    asyncio.run(scenario())
+
+
+def test_expired_winning_auction_pays_seller_and_delivers_item(monkeypatch):
+    async def scenario():
+        db = AuctionDatabase()
+        auction = db.world["auctions"]["1001"]
+        auction["end_time"] = 100
+        auction["highest_bidder"] = 42
+        auction["current_bid"] = 350
+        db.profiles[42]["grams"] = 650
+
+        monkeypatch.setattr("economy.time.time", lambda: 200)
+
+        cog = Economy(SimpleNamespace(db=db))
+        changed = await cog._settle_expired_auctions(123, db.world)
+
+        assert changed is True
+        assert db.profiles[42]["items"]["pager"] == 1
+        assert db.profiles[42]["grams"] == 650
+        assert db.profiles[77]["grams"] == 450
+        assert "1001" not in db.world["auctions"]
+        assert db.dirty_profiles == {(123, 42), (123, 77)}
+        assert db.dirty_worlds == {123}
+
+    asyncio.run(scenario())
+
+
+def test_expired_auction_buyer_load_failure_leaves_auction_unsettled(monkeypatch):
+    async def scenario():
+        db = AuctionDatabase(fail_user_id=42)
+        auction = db.world["auctions"]["1001"]
+        auction["end_time"] = 100
+        auction["highest_bidder"] = 42
+        auction["current_bid"] = 350
+
+        monkeypatch.setattr("economy.time.time", lambda: 200)
+
+        cog = Economy(SimpleNamespace(db=db))
+        seller_before = dict(db.profiles[77])
+        auction_before = dict(auction)
+
+        with pytest.raises(RuntimeError, match="simulated profile load failure"):
+            await cog._settle_expired_auctions(123, db.world)
+
+        assert db.profiles[77] == seller_before
+        assert db.world["auctions"]["1001"] == auction_before
+        assert db.dirty_profiles == set()
+        assert db.dirty_worlds == set()
+
+    asyncio.run(scenario())
