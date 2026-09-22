@@ -67,9 +67,6 @@ class Farming(commands.Cog):
             new_plant = {
                 "strain": clean_name,
                 "planted_at": planted_at,
-                "last_watered": planted_at,
-                "water_count": 1,
-                "quality": 1.0,
             }
             current_plants.append(new_plant)
             add_progress(user, "plant", 1, user_id=ctx.author.id)
@@ -79,37 +76,6 @@ class Farming(commands.Cog):
         grow_time = get_plant_grow_time(user, world, new_plant)
         ready_at = int(planted_at + grow_time)
         await ctx.send(f"🌱 **Planted:** {clean_name.title()}\n⏳ **Ready:** {discord_relative_time(ready_at)}")
-
-    @commands.hybrid_command(name="water", aliases=["hydrate"])
-    async def water(self, ctx):
-        """Water all eligible plants in the current server."""
-        guild_id = require_guild_id(ctx)
-        scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
-        user = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
-        if await jail_guard(ctx, user, "water"):
-            return
-
-        async with self.bot.db.lock:
-            plants = user.get("plants", [])
-            if not plants:
-                return await ctx.send("🏜️ You have no plants to water.")
-
-            count = 0
-            now = time.time()
-            for plant in plants:
-                if now - float(plant.get("last_watered", 0) or 0) > 300:
-                    plant["last_watered"] = now
-                    plant["water_count"] = max(0, int(plant.get("water_count", 0))) + 1
-                    count += 1
-
-            if count == 0:
-                return await ctx.send("💧 Plants are already wet enough.")
-
-            add_progress(user, "water", count, user_id=ctx.author.id)
-            check_achievements(user)
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
-
-        await ctx.send(f"💦 **Watered {count} plants.** Keep 'em happy!")
 
     @commands.hybrid_command(name="harvest", aliases=["h"])
     async def harvest(self, ctx):
