@@ -7,6 +7,7 @@ from economy import Economy
 from farming import Farming
 from gambling import Gambling
 from lab import Lab
+from quick import Quick
 from social import Social
 from world_modes import POLICY_SERVER, POLICY_SOLO, new_world_mode_config
 
@@ -258,5 +259,32 @@ def test_atomic_casino_play_advances_play_and_win_quests():
         assert play["completed"] is True
         assert win["completed"] is True
         assert profile["stats"]["casino_total_bets"] == 1
+
+    asyncio.run(scenario())
+
+
+def test_quick_plant_advances_plant_quest_for_every_seed_planted():
+    async def scenario():
+        guild_id, user_id = 123456789012345678, 42
+        db = MemoryDatabase(guild_id, user_id)
+        profile = {
+            "level": 1,
+            "xp": 0,
+            "grams": 500,
+            "items": {"schwag seed": 2},
+            "plants": [],
+            "max_pots": 3,
+            "stats": {},
+            "achievements": [],
+        }
+        plant_quest = quest("plant", 2)
+        add_active_quests(profile, plant_quest)
+        db.profiles[(guild_id, user_id)] = profile
+        ctx = ContextStub(guild_id, user_id)
+
+        await Quick.qplant.callback(Quick(SimpleNamespace(db=db)), ctx, count=2)
+
+        assert plant_quest["completed"] is True
+        assert len(profile["plants"]) == 2
 
     asyncio.run(scenario())
