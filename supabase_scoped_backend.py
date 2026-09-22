@@ -1,5 +1,4 @@
 import asyncio
-from collections import defaultdict
 from collections.abc import Mapping
 from typing import Any
 
@@ -11,7 +10,8 @@ from persistence_scope import (
 )
 
 
-REQUIRED_SCHEMA_VERSION = "002_enterprise_casino_metrics"
+REQUIRED_SCHEMA_VERSION = "003_atomic_scoped_record_batch"
+ATOMIC_SAVE_RPC = "idle_grow_save_scoped_records"
 CASINO_PROFIT_METRICS = {
     "casino_total_profit",
     "coinflip_profit",
@@ -54,7 +54,7 @@ class SupabaseScopedBackend:
             )
         except Exception as exc:
             raise SupabaseSchemaError(
-                "Enterprise scoped Supabase schema is unavailable. Run migrations/001_guild_scoped_persistence.sql and migrations/002_enterprise_casino_metrics.sql."
+                "Enterprise scoped Supabase schema is unavailable. Run migrations/001_guild_scoped_persistence.sql, migrations/002_enterprise_casino_metrics.sql, and migrations/003_atomic_scoped_record_batch.sql."
             ) from exc
 
         if not (response.data or []):
@@ -75,6 +75,13 @@ class SupabaseScopedBackend:
                 raise SupabaseSchemaError(
                     f"Required Supabase table or column is unavailable: {table_name}"
                 ) from exc
+
+        try:
+            self.client.rpc(ATOMIC_SAVE_RPC, self._empty_save_payload()).execute()
+        except Exception as exc:
+            raise SupabaseSchemaError(
+                f"Required Supabase RPC is unavailable: {ATOMIC_SAVE_RPC}"
+            ) from exc
 
     async def load(self, key: RecordKey) -> Mapping[str, Any] | None:
         return await asyncio.to_thread(self._load_sync, key)
@@ -202,13 +209,25 @@ class SupabaseScopedBackend:
         await asyncio.to_thread(self._save_many_sync, records)
 
     def _save_many_sync(self, records: Mapping[RecordKey, Mapping[str, Any]]) -> None:
-        grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        payload = self._empty_save_payload()
+        payload_keys = {
+            "global_accounts": "p_global_accounts",
+            "guild_profiles": "p_guild_profiles",
+            "guild_worlds": "p_guild_worlds",
+        }
         for key, data in records.items():
             table_name, filters = self._table_and_filters(key)
-            grouped[table_name].append({**filters, "data": dict(data)})
+            payload[payload_keys[table_name]].append({**filters, "data": dict(data)})
 
-        for table_name, payload in grouped.items():
-            self.client.table(table_name).upsert(payload).execute()
+        self.client.rpc(ATOMIC_SAVE_RPC, payload).execute()
+
+    @staticmethod
+    def _empty_save_payload() -> dict[str, list[dict[str, Any]]]:
+        return {
+            "p_global_accounts": [],
+            "p_guild_profiles": [],
+            "p_guild_worlds": [],
+        }
 
     @staticmethod
     def _positive_int(value: Any, name: str) -> int:
