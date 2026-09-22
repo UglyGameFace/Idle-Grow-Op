@@ -307,6 +307,25 @@ Cleanup:
 - Crew users now have a complete join/leave lifecycle instead of a one-way membership trap.
 - Interactive casino money can survive message failure, extension reload, or process crash without silently disappearing.
 
+## Phase 9 Checkpoint: Command, Help, and UI Surface Consistency
+Validated on exact head 05971e806fb16382ee7084bec97163714237c918 with CI run 828 successful.
+
+Root causes:
+- Player-facing command copy had historically drifted from the loaded command tree.
+- Nested command paths were not covered by the original top-level sync/runtime contract.
+- Previous residue included impossible guidance such as prefix-only/public mismatches and missing command paths.
+
+Completed:
+- Added recursive loaded-tree validation for the full advertised public command surface.
+- Covered nested paths including /auction list, /crew create, /crew join, /crew leave, /crew info, /crew deposit, /crew war, and /seshconfig disable.
+- Explicitly guarded removed/nonexistent public paths including /water, /tasks, /appeal, /bail, and /sesh_setup.
+- Re-scanned player-facing source copy for stale prefix-only guidance and removed command names.
+- Verified no current player-facing !command residue remains in audited public modules.
+
+Cleanup:
+- User-facing slash guidance now has a direct loaded-tree contract instead of relying on decorator/source-text assumptions.
+- Removed command names are protected from accidental reintroduction into the published command tree.
+
 ## Cleanup / Conflict Review
 Pending. Every affected subsystem will be checked after its behavioral audit for obsolete, duplicate, conflicting, partial, temporary, and superseded logic.
 
@@ -330,4 +349,4 @@ Pending. Every affected subsystem will be checked after its behavioral audit for
 - No open PR at audit start.
 
 ## Next Step
-Audit user-facing command/help/UI consistency against the fully loaded command tree, including nested subcommands, setup/onboarding guidance, Sesh/profile-signature controls, and stale command references. Add runtime/tree guards for any instruction that can lead users to a missing or obsolete surface.
+Run the final cleanup and deployment-readiness pass: review the full audit-branch diff for accidental duplication or unrelated changes, close remaining dead-code/conflict findings, validate the exact final head, document migration/deployment blockers, and prepare the branch for review without claiming live production resolution until Supabase/Discloud state is verified.
