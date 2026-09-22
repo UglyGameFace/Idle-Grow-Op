@@ -93,15 +93,19 @@ class Economy(commands.Cog):
         sender = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
         if await jail_guard(ctx, sender, "trade"):
             return
+        transfer_error = None
         async with self.bot.db.lock:
             receiver = await self.bot.db.get_profile(scope.scope_id, target.id)
             sender_balance = max(0, int(sender.get("grams", 0)))
             if sender_balance < transfer_amount:
-                return await ctx.send("💸 **Insufficient funds.**")
-            sender["grams"] = sender_balance - transfer_amount
-            receiver["grams"] = max(0, int(receiver.get("grams", 0))) + transfer_amount
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
-            self.bot.db.mark_profile_dirty(scope.scope_id, target.id)
+                transfer_error = "💸 **Insufficient funds.**"
+            else:
+                sender["grams"] = sender_balance - transfer_amount
+                receiver["grams"] = max(0, int(receiver.get("grams", 0))) + transfer_amount
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                self.bot.db.mark_profile_dirty(scope.scope_id, target.id)
+        if transfer_error:
+            return await ctx.send(transfer_error)
         await ctx.send(f"💸 **Transferred:** ${transfer_amount:,} to {target.mention}.")
 
     @commands.hybrid_command(name="leaderboard", aliases=["lb", "top", "rich"])
@@ -189,28 +193,32 @@ class Economy(commands.Cog):
             return await ctx.send("❌ This item is currently unavailable.")
         if int(user.get("level", 1)) < int(item.get("level_req", 1)):
             return await ctx.send("🔒 Level locked.")
+        purchase_error = None
         async with self.bot.db.lock:
             if (
                 item.get("type") in {"equipment", "tool", "defense"}
                 and inv_get(user, clean_name) > 0
             ):
-                return await ctx.send(f"✅ You already own **{clean_name.title()}**.")
+                purchase_error = f"✅ You already own **{clean_name.title()}**."
             balance = max(0, int(user.get("grams", 0)))
-            if balance < cost:
-                return await ctx.send("💸 Too poor.")
+            if purchase_error is None and balance < cost:
+                purchase_error = "💸 Too poor."
             new_capacity = None
-            if item.get("type") == "pot_upgrade":
+            if purchase_error is None and item.get("type") == "pot_upgrade":
                 try:
                     new_capacity = pot_upgrade_capacity(user, clean_name, POT_UPGRADE_LIMITS)
                 except ValueError:
-                    return await ctx.send("🚫 You already own the maximum number of that pot upgrade.")
-            user["grams"] = balance - cost
-            inv_add(user, clean_name, 1)
-            if new_capacity is not None:
-                user["max_pots"] = new_capacity
-            add_progress(user, "buy", 1, user_id=ctx.author.id)
-            check_achievements(user)
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                    purchase_error = "🚫 You already own the maximum number of that pot upgrade."
+            if purchase_error is None:
+                user["grams"] = balance - cost
+                inv_add(user, clean_name, 1)
+                if new_capacity is not None:
+                    user["max_pots"] = new_capacity
+                add_progress(user, "buy", 1, user_id=ctx.author.id)
+                check_achievements(user)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+        if purchase_error:
+            return await ctx.send(purchase_error)
         await ctx.send(f"✅ Bought **{clean_name.title()}** for ${cost:,}.")
 
     @commands.hybrid_command(name="sell")
