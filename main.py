@@ -9,6 +9,7 @@ from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 
+from guild_config import ERROR_LOG_CHANNEL_KEY, WORLD_SETTINGS_KEY
 from persistence_bootstrap import build_scoped_database
 
 
@@ -155,7 +156,7 @@ async def _configured_error_channel(guild_id: int | None):
         return None
     try:
         world = await bot.db.get_world(resolved_guild_id)
-        channel_id = world.get("settings", {}).get("error_log_channel_id")
+        channel_id = world.get(WORLD_SETTINGS_KEY, {}).get(ERROR_LOG_CHANNEL_KEY)
     except Exception:
         logger.exception("Failed to resolve error channel for guild %s", resolved_guild_id)
         return None
