@@ -321,7 +321,7 @@ class Gambling(commands.Cog):
         balance = int(profile.get("grams", 0) or 0)
         token, choice = _pick_bet_and_choice(arg1=arg1, arg2=arg2, balance=balance, min_bet=int(_cfg("coinflip_min_bet", 10)), default_bet="100", default_choice="heads", aliases={"h":"heads","head":"heads","heads":"heads","t":"tails","tail":"tails","tails":"tails"}, valid={"heads","tails"})
         if not token:
-            return await self._usage(ctx, "🪙 Coinflip", "!coinflip heads 500", "!coinflip 500 tails")
+            return await self._usage(ctx, "🪙 Coinflip", "/coinflip arg1:heads arg2:500", "/coinflip arg1:500 arg2:tails")
         result = await self._atomic_game(ctx, token, "coinflip", lambda bet: (lambda landed: {"payout": bet * 2 if landed == choice else 0, "landed": landed})(secrets.choice(["heads", "tails"])), min_bet=int(_cfg("coinflip_min_bet", 10)))
         if result:
             bet, data = result
@@ -360,7 +360,7 @@ class Gambling(commands.Cog):
         _, profile = await self._profile(ctx)
         token, choice = _pick_bet_and_choice(arg1=arg1,arg2=arg2,balance=int(profile.get("grams",0) or 0),min_bet=int(_cfg("hilo_min_bet",10)),default_bet="100",default_choice="high",aliases={"h":"high","hi":"high","high":"high","l":"low","lo":"low","low":"low","7":"7","seven":"7","mid":"7"},valid={"high","low","7"})
         if not token:
-            return await self._usage(ctx, "🃏 HiLo", "!hilo high 1k", "!hilo 7 500")
+            return await self._usage(ctx, "🃏 HiLo", "/hilo arg1:high arg2:1k", "/hilo arg1:7 arg2:500")
         def resolve(bet):
             card=random.randint(1,13); won=(choice=="high" and card>=8) or (choice=="low" and card<=6) or (choice=="7" and card==7)
             return {"payout": int(bet * (12 if choice=="7" else 2)) if won else 0, "card": {1:"A",11:"J",12:"Q",13:"K"}.get(card,str(card))}
@@ -371,7 +371,7 @@ class Gambling(commands.Cog):
     @commands.hybrid_command(name="rps", aliases=["rockpaperscissors"])
     async def rps(self, ctx, arg1: str | None = None, arg2: str | None = None):
         _, profile=await self._profile(ctx); token,choice=_pick_bet_and_choice(arg1=arg1,arg2=arg2,balance=int(profile.get("grams",0) or 0),min_bet=int(_cfg("rps_min_bet",10)),default_bet="100",default_choice="rock",aliases={"r":"rock","rock":"rock","p":"paper","paper":"paper","s":"scissors","scissor":"scissors","scissors":"scissors"},valid={"rock","paper","scissors"})
-        if not token: return await self._usage(ctx,"✊ Rock Paper Scissors","!rps paper 500","!rps 500 scissors")
+        if not token: return await self._usage(ctx,"✊ Rock Paper Scissors","/rps arg1:paper arg2:500","/rps arg1:500 arg2:scissors")
         def resolve(bet):
             dealer=secrets.choice(["rock","paper","scissors"]); win={"rock":"scissors","paper":"rock","scissors":"paper"}; payout=bet if dealer==choice else bet*2 if win[choice]==dealer else 0
             return {"payout":payout,"dealer":dealer}
@@ -385,7 +385,7 @@ class Gambling(commands.Cog):
         if a1 in {"1","2","3"} and _parse_bet(arg2,bal,min_bet=int(_cfg("cups_min_bet",10))) is not None: cup,token=int(a1),str(arg2)
         elif _parse_bet(arg1,bal,min_bet=int(_cfg("cups_min_bet",10))) is not None and a2 in {"1","2","3"}: cup,token=int(a2),str(arg1)
         elif a1 in {"1","2","3"} and not a2: cup,token=int(a1),"100"
-        if cup is None: return await self._usage(ctx,"🥤 Cups","!cups 1k 2","!cups 2 1k")
+        if cup is None: return await self._usage(ctx,"🥤 Cups","/cups arg1:1k arg2:2","/cups arg1:2 arg2:1k")
         result=await self._atomic_game(ctx,token,"cups",lambda bet:(lambda prize:{"payout":int(bet*2.85) if cup==prize else 0,"prize":prize})(secrets.choice([1,2,3])),min_bet=int(_cfg("cups_min_bet",10)))
         if result:
             bet,data=result; await ctx.send(f"🥤 Prize was under **{data['prize']}** — "+(f"✅ Won **{_fmt_cash(data['payout'])}**." if data['payout'] else f"❌ Lost **{_fmt_cash(bet)}**."))
@@ -398,7 +398,7 @@ class Gambling(commands.Cog):
             if cleaned.isdigit() and 1<=int(cleaned)<=40: picks.append(int(cleaned))
             elif bet_token is None and _parse_bet(token,balance,min_bet=int(_cfg("keno_min_bet",100))) is not None: bet_token=str(token)
         picks=list(dict.fromkeys(picks))[:3]; bet_token=bet_token or "100"
-        if not picks: return await self._usage(ctx,"🔢 Keno","!keno 1k 7","!keno 7 12 33 1k")
+        if not picks: return await self._usage(ctx,"🔢 Keno","/keno arg1:1k arg2:7","/keno arg1:7 arg2:12 arg3:33 arg4:1k")
         def resolve(bet):
             drawn=random.sample(range(1,41),5); matches=len(set(picks)&set(drawn)); count=len(picks); mult=(6 if matches==1 else 0) if count==1 else (20 if matches==2 else 2 if matches==1 else 0) if count==2 else (80 if matches==3 else 5 if matches==2 else 1 if matches==1 else 0)
             return {"payout":int(bet*mult),"drawn":drawn,"matches":matches}
@@ -463,7 +463,7 @@ class Gambling(commands.Cog):
         c1,c2=choice(arg1),choice(arg2); b1=_parse_bet(arg1,balance,min_bet=int(_cfg("roulette_min_bet",10))); b2=_parse_bet(arg2,balance,min_bet=int(_cfg("roulette_min_bet",10)))
         if c1 and (b2 is not None or not arg2): selected,token=c1,str(arg2) if arg2 else "100"
         elif b1 is not None and c2: selected,token=c2,str(arg1)
-        else: return await self._usage(ctx,"🎡 Roulette","!roulette red 1k","!roulette 500 17")
+        else: return await self._usage(ctx,"🎡 Roulette","/roulette arg1:red arg2:1k","/roulette arg1:500 arg2:17")
         def resolve(bet):
             n=random.randint(0,36); color="green" if n==0 else "red" if n%2 else "black"; won=(selected==color) if selected in {"red","black"} else n==0 if selected=="0" else (n!=0 and (n%2==1)==(selected=="odd")) if selected in {"odd","even"} else 1<=n<=18 if selected=="low" else 19<=n<=36 if selected=="high" else 1<=n<=12 if selected=="1st12" else 13<=n<=24 if selected=="2nd12" else 25<=n<=36 if selected=="3rd12" else n==int(selected)
             mult=36 if selected=="0" or selected.isdigit() else 3 if selected.endswith("12") else 2
