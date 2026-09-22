@@ -87,7 +87,7 @@ def quest(event: str, target: int = 1):
 def add_active_quests(profile: dict, *items: dict):
     profile["daily_quest_date"] = progression_core._today()
     profile["daily_quests_bonus_claimed"] = False
-    profile["daily_quests"] = [*items, quest("water", 999)]
+    profile["daily_quests"] = [*items, quest("harvest", 999)]
 
 
 def test_economy_leaderboard_consumes_backend_tuple_contract():
