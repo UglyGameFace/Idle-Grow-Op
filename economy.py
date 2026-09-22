@@ -443,20 +443,29 @@ class Economy(commands.Cog):
             required_funds = valid_bid - current_bid if previous_bidder_id == ctx.author.id else valid_bid
             if bidder_balance < required_funds:
                 return await ctx.send("💸 Insufficient funds.")
-            user["grams"] = bidder_balance - required_funds
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+
+            previous_bidder = None
+            previous_id = None
             if previous_bidder_id is not None and previous_bidder_id != ctx.author.id:
                 previous_id = int(previous_bidder_id)
                 previous_bidder = await self.bot.db.get_profile(scope.scope_id, previous_id)
+
+            bought_out = bool(buyout and valid_bid >= buyout)
+            seller = None
+            seller_id = None
+            if bought_out:
+                seller_id = int(auction["seller_id"])
+                seller = await self.bot.db.get_profile(scope.scope_id, seller_id)
+
+            user["grams"] = bidder_balance - required_funds
+            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+            if previous_bidder is not None and previous_id is not None:
                 previous_bidder["grams"] = max(0, int(previous_bidder.get("grams", 0))) + current_bid
                 self.bot.db.mark_profile_dirty(scope.scope_id, previous_id)
             auction["current_bid"] = valid_bid
             auction["highest_bidder"] = ctx.author.id
-            bought_out = bool(buyout and valid_bid >= buyout)
             if bought_out:
                 inv_add(user, auction["item_name"], 1)
-                seller_id = int(auction["seller_id"])
-                seller = await self.bot.db.get_profile(scope.scope_id, seller_id)
                 seller["grams"] = max(0, int(seller.get("grams", 0))) + valid_bid
                 self.bot.db.mark_profile_dirty(scope.scope_id, seller_id)
                 del auctions[auction_id]
