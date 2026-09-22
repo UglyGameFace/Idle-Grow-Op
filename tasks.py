@@ -1,3 +1,4 @@
+import logging
 import random
 import time
 
@@ -25,6 +26,8 @@ ANNOUNCEMENT_CHANNEL_KEY = "announcement_channel_id"
 GAME_CHANNEL_KEY = "game_channel_id"
 MAJOR_MARKET_CHANGE = 0.20
 MARKET_CHANGE_EPSILON = 1e-9
+
+logger = logging.getLogger(__name__)
 
 
 class _WorldGuildProxy:
@@ -125,14 +128,24 @@ class Tasks(commands.Cog):
     @tasks.loop(minutes=15)
     async def game_cycle(self):
         """Advance every active local world and the shared Open World once."""
+        try:
+            await self._game_cycle_once()
+        except Exception:
+            logger.exception("Scheduled game cycle failed; the next iteration will still run")
+
+    async def _game_cycle_once(self):
         local_guilds, open_world_guilds = await self._active_cycle_guilds()
         cycle_guilds = list(local_guilds)
-        open_world_processed = False
         if open_world_guilds:
-            if not open_world_processed:
-                routing_guild = await self._open_world_notification_guild(open_world_guilds)
-                if routing_guild is not None:
+            routing_guild = await self._open_world_notification_guild(open_world_guilds)
+            if routing_guild is not None:
+                try:
                     await self._sync_open_world_routing(routing_guild)
+                except Exception:
+                    logger.exception(
+                        "Open World routing sync failed for game cycle; local worlds will continue"
+                    )
+                else:
                     cycle_guilds.append(
                         _WorldGuildProxy(
                             routing_guild,
@@ -140,7 +153,6 @@ class Tasks(commands.Cog):
                             open_world_guilds,
                         )
                     )
-                    open_world_processed = True
         await self._run_game_cycle_for(cycle_guilds)
 
     async def _run_game_cycle_for(self, guilds):
@@ -334,14 +346,26 @@ class Tasks(commands.Cog):
     @tasks.loop(minutes=2)
     async def notification_check(self):
         """Check active local saves and the shared Open World once each."""
+        try:
+            await self._notification_check_once()
+        except Exception:
+            logger.exception(
+                "Scheduled notification check failed; the next iteration will still run"
+            )
+
+    async def _notification_check_once(self):
         local_guilds, open_world_guilds = await self._active_cycle_guilds()
         notification_guilds = list(local_guilds)
-        open_world_processed = False
         if open_world_guilds:
-            if not open_world_processed:
-                routing_guild = await self._open_world_notification_guild(open_world_guilds)
-                if routing_guild is not None:
+            routing_guild = await self._open_world_notification_guild(open_world_guilds)
+            if routing_guild is not None:
+                try:
                     await self._sync_open_world_routing(routing_guild)
+                except Exception:
+                    logger.exception(
+                        "Open World routing sync failed for notifications; local saves will continue"
+                    )
+                else:
                     notification_guilds.append(
                         _WorldGuildProxy(
                             routing_guild,
@@ -349,7 +373,6 @@ class Tasks(commands.Cog):
                             open_world_guilds,
                         )
                     )
-                    open_world_processed = True
         await self._run_notification_check_for(notification_guilds)
 
     async def _run_notification_check_for(self, guilds):
@@ -406,23 +429,24 @@ class Tasks(commands.Cog):
                             color=discord.Color.green(),
                         )
                     )
+                    await self._commit_notification_flags(
+                        scope_id,
+                        resolved_user_id,
+                        world,
+                        now,
+                        plant_indexes,
+                        batch_indexes,
+                    )
                 except discord.DiscordException:
                     continue
                 except Exception as exc:
-                    print(
-                        f"❌ Notification check failed for scope {scope_id}, "
-                        f"user {resolved_user_id}: {exc}"
+                    logger.exception(
+                        "Notification check failed for scope %s, user %s: %s",
+                        scope_id,
+                        resolved_user_id,
+                        exc,
                     )
                     continue
-
-                await self._commit_notification_flags(
-                    scope_id,
-                    resolved_user_id,
-                    world,
-                    now,
-                    plant_indexes,
-                    batch_indexes,
-                )
 
     async def _notification_snapshot(
         self,
@@ -512,6 +536,12 @@ class Tasks(commands.Cog):
     @tasks.loop(minutes=5)
     async def status_cycle(self):
         """Rotate status without exposing one server's private world state."""
+        try:
+            await self._status_cycle_once()
+        except Exception:
+            logger.exception("Scheduled status cycle failed; the next iteration will still run")
+
+    async def _status_cycle_once(self):
         server_count = len(self.bot.guilds)
         statuses = [
             f"Growing in {server_count:,} servers 🌿",
