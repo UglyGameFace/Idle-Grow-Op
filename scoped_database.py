@@ -9,6 +9,7 @@ from persistence_scope import (
     guild_world_key,
 )
 from persistence_store import FlushResult, ScopedRecordStore
+from world_mode_contracts import WORLD_MODE_CONFIG_KEY, new_world_mode_config
 from profile_signature_contracts import (
     GUILD_PRIVACY_KEY,
     GLOBAL_PRIVACY_KEY,
@@ -96,13 +97,7 @@ def make_default_world() -> dict[str, Any]:
         "auctions": {},
         "auction_counter": 0,
         "settings": {},
-        "world_mode_config": {
-            "policy": "solo",
-            "default_player_mode": "solo",
-            "switch_cooldown_seconds": 604800,
-            "configured": False,
-            "updated_at": 0,
-        },
+        WORLD_MODE_CONFIG_KEY: new_world_mode_config(),
         SIGNATURE_CONFIG_KEY: default_signature_config(),
         SIGNATURE_STATE_KEY: default_signature_state(),
     }
