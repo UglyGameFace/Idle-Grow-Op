@@ -185,7 +185,6 @@ class BlackjackView(discord.ui.View):
                 elif result == "win":
                     profile["grams"] = int(profile.get("grams", 0) or 0) + payout
                     update_gamble_stats(profile, "blackjack", payout - self.bet, self.bet)
-                    _record_win(profile, self.user_id)
                     title, color = f"🃏 Won {_fmt_cash(payout)}", discord.Color.green()
                 elif result == "tie":
                     profile["grams"] = int(profile.get("grams", 0) or 0) + self.bet
