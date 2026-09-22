@@ -7,7 +7,7 @@ SESH_SOURCE = (ROOT / "sesh.py").read_text(encoding="utf-8")
 
 
 def test_sesh_is_optional_and_disabled_by_default():
-    assert 'SESH_ENABLED_KEY = "enabled"' in SETUP_SOURCE
+    assert 'SESH_ENABLED_KEY = "enabled"' in SESH_SOURCE
     assert 'config.get(SESH_ENABLED_KEY, False)' in SETUP_SOURCE
     assert 'Optional and disabled' in SETUP_SOURCE
     assert 'if not bool(config.get(SESH_ENABLED_KEY, False)):' in SESH_SOURCE
@@ -61,8 +61,8 @@ def test_cleanup_only_targets_bot_marked_temporary_rooms():
 
 
 def test_sesh_config_is_guild_world_scoped_and_dirty_tracked():
-    assert 'SESH_CONFIG_KEY = "sesh_config"' in SETUP_SOURCE
+    assert 'SESH_CONFIG_KEY = "sesh_config"' in SESH_SOURCE
     assert 'world.setdefault(SESH_CONFIG_KEY, {})' in SETUP_SOURCE
     assert 'self.bot.db.mark_world_dirty(int(guild_id))' in SETUP_SOURCE
     assert 'await self.bot.db.get_world(int(guild_id))' in SETUP_SOURCE
-    assert 'world.setdefault("sesh_config", {})' in SESH_SOURCE
+    assert 'world.setdefault(SESH_CONFIG_KEY, {})' in SESH_SOURCE
