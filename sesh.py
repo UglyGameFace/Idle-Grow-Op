@@ -44,6 +44,7 @@ MEDIA_MIN_SCORE = 8
 SESH_RECONCILE_ATTEMPTS = 3
 SESH_RECONCILE_RETRY_SECONDS = 5
 
+SESH_CONFIG_KEY = "sesh_config"
 SESH_ENABLED_KEY = "enabled"
 ALLOW_ALL_VOICE_ROOMS_KEY = "allow_all_voice_rooms"
 VOICE_CHANNELS_KEY = "voice_channels"
@@ -255,7 +256,7 @@ class Sesh(commands.Cog):
 
     async def _guild_config(self, guild_id: int) -> tuple[dict, dict]:
         world = await self.bot.db.get_world(guild_id)
-        return world, world.setdefault("sesh_config", {})
+        return world, world.setdefault(SESH_CONFIG_KEY, {})
 
     async def _persist_descriptor(
         self,
