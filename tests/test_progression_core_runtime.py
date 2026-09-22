@@ -34,10 +34,10 @@ def test_current_daily_quest_schema_progresses_and_rewards(monkeypatch):
                 "completed": False,
             },
             {
-                "id": "dq_water",
-                "name": "Water",
-                "desc": "Water",
-                "event": "water",
+                "id": "dq_harvest",
+                "name": "Harvest",
+                "desc": "Harvest",
+                "event": "harvest",
                 "target": 99,
                 "progress": 0,
                 "reward_cash": 0,
@@ -77,9 +77,9 @@ def test_daily_quest_pool_contains_only_implemented_event_types():
 
     assert "breed" not in events
     assert "contract_complete" not in events
+    assert "water" not in events
     assert {
         "plant",
-        "water",
         "harvest",
         "collect_dabs",
         "steal",
