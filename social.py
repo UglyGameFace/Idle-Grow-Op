@@ -277,59 +277,68 @@ class Social(commands.Cog):
             require_multiplayer(scope, "district")
         except WorldModeDenied as exc:
             return await ctx.send(str(exc))
+        war_error = None
+        immediate_message = None
+        attacker_won = None
         async with self.bot.db.lock:
             user = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
             world = await self.bot.db.get_world(scope.scope_id)
             crew_id = user.get("crew_id")
             if not crew_id:
-                return await ctx.send("❌ You need a crew.")
+                war_error = "❌ You need a crew."
+            else:
+                crews = get_crews(world)
+                attacker = crews.get(str(crew_id))
+                if not attacker:
+                    war_error = "❌ Crew data missing."
+                else:
+                    now = time.time()
+                    cooldowns = attacker.setdefault("cooldowns", {})
+                    last_war = float(cooldowns.get("war", 0) or 0)
+                    remaining = int(last_war + 3600 - now)
+                    if remaining > 0:
+                        war_error = f"⏳ Crew turf-war cooldown: **{remaining // 60 + 1}m**"
+                    else:
+                        district = world.setdefault("district", {})
+                        current_owner = district.get("owner_crew_id")
+                        if not current_owner or now >= float(district.get("expires_at", 0)):
+                            district.update(
+                                {
+                                    "owner_crew_id": str(crew_id),
+                                    "owner_name": attacker["name"],
+                                    "multiplier": 1.10,
+                                    "expires_at": now + 86400,
+                                }
+                            )
+                            cooldowns["war"] = now
+                            self.bot.db.mark_world_dirty(scope.scope_id)
+                            immediate_message = f"🔥 **{attacker['name']}** claimed the empty district!"
+                        elif str(current_owner) == str(crew_id):
+                            war_error = "🏙️ You already own the block."
+                        else:
+                            defender = crews.get(str(current_owner))
+                            if not defender:
+                                war_error = "❌ Defending crew data is missing."
+                            else:
+                                attacker_score = len(attacker.get("members", [])) * random.uniform(0.8, 1.2)
+                                defender_score = len(defender.get("members", [])) * random.uniform(0.8, 1.2)
+                                attacker_won = attacker_score > defender_score
+                                cooldowns["war"] = now
+                                if attacker_won:
+                                    district.update(
+                                        {
+                                            "owner_crew_id": str(crew_id),
+                                            "owner_name": attacker["name"],
+                                            "multiplier": 1.10,
+                                            "expires_at": now + 86400,
+                                        }
+                                    )
+                                self.bot.db.mark_world_dirty(scope.scope_id)
 
-            crews = get_crews(world)
-            attacker = crews.get(str(crew_id))
-            if not attacker:
-                return await ctx.send("❌ Crew data missing.")
-            now = time.time()
-            cooldowns = attacker.setdefault("cooldowns", {})
-            last_war = float(cooldowns.get("war", 0) or 0)
-            remaining = int(last_war + 3600 - now)
-            if remaining > 0:
-                return await ctx.send(f"⏳ Crew turf-war cooldown: **{remaining // 60 + 1}m**")
-
-            district = world.setdefault("district", {})
-            current_owner = district.get("owner_crew_id")
-            if not current_owner or now >= float(district.get("expires_at", 0)):
-                district.update(
-                    {
-                        "owner_crew_id": str(crew_id),
-                        "owner_name": attacker["name"],
-                        "multiplier": 1.10,
-                        "expires_at": now + 86400,
-                    }
-                )
-                cooldowns["war"] = now
-                self.bot.db.mark_world_dirty(scope.scope_id)
-                return await ctx.send(f"🔥 **{attacker['name']}** claimed the empty district!")
-            if str(current_owner) == str(crew_id):
-                return await ctx.send("🏙️ You already own the block.")
-
-            defender = crews.get(str(current_owner))
-            if not defender:
-                return await ctx.send("❌ Defending crew data is missing.")
-            attacker_score = len(attacker.get("members", [])) * random.uniform(0.8, 1.2)
-            defender_score = len(defender.get("members", [])) * random.uniform(0.8, 1.2)
-            attacker_won = attacker_score > defender_score
-            cooldowns["war"] = now
-            if attacker_won:
-                district.update(
-                    {
-                        "owner_crew_id": str(crew_id),
-                        "owner_name": attacker["name"],
-                        "multiplier": 1.10,
-                        "expires_at": now + 86400,
-                    }
-                )
-            self.bot.db.mark_world_dirty(scope.scope_id)
-
+        if war_error:
+            return await ctx.send(war_error)
+        if immediate_message:
+            return await ctx.send(immediate_message)
         if attacker_won:
             await ctx.send(
                 f"💥 **WAR!** {attacker['name']} defeated {defender['name']} and took the district!"
