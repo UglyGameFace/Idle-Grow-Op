@@ -173,7 +173,6 @@ def test_save_many_uses_one_atomic_rpc_for_all_scoped_tables():
     )
 
     assert client.upserts == []
-    assert client.rpc_calls == []
     assert client.rpc_calls == [
         (
             ATOMIC_SAVE_RPC,
@@ -200,3 +199,4 @@ def test_empty_save_does_not_touch_supabase():
     run(backend.save_many({}))
 
     assert client.upserts == []
+    assert client.rpc_calls == []
