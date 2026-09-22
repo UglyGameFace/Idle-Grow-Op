@@ -15,6 +15,20 @@ import discord
 from discord.ext import commands
 
 from persistence_context import GuildContextRequired, require_guild_id
+from profile_signature_contracts import (
+    ALL_PROFILE_FIELDS,
+    DEFAULT_SERVER_ALLOWED_FIELDS,
+    DEFAULT_VISIBLE_FIELDS,
+    FIELD_LABELS,
+    GLOBAL_PRIVACY_KEY,
+    GUILD_PRIVACY_KEY,
+    IDENTITY_KEY,
+    SIGNATURE_ALLOWED_FIELDS_KEY,
+    SIGNATURE_CHANNELS_KEY,
+    SIGNATURE_CONFIG_KEY,
+    SIGNATURE_ENABLED_KEY,
+    SIGNATURE_STATE_KEY,
+)
 from progression_core import xp_needed_for_level
 from utils import get_plant_grow_time
 from world_modes import MODE_LABELS, resolve_game_scope
@@ -22,39 +36,12 @@ from world_modes import MODE_LABELS, resolve_game_scope
 
 logger = logging.getLogger(__name__)
 
-SIGNATURE_CONFIG_KEY = "profile_signature_config"
-SIGNATURE_STATE_KEY = "profile_signature_state"
-SIGNATURE_ENABLED_KEY = "enabled"
-SIGNATURE_CHANNELS_KEY = "channel_ids"
-SIGNATURE_ALLOWED_FIELDS_KEY = "allowed_fields"
-
-IDENTITY_KEY = "profile_identity"
-GLOBAL_PRIVACY_KEY = "profile_privacy"
-GUILD_PRIVACY_KEY = "profile_signature_privacy"
-
 SIGNATURE_MARKER = "Idle Grow Live Signature"
 SIGNATURE_DEBOUNCE_SECONDS = 2.5
 SIGNATURE_CHANNEL_COOLDOWN_SECONDS = 8.0
 SIGNATURE_USER_COOLDOWN_SECONDS = 20.0
 SIGNATURE_SAME_SPEAKER_REFRESH_SECONDS = 90.0
 SIGNATURE_HISTORY_SCAN_LIMIT = 100
-
-FIELD_LABELS = {
-    "level": "Level & XP",
-    "crew": "Crew",
-    "grow_status": "Grow status",
-    "wealth": "Balance / net worth",
-    "inventory": "Inventory summary",
-    "rank": "Server rank",
-    "achievements": "Achievements",
-    "activity": "Activity details",
-    "platforms": "Gaming & social platforms",
-}
-ALL_PROFILE_FIELDS = tuple(FIELD_LABELS)
-DEFAULT_VISIBLE_FIELDS = frozenset({"level", "crew", "grow_status"})
-DEFAULT_SERVER_ALLOWED_FIELDS = frozenset(
-    {"level", "crew", "grow_status", "rank", "achievements", "platforms"}
-)
 
 _SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]{2,64}$")
 _STEAM_ID_RE = re.compile(r"^\d{15,20}$")
