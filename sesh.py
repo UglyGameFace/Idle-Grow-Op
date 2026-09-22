@@ -915,6 +915,12 @@ class Sesh(commands.Cog):
                 )
         except asyncio.CancelledError:
             raise
+        except Exception:
+            logger.exception(
+                "Private Sesh cleanup failed guild=%s channel=%s",
+                key[0],
+                channel_id,
+            )
         finally:
             self._private_cleanup_tasks.pop(key, None)
 
