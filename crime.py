@@ -337,6 +337,7 @@ class Crime(commands.Cog):
         ))
         await asyncio.sleep(HEIST_JOIN_WINDOW + 1)
 
+        settlement_error = None
         async with self.bot.db.lock:
             session = _ACTIVE_HEISTS.pop(key, None)
             if not session:
@@ -344,62 +345,65 @@ class Crime(commands.Cog):
             world = await self.bot.db.get_world(scope.scope_id)
             crew = self._get_crews(world).get(str(crew_id))
             if not crew:
-                return await ctx.send("❌ Crew data missing.")
-
-            valid_members: list[tuple[int, dict]] = []
-            for member_id, member_guild_id in session.get("members", {}).items():
-                member_scope = await resolve_game_scope(
-                    self.bot.db,
-                    int(member_guild_id),
-                    int(member_id),
-                )
-                if member_scope.scope_id != scope.scope_id:
-                    continue
-                member = await self.bot.db.get_profile(scope.scope_id, int(member_id))
-                if self._in_jail(member) <= 0 and str(member.get("crew_id")) == str(crew_id):
-                    valid_members.append((int(member_id), member))
-            if len(valid_members) < 2:
-                return await ctx.send("❌ Heist cancelled: not enough eligible crew members joined.")
-
-            levels = [max(1, int(member.get("level", 1))) for _, member in valid_members]
-            power = self._calc_power(levels)
-            chance = max(0.18, min(0.88, 0.46 + power * 0.06 + len(valid_members) * 0.03))
-            success = self._roll(chance)
-            base = int(2_600 + power * 1_200)
-            total = random.randint(int(base * 0.7), int(base * 1.3))
-
-            if success:
-                split = calculate_crew_payout(total, len(valid_members), bank_rate=0.30)
-                crew["bank"] = max(0, int(crew.get("bank", 0))) + split.crew_bank_gain + split.remainder
-                for member_id, member in valid_members:
-                    member["grams"] = max(0, int(member.get("grams", 0))) + split.member_gain
-                    add_heat(member, 2)
-                    self.bot.db.mark_profile_dirty(scope.scope_id, member_id)
-                bank_gain = split.crew_bank_gain + split.remainder
-                member_gain = split.member_gain
-                jail_minutes = 0
+                settlement_error = "❌ Crew data missing."
             else:
-                jail_minutes = random.randint(2, 7)
-                for member_id, member in valid_members:
-                    balance = max(0, int(member.get("grams", 0)))
-                    loss = calculate_capped_loss(balance, int(balance * 0.04))
-                    member["grams"] = balance - loss
-                    member["jail_until"] = int(
-                        self._now()
-                        + self._jail_duration_seconds(member, jail_minutes * 60)
+                valid_members: list[tuple[int, dict]] = []
+                for member_id, member_guild_id in session.get("members", {}).items():
+                    member_scope = await resolve_game_scope(
+                        self.bot.db,
+                        int(member_guild_id),
+                        int(member_id),
                     )
-                    add_heat(member, 6)
-                    self.bot.db.mark_profile_dirty(scope.scope_id, member_id)
-                bank_gain = 0
-                member_gain = 0
+                    if member_scope.scope_id != scope.scope_id:
+                        continue
+                    member = await self.bot.db.get_profile(scope.scope_id, int(member_id))
+                    if self._in_jail(member) <= 0 and str(member.get("crew_id")) == str(crew_id):
+                        valid_members.append((int(member_id), member))
 
-            for member_id, member in valid_members:
-                self._record_heist_progress(member, member_id, success)
-                self.bot.db.mark_profile_dirty(scope.scope_id, member_id)
+                if len(valid_members) < 2:
+                    settlement_error = "❌ Heist cancelled: not enough eligible crew members joined."
+                else:
+                    levels = [max(1, int(member.get("level", 1))) for _, member in valid_members]
+                    power = self._calc_power(levels)
+                    chance = max(0.18, min(0.88, 0.46 + power * 0.06 + len(valid_members) * 0.03))
+                    success = self._roll(chance)
+                    base = int(2_600 + power * 1_200)
+                    total = random.randint(int(base * 0.7), int(base * 1.3))
 
-            self._set_crew_cooldown(crew, "heist")
-            self.bot.db.mark_world_dirty(scope.scope_id)
+                    if success:
+                        split = calculate_crew_payout(total, len(valid_members), bank_rate=0.30)
+                        crew["bank"] = max(0, int(crew.get("bank", 0))) + split.crew_bank_gain + split.remainder
+                        for member_id, member in valid_members:
+                            member["grams"] = max(0, int(member.get("grams", 0))) + split.member_gain
+                            add_heat(member, 2)
+                            self.bot.db.mark_profile_dirty(scope.scope_id, member_id)
+                        bank_gain = split.crew_bank_gain + split.remainder
+                        member_gain = split.member_gain
+                        jail_minutes = 0
+                    else:
+                        jail_minutes = random.randint(2, 7)
+                        for member_id, member in valid_members:
+                            balance = max(0, int(member.get("grams", 0)))
+                            loss = calculate_capped_loss(balance, int(balance * 0.04))
+                            member["grams"] = balance - loss
+                            member["jail_until"] = int(
+                                self._now()
+                                + self._jail_duration_seconds(member, jail_minutes * 60)
+                            )
+                            add_heat(member, 6)
+                            self.bot.db.mark_profile_dirty(scope.scope_id, member_id)
+                        bank_gain = 0
+                        member_gain = 0
 
+                    for member_id, member in valid_members:
+                        self._record_heist_progress(member, member_id, success)
+                        self.bot.db.mark_profile_dirty(scope.scope_id, member_id)
+
+                    self._set_crew_cooldown(crew, "heist")
+                    self.bot.db.mark_world_dirty(scope.scope_id)
+
+        if settlement_error:
+            return await ctx.send(settlement_error)
         if success:
             await ctx.send(embed=discord.Embed(
                 title="🏦 Crew Heist Success",
@@ -423,11 +427,15 @@ class Crime(commands.Cog):
         if not crew_id:
             return await ctx.send("❌ You need a crew.")
         key = self._session_key(scope.scope_id, "crew", crew_id)
+        join_error = None
         async with self.bot.db.lock:
             session = _ACTIVE_HEISTS.get(key)
             if not session or session.get("join_until", 0) <= self._now():
-                return await ctx.send("❌ No heist is forming.")
-            session.setdefault("members", {})[int(ctx.author.id)] = int(scope.guild_id)
+                join_error = "❌ No heist is forming."
+            else:
+                session.setdefault("members", {})[int(ctx.author.id)] = int(scope.guild_id)
+        if join_error:
+            return await ctx.send(join_error)
         await ctx.send(f"✅ {ctx.author.mention} joined!")
 
     async def _raid(self, ctx, scope, user: dict, target_id: str | None) -> None:
