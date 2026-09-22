@@ -224,51 +224,53 @@ class Crime(commands.Cog):
 
         _ACTIVE_HEISTS[key] = {"ends": self._now() + 8}
         try:
+            heist_error = None
             async with self.bot.db.lock:
                 last = self._get_user_cooldown(user, "heist_solo")
                 remaining = int(last + HEIST_SOLO_COOLDOWN - self._now())
                 if remaining > 0:
-                    await ctx.send(f"⏳ Solo heist cooldown: **{self._fmt_time(remaining)}**")
-                    return
-
-                heat = self._apply_heat_decay(user)
-                level = max(1, int(user.get("level", 1) or 1))
-                prestige = max(0, int(user.get("prestige", 0) or 0))
-                config = self._solo_profile(level, prestige, heat, plan)
-                balance = max(0, int(user.get("grams", 0) or 0))
-                if balance < config["buyin"]:
-                    await ctx.send(f"💸 You need **${config['buyin']:,}** for this job.")
-                    return
-
-                user["grams"] = balance - config["buyin"]
-                stats = user.setdefault("stats", {})
-                success = self._roll(config["chance"])
-
-                if success:
-                    payout = random.randint(*config["reward"])
-                    xp = random.randint(*config["xp"])
-                    user["grams"] += payout
-                    credit_xp(user, xp)
-                    add_heat(user, HEAT_GAIN_WIN + config["heat_mod"])
-                    stats["heist_profit"] = max(0, int(stats.get("heist_profit", 0))) + payout
-                    jail_minutes = 0
-                    jail_seconds = 0
-                    loss = 0
+                    heist_error = f"⏳ Solo heist cooldown: **{self._fmt_time(remaining)}**"
                 else:
-                    requested_loss = max(150, int(config["buyin"] * random.uniform(0.30, 0.70)))
-                    loss = calculate_capped_loss(user["grams"], requested_loss)
-                    user["grams"] -= loss
-                    jail_minutes = random.randint(HEIST_JAIL_MIN, HEIST_JAIL_MAX)
-                    jail_seconds = self._jail_duration_seconds(user, jail_minutes * 60)
-                    user["jail_until"] = int(self._now() + jail_seconds)
-                    add_heat(user, HEAT_GAIN_FAIL + config["heat_mod"])
-                    stats["heists_lost"] = max(0, int(stats.get("heists_lost", 0))) + 1
-                    payout = 0
-                    xp = 0
+                    heat = self._apply_heat_decay(user)
+                    level = max(1, int(user.get("level", 1) or 1))
+                    prestige = max(0, int(user.get("prestige", 0) or 0))
+                    config = self._solo_profile(level, prestige, heat, plan)
+                    balance = max(0, int(user.get("grams", 0) or 0))
+                    if balance < config["buyin"]:
+                        heist_error = f"💸 You need **${config['buyin']:,}** for this job."
+                    else:
+                        user["grams"] = balance - config["buyin"]
+                        stats = user.setdefault("stats", {})
+                        success = self._roll(config["chance"])
 
-                self._record_heist_progress(user, ctx.author.id, success)
-                self._set_user_cooldown(user, "heist_solo", self._now())
-                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                        if success:
+                            payout = random.randint(*config["reward"])
+                            xp = random.randint(*config["xp"])
+                            user["grams"] += payout
+                            credit_xp(user, xp)
+                            add_heat(user, HEAT_GAIN_WIN + config["heat_mod"])
+                            stats["heist_profit"] = max(0, int(stats.get("heist_profit", 0))) + payout
+                            jail_minutes = 0
+                            jail_seconds = 0
+                            loss = 0
+                        else:
+                            requested_loss = max(150, int(config["buyin"] * random.uniform(0.30, 0.70)))
+                            loss = calculate_capped_loss(user["grams"], requested_loss)
+                            user["grams"] -= loss
+                            jail_minutes = random.randint(HEIST_JAIL_MIN, HEIST_JAIL_MAX)
+                            jail_seconds = self._jail_duration_seconds(user, jail_minutes * 60)
+                            user["jail_until"] = int(self._now() + jail_seconds)
+                            add_heat(user, HEAT_GAIN_FAIL + config["heat_mod"])
+                            stats["heists_lost"] = max(0, int(stats.get("heists_lost", 0))) + 1
+                            payout = 0
+                            xp = 0
+
+                        self._record_heist_progress(user, ctx.author.id, success)
+                        self._set_user_cooldown(user, "heist_solo", self._now())
+                        self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+            if heist_error:
+                await ctx.send(heist_error)
+                return
         finally:
             _ACTIVE_HEISTS.pop(key, None)
 
@@ -309,17 +311,21 @@ class Crime(commands.Cog):
             return await ctx.send("❌ Crew data missing.")
 
         key = self._session_key(scope.scope_id, "crew", crew_id)
+        start_error = None
         async with self.bot.db.lock:
             remaining = self._crew_cooldown_left(crew, "heist")
             if remaining > 0:
-                return await ctx.send(f"⏳ Crew cooldown: **{self._fmt_time(remaining)}**")
-            if _ACTIVE_HEISTS.get(key, {}).get("join_until", 0) > self._now():
-                return await ctx.send("⏳ Crew heist already forming. Use `/heist mode:join`.")
-            _ACTIVE_HEISTS[key] = {
-                "join_until": self._now() + HEIST_JOIN_WINDOW,
-                "members": {int(ctx.author.id): int(scope.guild_id)},
-                "host_id": int(ctx.author.id),
-            }
+                start_error = f"⏳ Crew cooldown: **{self._fmt_time(remaining)}**"
+            elif _ACTIVE_HEISTS.get(key, {}).get("join_until", 0) > self._now():
+                start_error = "⏳ Crew heist already forming. Use `/heist mode:join`."
+            else:
+                _ACTIVE_HEISTS[key] = {
+                    "join_until": self._now() + HEIST_JOIN_WINDOW,
+                    "members": {int(ctx.author.id): int(scope.guild_id)},
+                    "host_id": int(ctx.author.id),
+                }
+        if start_error:
+            return await ctx.send(start_error)
 
         await ctx.send(embed=discord.Embed(
             title="🧪 Crew Heist Forming",
