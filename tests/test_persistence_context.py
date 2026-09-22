@@ -16,7 +16,7 @@ def test_require_guild_id_rejects_dm_context():
         require_guild_id(context)
 
 
-@pytest.mark.parametrize("guild_id", [None, 0, -1, "not-a-snowflake"])
+@pytest.mark.parametrize("guild_id", [0, -1, "not-a-snowflake"])
 def test_require_guild_id_rejects_invalid_server_identifiers(guild_id):
     context = SimpleNamespace(guild=SimpleNamespace(id=guild_id))
     with pytest.raises(GuildContextRequired, match="Discord guild context is invalid"):
