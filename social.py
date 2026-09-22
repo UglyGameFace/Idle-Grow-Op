@@ -138,33 +138,37 @@ class Social(commands.Cog):
         if len(clean_name) > 50:
             return await ctx.send("❌ Crew name is too long.")
 
+        create_error = None
+        crew_id = None
         async with self.bot.db.lock:
             user = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
             world = await self.bot.db.get_world(scope.scope_id)
             if user.get("crew_id"):
-                return await ctx.send("❌ Already in a crew.")
-            balance = max(0, int(user.get("grams", 0)))
-            if balance < 50000:
-                return await ctx.send("💸 Cost: $50,000.")
-
-            crews = get_crews(world)
-            crew_id = str(random.randint(10000, 99999))
-            while crew_id in crews:
-                crew_id = str(random.randint(10000, 99999))
-            crews[crew_id] = {
-                "id": crew_id,
-                "name": clean_name,
-                "owner_id": ctx.author.id,
-                "members": [ctx.author.id],
-                "bank": 0,
-                "level": 1,
-                "created_at": time.time(),
-            }
-            user["grams"] = balance - 50000
-            user["crew_id"] = crew_id
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
-            self.bot.db.mark_world_dirty(scope.scope_id)
-
+                create_error = "❌ Already in a crew."
+            else:
+                balance = max(0, int(user.get("grams", 0)))
+                if balance < 50000:
+                    create_error = "💸 Cost: $50,000."
+                else:
+                    crews = get_crews(world)
+                    crew_id = str(random.randint(10000, 99999))
+                    while crew_id in crews:
+                        crew_id = str(random.randint(10000, 99999))
+                    crews[crew_id] = {
+                        "id": crew_id,
+                        "name": clean_name,
+                        "owner_id": ctx.author.id,
+                        "members": [ctx.author.id],
+                        "bank": 0,
+                        "level": 1,
+                        "created_at": time.time(),
+                    }
+                    user["grams"] = balance - 50000
+                    user["crew_id"] = crew_id
+                    self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                    self.bot.db.mark_world_dirty(scope.scope_id)
+        if create_error:
+            return await ctx.send(create_error)
         await ctx.send(f"✅ **Crew Created!** ID: `{crew_id}`")
 
     @crew.command(name="join")
@@ -175,21 +179,26 @@ class Social(commands.Cog):
             require_multiplayer(scope, "crew")
         except WorldModeDenied as exc:
             return await ctx.send(str(exc))
+        join_error = None
+        crew = None
         async with self.bot.db.lock:
             user = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
             world = await self.bot.db.get_world(scope.scope_id)
             if user.get("crew_id"):
-                return await ctx.send("❌ Leave your current crew first.")
-            crew = get_crews(world).get(str(crew_id))
-            if not crew:
-                return await ctx.send("❌ Crew not found.")
-            members = crew.setdefault("members", [])
-            if ctx.author.id not in members:
-                members.append(ctx.author.id)
-            user["crew_id"] = str(crew_id)
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
-            self.bot.db.mark_world_dirty(scope.scope_id)
-
+                join_error = "❌ Leave your current crew first."
+            else:
+                crew = get_crews(world).get(str(crew_id))
+                if not crew:
+                    join_error = "❌ Crew not found."
+                else:
+                    members = crew.setdefault("members", [])
+                    if ctx.author.id not in members:
+                        members.append(ctx.author.id)
+                    user["crew_id"] = str(crew_id)
+                    self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                    self.bot.db.mark_world_dirty(scope.scope_id)
+        if join_error:
+            return await ctx.send(join_error)
         await ctx.send(f"✅ Joined **{crew['name']}**!")
 
     @crew.command(name="info")
@@ -233,25 +242,30 @@ class Social(commands.Cog):
         except ValueError:
             return await ctx.send("❌ Deposit must be a positive whole number.")
 
+        deposit_error = None
         async with self.bot.db.lock:
             user = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
             world = await self.bot.db.get_world(scope.scope_id)
             crew_id = user.get("crew_id")
             if not crew_id:
-                return await ctx.send("❌ No crew.")
-            crew = get_crews(world).get(str(crew_id))
-            if not crew:
-                return await ctx.send("❌ Crew data missing.")
-            balance = max(0, int(user.get("grams", 0)))
-            if balance < deposit:
-                return await ctx.send("💸 Insufficient funds.")
-            user["grams"] = balance - deposit
-            crew["bank"] = max(0, int(crew.get("bank", 0))) + deposit
-            add_progress(user, "crew_deposit_cash", deposit, user_id=ctx.author.id)
-            check_achievements(user)
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
-            self.bot.db.mark_world_dirty(scope.scope_id)
-
+                deposit_error = "❌ No crew."
+            else:
+                crew = get_crews(world).get(str(crew_id))
+                if not crew:
+                    deposit_error = "❌ Crew data missing."
+                else:
+                    balance = max(0, int(user.get("grams", 0)))
+                    if balance < deposit:
+                        deposit_error = "💸 Insufficient funds."
+                    else:
+                        user["grams"] = balance - deposit
+                        crew["bank"] = max(0, int(crew.get("bank", 0))) + deposit
+                        add_progress(user, "crew_deposit_cash", deposit, user_id=ctx.author.id)
+                        check_achievements(user)
+                        self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                        self.bot.db.mark_world_dirty(scope.scope_id)
+        if deposit_error:
+            return await ctx.send(deposit_error)
         await ctx.send(f"🏦 Deposited ${deposit:,}.")
 
     @crew.command(name="war")
