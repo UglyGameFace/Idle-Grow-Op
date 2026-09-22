@@ -203,6 +203,37 @@ Cleanup:
 - Current progression ownership is explicit and storage-agnostic in progression_core.py.
 - The old empty achievement stub and old quest schema are gone.
 
+## Phase 5 Checkpoint: Gameplay Catalog, Grow Loop, and Configuration Contracts
+Validated on exact head ddc7163257d9df965149d835b39f41cc9e515bc5 with CI run 761 successful.
+
+Root causes:
+- Weather advertised growth-speed effects but plant grow-time calculation ignored weather.
+- Several shop items advertised mechanics or commands that never existed, including thirst/durability/appeal/bail/autoharvest behavior.
+- Pager and Lawyer had exact advertised passive effects but no runtime implementation.
+- Three selectable world events announced effects the runtime never applied.
+- The original skills system left unreachable profile state and a hidden sale multiplier with no way to earn skill levels.
+- Watering had never affected growth, yield, survival, or quality; it only mutated timestamps/counters and was still exposed as a command, quest, and onboarding step.
+- Shared guild configuration keys were independently re-declared across setup.py, tasks.py, main.py, Sesh, and AI.
+
+Completed:
+- Applied WEATHER_TYPES growth modifiers to real plant timing.
+- Removed unsupported shop placeholders and corrected live equipment descriptions.
+- Prevented repeat purchases of passive equipment/tools/defenses.
+- Implemented Pager's exact +20% daily cash/XP multiplier.
+- Implemented Lawyer's exact -25% jail duration across solo heists, crew-heist failures, and failed robberies.
+- Removed nonfunctional special events and made the remaining market events consume their authoritative declared multiplier.
+- Removed dead thirst/event metadata and ownerless legacy skill state/constants.
+- Removed the no-op /water command, watering quest, onboarding guidance, and unused hydration/quality fields from new plants.
+- Added guild_config.py as the single owner of shared guild-world channel keys.
+- Made AI and Sesh own their subsystem config keys; setup imports those contracts instead of redeclaring them.
+- Updated main.py and tasks.py to consume the canonical shared guild config keys.
+- Added regression coverage for weather timing, shop mechanic contracts, world-event ownership, dead legacy state, watering removal, and configuration-key ownership.
+
+Cleanup:
+- No imaginary thirst, durability, sale-speed, or skill subsystem was invented to justify legacy catalog text.
+- Existing stored unknown JSON keys remain non-destructively ignored; new state no longer creates those ownerless fields.
+- Configuration key strings now have explicit canonical owners instead of synchronized duplicate declarations.
+
 ## Cleanup / Conflict Review
 Pending. Every affected subsystem will be checked after its behavioral audit for obsolete, duplicate, conflicting, partial, temporary, and superseded logic.
 
@@ -226,4 +257,4 @@ Pending. Every affected subsystem will be checked after its behavioral audit for
 - No open PR at audit start.
 
 ## Next Step
-Audit gameplay/catalog consistency: verify every advertised weather modifier, watering effect, equipment, consumable, shop description, and help/onboarding promise has one real runtime owner. Remove or repair legacy promises that have no backing mechanic.
+Audit setup/profile-signature/server-configuration ownership: trace every config writer, default, validation path, cleanup/sync side effect, and reconnect behavior. Consolidate only where multiple modules independently own the same contract or runtime consequence.
