@@ -1,4 +1,6 @@
 import asyncio
+
+import sesh as sesh_module
 from types import SimpleNamespace
 
 from profile_signatures import ProfileSignatures
@@ -87,6 +89,37 @@ def test_profile_reconciliation_retries_only_failed_guilds_on_later_ready():
 
         await cog.on_ready()
         assert cog._reconciled_guild_ids == {1, 2}
+        assert calls == [1, 2, 1]
+
+    asyncio.run(scenario())
+
+
+def test_sesh_restart_reconciliation_retries_only_failed_guilds(monkeypatch):
+    async def scenario():
+        guild_one = SimpleNamespace(id=1)
+        guild_two = SimpleNamespace(id=2)
+
+        class BotStub:
+            guilds = [guild_one, guild_two]
+
+            async def wait_until_ready(self):
+                return None
+
+        cog = Sesh(BotStub())
+        calls = []
+        fail_first = {1: True}
+
+        async def reconcile(guild):
+            calls.append(guild.id)
+            if guild.id == 1 and fail_first[1]:
+                fail_first[1] = False
+                raise RuntimeError("temporary stale cleanup failure")
+
+        cog._reconcile_stale_guild = reconcile
+        monkeypatch.setattr(sesh_module, "SESH_RECONCILE_RETRY_SECONDS", 0)
+
+        await cog._reconcile_stale_sessions()
+
         assert calls == [1, 2, 1]
 
     asyncio.run(scenario())
