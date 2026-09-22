@@ -234,6 +234,31 @@ Cleanup:
 - Existing stored unknown JSON keys remain non-destructively ignored; new state no longer creates those ownerless fields.
 - Configuration key strings now have explicit canonical owners instead of synchronized duplicate declarations.
 
+## Phase 6 Checkpoint: Configuration and Persistence Contract Ownership
+Validated on exact head ebae7eebd5849b9cadf1fa99e12cb3b532cf8c34 with CI run 781 successful.
+
+Root causes:
+- Shared guild channel keys were previously re-declared independently across setup, tasks, and main.
+- Sesh and AI subsystem config keys were duplicated in setup instead of being consumed from their owning modules.
+- Profile-signature persistence/default schema lived inside the Discord runtime module while persistence and setup needed the same contract.
+- The database hardcoded world-mode defaults instead of using the world-mode owner.
+- The reserved Open World scope ID and world settings key had duplicate ownership.
+- Sesh config reads used setdefault(), mutating world state during a read-only operation.
+
+Completed:
+- Added guild_config.py as the pure owner of shared guild-world setting keys.
+- Added profile_signature_contracts.py as the Discord-free owner of signature/privacy persistence schema and default builders.
+- Added world_mode_contracts.py as the Discord-free owner of world-mode persistence defaults and routing identifiers.
+- Routed setup, runtime cogs, tasks, main, and scoped_database through those canonical contracts.
+- Made persistence defaults consume canonical world-mode, profile-signature, Open World scope, and guild-settings contracts.
+- Made Sesh config reads side-effect free while preserving explicit mutation/dirty tracking on real writes.
+- Added runtime/default/ownership regression coverage and linted the extracted contract modules.
+
+Cleanup:
+- Setup remains the Discord UI front end, not a second schema owner.
+- No persistence module imports Discord UI code.
+- Runtime modules may re-export imported constants for compatibility, but the literal definitions now have one source of truth.
+
 ## Cleanup / Conflict Review
 Pending. Every affected subsystem will be checked after its behavioral audit for obsolete, duplicate, conflicting, partial, temporary, and superseded logic.
 
@@ -257,4 +282,4 @@ Pending. Every affected subsystem will be checked after its behavioral audit for
 - No open PR at audit start.
 
 ## Next Step
-Audit setup/profile-signature/server-configuration ownership: trace every config writer, default, validation path, cleanup/sync side effect, and reconnect behavior. Consolidate only where multiple modules independently own the same contract or runtime consequence.
+Resume command-runtime coverage across the remaining gameplay and admin/user flows. Prioritize callbacks with persistence mutations, cross-player value exchange, cooldowns, and failure paths that are still protected mainly by static source contracts.
