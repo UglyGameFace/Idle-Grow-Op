@@ -256,23 +256,29 @@ class Gambling(commands.Cog):
     async def _atomic_game(self, ctx, raw_bet, game: str, resolver, *, min_bet=10, max_bet=None):
         guild_id = require_guild_id(ctx)
         scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
+        profile = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
+        if await jail_guard(ctx, profile, "gamble"):
+            return None
+        game_error = None
+        result = None
+        bet = None
         async with self.bot.db.lock:
-            profile = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
-            if await jail_guard(ctx, profile, "gamble"):
-                return None
             balance = max(0, int(profile.get("grams", 0) or 0))
             bet = _parse_bet(raw_bet, balance, min_bet=int(min_bet), max_bet=max_bet)
             if bet is None:
-                await ctx.send(f"❌ Invalid bet or insufficient funds. Minimum: {_fmt_cash(min_bet)}.")
-                return None
-            profile["grams"] = balance - bet
-            result = resolver(bet)
-            payout = max(0, int(result.get("payout", 0)))
-            profile["grams"] += payout
-            net = payout - bet
-            update_gamble_stats(profile, game, net, bet)
-            _record_game_progress(profile, ctx.author.id, won=net > 0)
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                game_error = f"❌ Invalid bet or insufficient funds. Minimum: {_fmt_cash(min_bet)}."
+            else:
+                profile["grams"] = balance - bet
+                result = resolver(bet)
+                payout = max(0, int(result.get("payout", 0)))
+                profile["grams"] += payout
+                net = payout - bet
+                update_gamble_stats(profile, game, net, bet)
+                _record_game_progress(profile, ctx.author.id, won=net > 0)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+        if game_error:
+            await ctx.send(game_error)
+            return None
         return bet, result
 
     @commands.hybrid_command(name="casino", aliases=["gambleprofile"])
@@ -431,12 +437,17 @@ class Gambling(commands.Cog):
     async def blackjack(self, ctx, bet: str="200"):
         guild_id=require_guild_id(ctx)
         scope=await resolve_game_scope(self.bot.db,guild_id,ctx.author.id)
+        profile=await self.bot.db.get_profile(scope.scope_id,ctx.author.id)
+        if await jail_guard(ctx,profile,"gamble"): return
+        blackjack_error=None
+        wager=None
         async with self.bot.db.lock:
-            profile=await self.bot.db.get_profile(scope.scope_id,ctx.author.id)
-            if await jail_guard(ctx,profile,"gamble"): return
             wager=_parse_bet(bet,int(profile.get("grams",0) or 0),min_bet=int(_cfg("blackjack_min_bet",200)))
-            if wager is None: return await ctx.send("❌ Invalid bet or insufficient funds.")
-            profile["grams"]-=wager; self.bot.db.mark_profile_dirty(scope.scope_id,ctx.author.id)
+            if wager is None:
+                blackjack_error="❌ Invalid bet or insufficient funds."
+            else:
+                profile["grams"]-=wager; self.bot.db.mark_profile_dirty(scope.scope_id,ctx.author.id)
+        if blackjack_error: return await ctx.send(blackjack_error)
         deck=[2,3,4,5,6,7,8,9,10,"J","Q","K","A"]*4; random.shuffle(deck); player=[deck.pop(),deck.pop()]; dealer=[deck.pop(),deck.pop()]
         view=BlackjackView(self,ctx,scope.scope_id,ctx.author.id,wager,deck,player,dealer)
         if view.value(player) == 21:
