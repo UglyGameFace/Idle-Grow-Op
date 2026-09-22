@@ -280,6 +280,33 @@ Cleanup:
 - No lock was removed from mutation code; only external/network awaits were moved out.
 - Intermediate CI failures from the staged refactor are resolved; exact head is green.
 
+## Phase 8 Checkpoint: High-Risk Value Flows and Player Exit Paths
+Validated on exact head bdf511a348fd2702570468af474f6b98ba14bece with CI run 826 successful.
+
+Root causes:
+- Auction buyout could mutate bidder state before all participant profiles were successfully loaded.
+- The first auction bidder could not meet the listed starting price because all bids were forced strictly above current_bid.
+- Admin !wipeuser reset non-game control metadata such as notification settings, signature privacy, and world-mode selection.
+- Crew users were told to leave before joining another crew, but no crew-leave command existed.
+- New/unowned districts stored a +10% multiplier and /district could advertise a bonus when no active owner existed.
+- Interactive Blackjack deducted and dirtied a wager before message creation and had no crash/reload recovery state.
+
+Completed:
+- Preloaded auction participants before mutation and added buyout/expiry atomicity regressions.
+- Allowed the first bid to meet the starting price while preserving strict increases for later bids.
+- Added callback-level owner/admin mutation tests.
+- Added a canonical gameplay reset helper that preserves profile control/privacy preferences.
+- Added callback-level cross-player conservation tests for /give and /steal, including prerequisite-load and poor-target failure paths.
+- Added /crew leave with member exit, owner handoff, stale-membership repair, last-member disband, crew-bank conservation, and district cleanup.
+- Neutralized unowned district defaults and only display district bonuses while ownership is active.
+- Added persistent Blackjack escrow with stale recovery, timeout refund, send-failure refund, and double-settlement protection.
+- Added casino_contracts.py and lint/runtime coverage for the escrow contract.
+
+Cleanup:
+- Existing active game state and user preferences are preserved through admin gameplay resets.
+- Crew users now have a complete join/leave lifecycle instead of a one-way membership trap.
+- Interactive casino money can survive message failure, extension reload, or process crash without silently disappearing.
+
 ## Cleanup / Conflict Review
 Pending. Every affected subsystem will be checked after its behavioral audit for obsolete, duplicate, conflicting, partial, temporary, and superseded logic.
 
@@ -303,4 +330,4 @@ Pending. Every affected subsystem will be checked after its behavioral audit for
 - No open PR at audit start.
 
 ## Next Step
-Continue callback-level runtime auditing for remaining high-risk mutations: expired-auction settlement, admin owner commands, cross-player transfers/crime, and any command still protected mainly by source-text contracts. Add failure-path regressions before final cleanup.
+Audit user-facing command/help/UI consistency against the fully loaded command tree, including nested subcommands, setup/onboarding guidance, Sesh/profile-signature controls, and stale command references. Add runtime/tree guards for any instruction that can lead users to a missing or obsolete surface.
