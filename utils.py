@@ -124,11 +124,20 @@ CONCENTRATE_TYPES = {
 }
 
 SPECIAL_EVENTS = {
-    "HEAT_WAVE": {"name": "Heat Wave", "desc": "🔥 **Heat Wave!** Plants are drying out 2x faster!", "duration": 3600, "effect": "water_drain", "multiplier": 1.0},
-    "MARKET_BOOM": {"name": "Market Boom", "desc": "📈 **Market Boom!** Prices are sky high!", "duration": 7200, "effect": "price_up", "multiplier": 1.5},
-    "MARKET_CRASH": {"name": "Market Crash", "desc": "📉 **Market Crash!** The economy is in shambles.", "duration": 3600, "effect": "price_down", "multiplier": 0.6},
-    "POLICE_RAID": {"name": "Increased Patrols", "desc": "🚓 **Police Raid!** Heat generation is doubled!", "duration": 3600, "effect": "heat_up", "multiplier": 0.8},
-    "RAVE": {"name": "Underground Rave", "desc": "🎉 **Rave!** Demand is high. Sales are faster.", "duration": 10800, "effect": "demand_up", "multiplier": 1.25},
+    "MARKET_BOOM": {
+        "name": "Market Boom",
+        "desc": "📈 **Market Boom!** Prices are sky high!",
+        "duration": 7200,
+        "effect": "market_multiplier",
+        "multiplier": 1.5,
+    },
+    "MARKET_CRASH": {
+        "name": "Market Crash",
+        "desc": "📉 **Market Crash!** The economy is in shambles.",
+        "duration": 3600,
+        "effect": "market_multiplier",
+        "multiplier": 0.6,
+    },
 }
 
 SESH_MESSAGES = ["Pass the boof.", "Sesh time.", "Who's holding?", "Cloud 9.", "Stay lifted."]
