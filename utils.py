@@ -50,14 +50,14 @@ SKILLS_CONFIG = {
 }
 
 WEATHER_TYPES = {
-    "Sunny ☀️": {"growth": 1.15, "thirst": 1.2, "price": 1.10},
-    "Rainy 🌧️": {"growth": 1.00, "thirst": 0.50, "price": 0.90},
-    "Heatwave 🔥": {"growth": 1.30, "thirst": 2.50, "price": 1.20},
-    "Cloudy ☁️": {"growth": 1.05, "thirst": 1.00, "price": 1.00},
-    "Misty 🌫️": {"growth": 0.90, "thirst": 0.80, "price": 1.05},
-    "Windy 💨": {"growth": 0.95, "thirst": 1.50, "price": 0.95},
-    "420 Day 🍁": {"growth": 2.00, "thirst": 0.50, "price": 2.00},
-    "Harvest Moon 🌕": {"growth": 1.50, "thirst": 0.70, "price": 1.50},
+    "Sunny ☀️": {"growth": 1.15, "price": 1.10},
+    "Rainy 🌧️": {"growth": 1.00, "price": 0.90},
+    "Heatwave 🔥": {"growth": 1.30, "price": 1.20},
+    "Cloudy ☁️": {"growth": 1.05, "price": 1.00},
+    "Misty 🌫️": {"growth": 0.90, "price": 1.05},
+    "Windy 💨": {"growth": 0.95, "price": 0.95},
+    "420 Day 🍁": {"growth": 2.00, "price": 2.00},
+    "Harvest Moon 🌕": {"growth": 1.50, "price": 1.50},
 }
 
 GROWTH_CYCLES = {
@@ -126,14 +126,12 @@ CONCENTRATE_TYPES = {
 SPECIAL_EVENTS = {
     "MARKET_BOOM": {
         "name": "Market Boom",
-        "desc": "📈 **Market Boom!** Prices are sky high!",
         "duration": 7200,
         "effect": "market_multiplier",
         "multiplier": 1.5,
     },
     "MARKET_CRASH": {
         "name": "Market Crash",
-        "desc": "📉 **Market Crash!** The economy is in shambles.",
         "duration": 3600,
         "effect": "market_multiplier",
         "multiplier": 0.6,
