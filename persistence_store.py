@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping, MutableMapping
+from collections.abc import Callable, Mapping, MutableMapping
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Protocol
