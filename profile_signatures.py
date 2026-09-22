@@ -856,7 +856,7 @@ class ProfileSignatures(commands.Cog):
         self._channel_last_update: dict[tuple[int, int], float] = {}
         self._user_last_update: dict[tuple[int, int], float] = {}
         self._rank_cache: dict[int, tuple[float, dict[int, int]]] = {}
-        self._reconciled = False
+        self._reconciled_guild_ids: set[int] = set()
 
     def cog_unload(self) -> None:
         for task in [*self._pending.values(), *self._cleanup_tasks]:
@@ -865,6 +865,7 @@ class ProfileSignatures(commands.Cog):
         self._pending.clear()
         self._cleanup_tasks.clear()
         self._channel_generation.clear()
+        self._reconciled_guild_ids.clear()
 
     def _lock_for(self, guild_id: int, channel_id: int) -> asyncio.Lock:
         key = (int(guild_id), int(channel_id))
@@ -1821,19 +1822,30 @@ class ProfileSignatures(commands.Cog):
                 updated_at=float(current.get("updated_at", 0) or 0),
             )
 
+    async def _reconcile_guild_if_needed(self, guild: discord.Guild) -> bool:
+        guild_id = int(guild.id)
+        if guild_id in self._reconciled_guild_ids:
+            return True
+        try:
+            await self.reconcile_guild(guild)
+        except Exception:
+            logger.exception(
+                "Could not reconcile profile signatures for guild %s; will retry later",
+                guild_id,
+            )
+            return False
+        self._reconciled_guild_ids.add(guild_id)
+        return True
+
     @commands.Cog.listener()
     async def on_ready(self) -> None:
-        if self._reconciled:
-            return
-        self._reconciled = True
         for guild in list(self.bot.guilds):
-            try:
-                await self.reconcile_guild(guild)
-            except Exception:
-                logger.exception(
-                    "Could not reconcile profile signatures for guild %s",
-                    guild.id,
-                )
+            await self._reconcile_guild_if_needed(guild)
+
+    @commands.Cog.listener()
+    async def on_guild_join(self, guild: discord.Guild) -> None:
+        self._reconciled_guild_ids.discard(int(guild.id))
+        await self._reconcile_guild_if_needed(guild)
 
 
 async def setup(bot: commands.Bot) -> None:
