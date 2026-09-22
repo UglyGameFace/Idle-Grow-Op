@@ -139,7 +139,7 @@ class Quick(commands.Cog):
         strain = str(strain or "").lower().strip()
         if strain not in GROWTH_CYCLES:
             return await ctx.send("❌ Unknown strain.")
-        _, _, world = await self._scope(ctx)
+        scope, _, world = await self._scope(ctx)
         data = GROWTH_CYCLES[strain]
         seed_cost = _seed_cost(f"{strain} seed")
         average_yield = sum(data["yield"]) / 2
