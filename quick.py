@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands
 
 from persistence_context import GuildContextRequired, require_guild_id
+from progression_core import add_progress, check_achievements
 from world_modes import (
     effective_market_multiplier,
     effective_pot_capacity,
@@ -204,6 +205,8 @@ class Quick(commands.Cog):
                 if len(planted) >= desired:
                     break
             if planted:
+                add_progress(profile, "plant", len(planted), user_id=ctx.author.id)
+                check_achievements(profile)
                 self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
         if not planted:
