@@ -289,7 +289,7 @@ class Onboarding(commands.Cog):
         )
         embed.add_field(
             name="The money loop",
-            value="Buy a seed → plant → tend/check → harvest → sell → upgrade and repeat.",
+            value="Buy a seed → plant → check progress → harvest → sell → upgrade and repeat.",
             inline=False,
         )
         embed.add_field(
@@ -318,8 +318,8 @@ class Onboarding(commands.Cog):
             inline=False,
         )
         embed.add_field(
-            name="3. Watch and tend it",
-            value="`/status` shows the live timer. `/water` waters eligible plants. Weather and equipment can change growth speed.",
+            name="3. Watch it grow",
+            value="`/status` shows the live timer. Weather and equipment can change growth speed.",
             inline=False,
         )
         embed.add_field(
@@ -423,7 +423,7 @@ class Onboarding(commands.Cog):
         )
         embed.add_field(
             name="🌱 Core grow loop",
-            value="`/shop` • `/buy` • `/plant` • `/status` • `/water` • `/harvest` • `/sell`",
+            value="`/shop` • `/buy` • `/plant` • `/status` • `/harvest` • `/sell`",
             inline=False,
         )
         embed.add_field(
