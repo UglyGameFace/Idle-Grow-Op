@@ -14,6 +14,7 @@ from world_mode_contracts import (
     MODE_OPEN,
     MODE_SERVER,
     MODE_SOLO,
+    OPEN_WORLD_SCOPE_ID,
     PLAYER_MODE_SELECTION_KEY,
     POLICY_CHOICE,
     POLICY_OPEN,
@@ -26,11 +27,6 @@ from world_mode_contracts import (
     new_world_mode_config,
 )
 
-
-# Discord guild snowflakes are far larger than 1. This reserved positive scope lets
-# the existing, proven guild-profile/world persistence tables hold one shared Open
-# World without a parallel database implementation or a destructive migration.
-OPEN_WORLD_SCOPE_ID = 1
 
 SOLO_POT_CAP = 5
 SOLO_PROCESSING_QUEUE_CAP = 3
