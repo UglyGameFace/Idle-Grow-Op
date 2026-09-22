@@ -428,16 +428,17 @@ class Economy(commands.Cog):
                 return await ctx.send("❌ You can't bid on your own item.")
             buyout = max(0, int(auction.get("buyout", 0)))
             requested = buyout if buyout and amount >= buyout else amount
+            previous_bidder_id = auction.get("highest_bidder")
             try:
                 valid_bid = validate_bid_amount(
                     requested,
                     current_bid=auction["current_bid"],
                     end_time=auction["end_time"],
                     now=time.time(),
+                    allow_equal=previous_bidder_id is None,
                 )
             except ValueError as exc:
                 return await ctx.send(f"❌ {exc}.")
-            previous_bidder_id = auction.get("highest_bidder")
             current_bid = max(0, int(auction["current_bid"]))
             bidder_balance = max(0, int(user.get("grams", 0)))
             required_funds = valid_bid - current_bid if previous_bidder_id == ctx.author.id else valid_bid
