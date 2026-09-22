@@ -25,7 +25,7 @@ from sesh import (
     SESH_ENABLED_KEY,
     VOICE_CHANNELS_KEY as SESH_VOICE_CHANNELS_KEY,
 )
-from profile_signatures import (
+from profile_signature_contracts import (
     ALL_PROFILE_FIELDS,
     DEFAULT_SERVER_ALLOWED_FIELDS,
     FIELD_LABELS,
