@@ -310,10 +310,8 @@ class Tasks(commands.Cog):
                 "expires": now + event_data["duration"],
                 "name": event_data["name"],
             }
-            if event_data["effect"] == "price_up":
-                world["market_multiplier"] = 1.5
-            elif event_data["effect"] == "price_down":
-                world["market_multiplier"] = 0.6
+            if event_data["effect"] == "market_multiplier":
+                world["market_multiplier"] = float(event_data["multiplier"])
             return True
 
         weather_names = list(WEATHER_TYPES.keys())
