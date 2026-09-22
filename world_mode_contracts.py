@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 
+# Reserved persistence scope for the cross-server Open World.
+# Discord guild snowflakes are far larger than this value.
+OPEN_WORLD_SCOPE_ID = 1
+
 WORLD_MODE_CONFIG_KEY = "world_mode_config"
 PLAYER_MODE_SELECTION_KEY = "world_mode_selection"
 
