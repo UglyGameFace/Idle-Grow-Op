@@ -445,66 +445,72 @@ class Crime(commands.Cog):
         if not target_id:
             return await ctx.send("Usage: `/heist mode:raid arg:<target_crew_id>`")
 
+        raid_error = None
         async with self.bot.db.lock:
             world = await self.bot.db.get_world(scope.scope_id)
             crews = self._get_crews(world)
             attacker = crews.get(str(crew_id))
             defender = crews.get(str(target_id).strip())
             if not attacker or not defender:
-                return await ctx.send("❌ Invalid crew IDs.")
-            if str(crew_id) == str(target_id).strip():
-                return await ctx.send("❌ Cannot raid your own crew.")
-            remaining = self._crew_cooldown_left(attacker, "raid")
-            if remaining > 0:
-                return await ctx.send(f"⏳ Raid cooldown: **{self._fmt_time(remaining)}**")
-            defender_bank = max(0, int(defender.get("bank", 0)))
-            if defender_bank < RAID_MIN_TARGET_BANK:
-                return await ctx.send("❌ Target is too poor to raid.")
-
-            async def levels(crew: dict) -> list[int]:
-                result = []
-                for member_id in crew.get("members", []):
-                    try:
-                        profile = await self.bot.db.get_profile(scope.scope_id, int(member_id))
-                    except (TypeError, ValueError):
-                        continue
-                    result.append(max(1, int(profile.get("level", 1))))
-                return result
-
-            attacker_power = self._calc_power(await levels(attacker))
-            defender_power = self._calc_power(await levels(defender))
-            chance = max(0.12, min(0.85, 0.50 + (attacker_power - defender_power) * 0.06))
-            success = self._roll(chance)
-            attacker_bank = max(0, int(attacker.get("bank", 0)))
-            if success:
-                outcome = calculate_raid_outcome(
-                    defender_bank,
-                    attacker_bank,
-                    steal_rate=RAID_MAX_STEAL_PCT,
-                    steal_cap=RAID_MAX_STEAL_FLAT,
-                    attacker_keep_rate=0.85,
-                )
-                defender["bank"] = outcome.defender_balance
-                attacker["bank"] = outcome.attacker_balance
-                stolen = outcome.stolen
-                attacker_gain = outcome.attacker_gain
-                penalty = 0
+                raid_error = "❌ Invalid crew IDs."
+            elif str(crew_id) == str(target_id).strip():
+                raid_error = "❌ Cannot raid your own crew."
             else:
-                penalty = calculate_capped_loss(attacker_bank, min(12_000, int(attacker_bank * 0.06)))
-                attacker["bank"] = attacker_bank - penalty
-                stolen = 0
-                attacker_gain = 0
+                remaining = self._crew_cooldown_left(attacker, "raid")
+                if remaining > 0:
+                    raid_error = f"⏳ Raid cooldown: **{self._fmt_time(remaining)}**"
+                else:
+                    defender_bank = max(0, int(defender.get("bank", 0)))
+                    if defender_bank < RAID_MIN_TARGET_BANK:
+                        raid_error = "❌ Target is too poor to raid."
 
-            self._set_crew_cooldown(attacker, "raid")
-            stats = user.setdefault("stats", {})
-            stats["raids_run"] = max(0, int(stats.get("raids_run", 0))) + 1
-            if success:
-                stats["raids_won"] = max(0, int(stats.get("raids_won", 0))) + 1
-            add_progress(user, "raid", 1, user_id=ctx.author.id)
-            check_achievements(user)
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
-            self.bot.db.mark_world_dirty(scope.scope_id)
+            if raid_error is None:
+                async def levels(crew: dict) -> list[int]:
+                    result = []
+                    for member_id in crew.get("members", []):
+                        try:
+                            profile = await self.bot.db.get_profile(scope.scope_id, int(member_id))
+                        except (TypeError, ValueError):
+                            continue
+                        result.append(max(1, int(profile.get("level", 1))))
+                    return result
 
+                attacker_power = self._calc_power(await levels(attacker))
+                defender_power = self._calc_power(await levels(defender))
+                chance = max(0.12, min(0.85, 0.50 + (attacker_power - defender_power) * 0.06))
+                success = self._roll(chance)
+                attacker_bank = max(0, int(attacker.get("bank", 0)))
+                if success:
+                    outcome = calculate_raid_outcome(
+                        defender_bank,
+                        attacker_bank,
+                        steal_rate=RAID_MAX_STEAL_PCT,
+                        steal_cap=RAID_MAX_STEAL_FLAT,
+                        attacker_keep_rate=0.85,
+                    )
+                    defender["bank"] = outcome.defender_balance
+                    attacker["bank"] = outcome.attacker_balance
+                    stolen = outcome.stolen
+                    attacker_gain = outcome.attacker_gain
+                    penalty = 0
+                else:
+                    penalty = calculate_capped_loss(attacker_bank, min(12_000, int(attacker_bank * 0.06)))
+                    attacker["bank"] = attacker_bank - penalty
+                    stolen = 0
+                    attacker_gain = 0
+
+                self._set_crew_cooldown(attacker, "raid")
+                stats = user.setdefault("stats", {})
+                stats["raids_run"] = max(0, int(stats.get("raids_run", 0))) + 1
+                if success:
+                    stats["raids_won"] = max(0, int(stats.get("raids_won", 0))) + 1
+                add_progress(user, "raid", 1, user_id=ctx.author.id)
+                check_achievements(user)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                self.bot.db.mark_world_dirty(scope.scope_id)
+
+        if raid_error:
+            return await ctx.send(raid_error)
         if success:
             await ctx.send(embed=discord.Embed(
                 title="⚔️ Raid Success",
@@ -537,6 +543,7 @@ class Crime(commands.Cog):
         if await jail_guard(ctx, robber, "steal"):
             return
 
+        steal_error = None
         async with self.bot.db.lock:
             victim = await self.bot.db.get_profile(scope.scope_id, target.id)
             chance = 0.50
@@ -556,15 +563,16 @@ class Crime(commands.Cog):
                     amount = calculate_robbery_transfer(wallet, random.uniform(0.05, 0.20))
                 except ValueError:
                     ctx.command.reset_cooldown(ctx)
-                    return await ctx.send("That player is too poor to rob.")
-                victim["grams"] = wallet - amount
-                robber["dirty_cash"] = max(0, int(robber.get("dirty_cash", 0))) + amount
-                add_heat(robber, 15)
-                stats = robber.setdefault("stats", {})
-                stats["steals"] = max(0, int(stats.get("steals", 0))) + 1
-                success = True
-                fine = 0
-                self.bot.db.mark_profile_dirty(scope.scope_id, target.id)
+                    steal_error = "That player is too poor to rob."
+                else:
+                    victim["grams"] = wallet - amount
+                    robber["dirty_cash"] = max(0, int(robber.get("dirty_cash", 0))) + amount
+                    add_heat(robber, 15)
+                    stats = robber.setdefault("stats", {})
+                    stats["steals"] = max(0, int(stats.get("steals", 0))) + 1
+                    success = True
+                    fine = 0
+                    self.bot.db.mark_profile_dirty(scope.scope_id, target.id)
             else:
                 balance = max(0, int(robber.get("grams", 0)))
                 fine = calculate_capped_loss(balance, 1_000)
@@ -574,10 +582,13 @@ class Crime(commands.Cog):
                 add_heat(robber, 25)
                 amount = 0
                 success = False
-            add_progress(robber, "steal", 1, user_id=ctx.author.id)
-            check_achievements(robber)
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+            if steal_error is None:
+                add_progress(robber, "steal", 1, user_id=ctx.author.id)
+                check_achievements(robber)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
+        if steal_error:
+            return await ctx.send(steal_error)
         if success:
             await ctx.send(f"🔫 **SUCCESS!** Stole **${amount:,}** in dirty cash.")
         else:
@@ -591,33 +602,37 @@ class Crime(commands.Cog):
         guild_id = require_guild_id(ctx)
         scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
         user = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
+        launder_error = None
+        outcome = None
         async with self.bot.db.lock:
             dirty = max(0, int(user.get("dirty_cash", 0) or 0))
             heat = max(0, int(user.get("heat", 0) or 0))
             if dirty <= 0:
                 ctx.command.reset_cooldown(ctx)
-                return await ctx.send("❌ You have no **Dirty Cash** to launder.")
-            if heat >= 90:
+                launder_error = "❌ You have no **Dirty Cash** to launder."
+            elif heat >= 90:
                 ctx.command.reset_cooldown(ctx)
-                return await ctx.send(f"🚓 **Too Hot!** Heat is **{heat}%**. Let it cool down first.")
+                launder_error = f"🚓 **Too Hot!** Heat is **{heat}%**. Let it cool down first."
+            else:
+                raw = (amount or "all").strip().lower()
+                try:
+                    requested = dirty if raw in ("all", "max", "*") else require_positive_amount(raw.replace(",", ""))
+                    outcome = calculate_launder_outcome(requested, dirty_balance=dirty, fee_rate=0.20)
+                except ValueError as error:
+                    ctx.command.reset_cooldown(ctx)
+                    launder_error = f"❌ {error}."
+                else:
+                    user["dirty_cash"] = dirty - outcome.dirty_spent
+                    user["grams"] = max(0, int(user.get("grams", 0))) + outcome.clean_received
+                    add_heat(user, 5)
+                    stats = user.setdefault("stats", {})
+                    stats["laundered"] = max(0, int(stats.get("laundered", 0))) + outcome.dirty_spent
+                    add_progress(user, "launder", 1, user_id=ctx.author.id)
+                    check_achievements(user)
+                    self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
-            raw = (amount or "all").strip().lower()
-            try:
-                requested = dirty if raw in ("all", "max", "*") else require_positive_amount(raw.replace(",", ""))
-                outcome = calculate_launder_outcome(requested, dirty_balance=dirty, fee_rate=0.20)
-            except ValueError as error:
-                ctx.command.reset_cooldown(ctx)
-                return await ctx.send(f"❌ {error}.")
-
-            user["dirty_cash"] = dirty - outcome.dirty_spent
-            user["grams"] = max(0, int(user.get("grams", 0))) + outcome.clean_received
-            add_heat(user, 5)
-            stats = user.setdefault("stats", {})
-            stats["laundered"] = max(0, int(stats.get("laundered", 0))) + outcome.dirty_spent
-            add_progress(user, "launder", 1, user_id=ctx.author.id)
-            check_achievements(user)
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
-
+        if launder_error:
+            return await ctx.send(launder_error)
         embed = discord.Embed(
             title="🧼 Money Laundered",
             description=f"You cleaned **${outcome.dirty_spent:,}** dirty cash.",
