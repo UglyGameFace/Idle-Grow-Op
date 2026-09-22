@@ -64,3 +64,29 @@ def test_private_sesh_cleanup_contains_detached_task_failures():
         await cog._private_room_cleanup(key, 456, 0)
 
     asyncio.run(scenario())
+
+
+def test_profile_reconciliation_retries_only_failed_guilds_on_later_ready():
+    async def scenario():
+        guild_one = SimpleNamespace(id=1)
+        guild_two = SimpleNamespace(id=2)
+        cog = ProfileSignatures(SimpleNamespace(guilds=[guild_one, guild_two]))
+        calls = []
+        fail_first = {1: True}
+
+        async def reconcile(guild):
+            calls.append(guild.id)
+            if guild.id == 1 and fail_first[1]:
+                fail_first[1] = False
+                raise RuntimeError("temporary reconcile failure")
+
+        cog.reconcile_guild = reconcile
+
+        await cog.on_ready()
+        assert cog._reconciled_guild_ids == {2}
+
+        await cog.on_ready()
+        assert cog._reconciled_guild_ids == {1, 2}
+        assert calls == [1, 2, 1]
+
+    asyncio.run(scenario())
