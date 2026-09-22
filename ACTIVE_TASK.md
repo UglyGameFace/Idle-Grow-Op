@@ -81,6 +81,28 @@ Cleanup:
 - Final diff contains no unrelated changes, secrets, temporary scripts, generated junk, conflict artifacts, or abandoned compatibility layers.
 - Exact final head receives CI and deployment/runtime validation.
 
+## Phase 2 Checkpoint: Persistence Flush Correctness
+Validated on exact head 6075976ec969da74b2d3e04389597442386ed742 with CI run 693 successful.
+
+Root cause:
+- ScopedRecordStore.flush() snapshotted dirty records, awaited backend I/O, then blindly cleared every snapshotted dirty key.
+- A newer mutation to the same cached record during that await could call mark_dirty(), but because the key was already in the dirty set, the older flush later removed the only dirty marker.
+- The newer in-memory state could therefore remain unsaved indefinitely until another mutation happened to mark it dirty again.
+
+Completed:
+- Added per-cache-record mutation versions.
+- Every dirty mark advances the record version.
+- Flush captures the version alongside each saved snapshot.
+- A successful older write clears a dirty key only when its version is unchanged.
+- Failed writes preserve dirty state exactly as before.
+- Eviction cleans the associated version state.
+- Added a deterministic blocked-backend concurrency regression proving v1 can save while v2 remains dirty and is persisted by the next flush.
+
+Cleanup:
+- No second persistence implementation or network-wide gameplay lock was added.
+- Existing flush serialization remains authoritative.
+- Change is limited to persistence_store.py and its focused tests.
+
 ## Cleanup / Conflict Review
 Pending. Every affected subsystem will be checked after its behavioral audit for obsolete, duplicate, conflicting, partial, temporary, and superseded logic.
 
@@ -104,4 +126,4 @@ Pending. Every affected subsystem will be checked after its behavioral audit for
 - No open PR at audit start.
 
 ## Next Step
-Audit persistence and legacy compatibility ownership end-to-end: identify which migration/compatibility paths are runtime-authoritative, which are one-time operational tooling, and whether any duplicate or superseded save logic still affects production.
+Finish persistence/legacy ownership review: verify migration-tool history and runtime references, determine which compatibility paths must remain, then inspect process-lifetime cache growth and cross-record save semantics before removing any legacy artifacts.
