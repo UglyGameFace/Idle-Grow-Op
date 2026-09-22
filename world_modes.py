@@ -24,7 +24,7 @@ from world_mode_contracts import (
     VALID_POLICIES,
     WORLD_MODE_CONFIG_KEY,
     legacy_world_mode_config,
-    new_world_mode_config,
+    new_world_mode_config as new_world_mode_config,
 )
 
 
@@ -393,7 +393,6 @@ async def world_mode_status(database, guild_id: int) -> str:
     world = await database.get_world(int(guild_id))
     config = normalize_world_mode_config(world)
     policy = config["policy"]
-    label = POLICY_LABELS[policy]
     if policy == POLICY_SERVER and config.get("legacy_compatibility"):
         return "🟡 **Current Server World** — compatibility mode preserving existing local multiplayer"
     if policy == POLICY_SOLO:
