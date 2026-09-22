@@ -238,7 +238,7 @@ class Lab(commands.Cog):
         summary = "\n".join(f"• **{qty}g {name.title()}**" for name, qty in collected.items())
         await ctx.send(f"📦 **Lab collection complete:**\n{summary}")
 
-    @commands.command(name="conc")
+    @commands.hybrid_command(name="conc")
     async def conc(self, ctx, user_target: discord.Member = None):
         guild_id = require_guild_id(ctx)
         target = user_target or ctx.author
