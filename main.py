@@ -101,18 +101,18 @@ async def sync_global_commands(
         if not synced_names:
             raise RuntimeError("Discord returned an empty global command set; refusing startup")
 
-        missing_remote = REQUIRED_PUBLIC_COMMANDS - synced_names
-        if missing_remote:
+        missing_remote = local_names - synced_names
+        unexpected_remote = synced_names - local_names
+        if missing_remote or unexpected_remote:
+            detail = []
+            if missing_remote:
+                detail.append("missing: " + ", ".join(sorted(missing_remote)))
+            if unexpected_remote:
+                detail.append("unexpected: " + ", ".join(sorted(unexpected_remote)))
             raise RuntimeError(
-                "Discord sync omitted required public commands: "
-                + ", ".join(sorted(missing_remote))
-            )
-
-        stale_remote = STALE_PUBLIC_COMMANDS & synced_names
-        if stale_remote:
-            raise RuntimeError(
-                "Discord sync retained stale commands: "
-                + ", ".join(sorted(stale_remote))
+                "Discord sync did not publish the complete local command tree ("
+                + "; ".join(detail)
+                + ")"
             )
 
         logger.info(
