@@ -12,6 +12,21 @@ from scoped_database import ScopedDatabaseManager
 
 ROOT = Path(__file__).resolve().parents[1]
 
+CONSOLIDATED_GAMEPLAY_COMMANDS = {
+    "heist",
+    "launder",
+    "heat",
+    "heiststats",
+    "topheists",
+    "heistset",
+    "sellconc",
+    "auction",
+    "bid",
+    "conc",
+    "crew",
+    "district",
+}
+
 
 class FakeTree:
     def __init__(self, commands, *, sync_effects=None):
@@ -158,6 +173,7 @@ def test_complete_extension_tree_contains_public_entry_points_and_no_stale_sesh_
     names = asyncio.run(_loaded_command_names())
 
     assert main.REQUIRED_PUBLIC_COMMANDS <= names
+    assert CONSOLIDATED_GAMEPLAY_COMMANDS <= names
     assert "sesh_setup" not in names
     assert len(names) > len(main.REQUIRED_PUBLIC_COMMANDS)
 
