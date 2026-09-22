@@ -40,3 +40,23 @@ def test_ai_and_sesh_own_their_subsystem_config_keys():
     assert 'AI_ENABLED_KEY = "enabled"' not in setup
     assert 'SESH_CONFIG_KEY = "sesh_config"' not in setup
     assert 'SESH_ENABLED_KEY = "enabled"' not in setup
+
+
+def test_world_mode_contract_owns_persistence_identifiers():
+    contract = source("world_mode_contracts.py")
+    runtime = source("world_modes.py")
+
+    assert 'OPEN_WORLD_SCOPE_ID = 1' in contract
+    assert 'WORLD_MODE_CONFIG_KEY = "world_mode_config"' in contract
+    assert 'PLAYER_MODE_SELECTION_KEY = "world_mode_selection"' in contract
+
+    assert 'OPEN_WORLD_SCOPE_ID = 1' not in runtime
+    assert 'WORLD_MODE_CONFIG_KEY = "world_mode_config"' not in runtime
+    assert 'PLAYER_MODE_SELECTION_KEY = "world_mode_selection"' not in runtime
+
+
+def test_setup_consumes_profile_signature_contract_directly():
+    setup = source("setup.py")
+
+    assert "from profile_signature_contracts import (" in setup
+    assert "from profile_signatures import (" not in setup
