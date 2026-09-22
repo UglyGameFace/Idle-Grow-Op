@@ -5,6 +5,7 @@ import pytest
 
 from persistence_scope import global_account_key, guild_profile_key, guild_world_key
 from supabase_scoped_backend import (
+    ATOMIC_SAVE_RPC,
     REQUIRED_SCHEMA_VERSION,
     SupabaseSchemaError,
     SupabaseScopedBackend,
@@ -49,16 +50,34 @@ class Query:
         return Response(deepcopy(data or []))
 
 
+class RpcQuery:
+    def __init__(self, client, name, params):
+        self.client = client
+        self.name = name
+        self.params = deepcopy(params)
+
+    def execute(self):
+        if self.name in self.client.fail_rpcs:
+            raise RuntimeError(f"missing rpc: {self.name}")
+        self.client.rpc_calls.append((self.name, deepcopy(self.params)))
+        return Response(None)
+
+
 class FakeClient:
     def __init__(self):
         self.records = {}
         self.loads = []
         self.selects = []
         self.upserts = []
+        self.rpc_calls = []
         self.fail_tables = set()
+        self.fail_rpcs = set()
 
     def table(self, table_name):
         return Query(self, table_name)
+
+    def rpc(self, name, params):
+        return RpcQuery(self, name, params)
 
 
 def run(coro):
@@ -85,6 +104,16 @@ def test_schema_verification_requires_recorded_migration_and_all_tables():
         "guild_profiles",
         "guild_worlds",
     ]
+
+
+def test_schema_verification_rejects_missing_atomic_save_rpc():
+    client = FakeClient()
+    install_schema_version(client)
+    client.fail_rpcs.add(ATOMIC_SAVE_RPC)
+    backend = SupabaseScopedBackend(client)
+
+    with pytest.raises(SupabaseSchemaError, match="Required Supabase RPC is unavailable"):
+        run(backend.verify_schema())
 
 
 def test_schema_verification_rejects_missing_migration():
@@ -124,7 +153,7 @@ def test_missing_record_returns_none():
     assert run(backend.load(guild_world_key(100))) is None
 
 
-def test_save_many_groups_records_by_table():
+def test_save_many_uses_one_atomic_rpc_for_all_scoped_tables():
     client = FakeClient()
     backend = SupabaseScopedBackend(client)
     account = global_account_key(200)
@@ -143,16 +172,24 @@ def test_save_many_groups_records_by_table():
         )
     )
 
-    by_table = {table: payload for table, payload in client.upserts}
-    assert by_table["global_accounts"] == [
-        {"user_id": 200, "data": {"collection": []}}
-    ]
-    assert by_table["guild_profiles"] == [
-        {"guild_id": 100, "user_id": 200, "data": {"grams": 500}},
-        {"guild_id": 101, "user_id": 200, "data": {"grams": 750}},
-    ]
-    assert by_table["guild_worlds"] == [
-        {"guild_id": 100, "data": {"weather": "Rainy"}}
+    assert client.upserts == []
+    assert client.rpc_calls == []
+    assert client.rpc_calls == [
+        (
+            ATOMIC_SAVE_RPC,
+            {
+                "p_global_accounts": [
+                    {"user_id": 200, "data": {"collection": []}}
+                ],
+                "p_guild_profiles": [
+                    {"guild_id": 100, "user_id": 200, "data": {"grams": 500}},
+                    {"guild_id": 101, "user_id": 200, "data": {"grams": 750}},
+                ],
+                "p_guild_worlds": [
+                    {"guild_id": 100, "data": {"weather": "Rainy"}}
+                ],
+            },
+        )
     ]
 
 
