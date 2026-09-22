@@ -194,9 +194,6 @@ class Quick(commands.Cog):
                         {
                             "strain": strain,
                             "planted_at": now,
-                            "last_watered": now,
-                            "water_count": 1,
-                            "quality": 1.0,
                         }
                     )
                     planted.append(strain)
