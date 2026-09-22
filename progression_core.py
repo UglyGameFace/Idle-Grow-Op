@@ -206,7 +206,12 @@ def check_achievements(profile: dict) -> list[dict]:
     return unlocked
 
 
-def claim_daily(profile: dict, *, user_id: int | None = None) -> dict:
+def claim_daily(
+    profile: dict,
+    *,
+    user_id: int | None = None,
+    reward_multiplier: float = 1.0,
+) -> dict:
     ensure_progression(profile)
     today = _today()
     if profile.get("last_daily_claim") == today:
@@ -228,8 +233,9 @@ def claim_daily(profile: dict, *, user_id: int | None = None) -> dict:
     level = max(1, _integer(profile.get("level"), 1))
     streak = max(1, _integer(profile.get("daily_streak"), 1))
     multiplier = 1.0 + min(1.0, streak / 30.0) * 0.60
-    cash = int((400 + level * 45) * multiplier)
-    xp = int((80 + level * 8) * multiplier)
+    reward_multiplier = max(0.0, float(reward_multiplier))
+    cash = int((400 + level * 45) * multiplier * reward_multiplier)
+    xp = int((80 + level * 8) * multiplier * reward_multiplier)
     profile["grams"] = _integer(profile.get("grams")) + cash
     credit_xp(profile, xp)
     stats = profile.setdefault("stats", {})
