@@ -238,39 +238,49 @@ class Economy(commands.Cog):
             district_multiplier = max(1.0, float(district.get("multiplier", 1.10)))
         sold_log = []
         total_earnings = 0
+        sale_error = None
         async with self.bot.db.lock:
             stash = user.setdefault("flower_stash", {})
             if amount.lower() == "all":
                 sale_items = [(name, max(0, int(qty))) for name, qty in list(stash.items()) if int(qty) > 0]
                 if not sale_items:
-                    return await ctx.send("🎒 Your flower stash is empty.")
+                    sale_error = "🎒 Your flower stash is empty."
             else:
                 if not strain_name:
-                    return await ctx.send("❌ Usage: `/sell amount:<amount> strain_name:<strain>`")
-                try:
-                    quantity = require_positive_amount(amount)
-                except ValueError:
-                    return await ctx.send("❌ Amount must be a positive whole number.")
-                clean_name = strain_name.lower().strip()
-                if max(0, int(stash.get(clean_name, 0))) < quantity:
-                    return await ctx.send(f"❌ You don't have {quantity}g of {clean_name}.")
-                sale_items = [(clean_name, quantity)]
-            for name, quantity in sale_items:
-                base_value = max(0, int(GROWTH_CYCLES.get(name, {"base_value": 10}).get("base_value", 10)))
-                unit_price = max(
-                    0,
-                    int(base_value * market_multiplier * district_multiplier),
-                )
-                total_earnings += unit_price * quantity
-                stash[name] = max(0, int(stash.get(name, 0))) - quantity
-                if stash[name] <= 0:
-                    stash.pop(name, None)
-                sold_log.append(f"{quantity}g {name.title()}")
-            user["grams"] = max(0, int(user.get("grams", 0))) + total_earnings
-            stats = user.setdefault("stats", {})
-            stats["total_earned"] = max(0, int(stats.get("total_earned", 0))) + total_earnings
-            check_achievements(user)
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                    sale_error = "❌ Usage: `/sell amount:<amount> strain_name:<strain>`"
+                    sale_items = []
+                else:
+                    try:
+                        quantity = require_positive_amount(amount)
+                    except ValueError:
+                        sale_error = "❌ Amount must be a positive whole number."
+                        sale_items = []
+                    else:
+                        clean_name = strain_name.lower().strip()
+                        if max(0, int(stash.get(clean_name, 0))) < quantity:
+                            sale_error = f"❌ You don\'t have {quantity}g of {clean_name}."
+                            sale_items = []
+                        else:
+                            sale_items = [(clean_name, quantity)]
+            if sale_error is None:
+                for name, quantity in sale_items:
+                    base_value = max(0, int(GROWTH_CYCLES.get(name, {"base_value": 10}).get("base_value", 10)))
+                    unit_price = max(
+                        0,
+                        int(base_value * market_multiplier * district_multiplier),
+                    )
+                    total_earnings += unit_price * quantity
+                    stash[name] = max(0, int(stash.get(name, 0))) - quantity
+                    if stash[name] <= 0:
+                        stash.pop(name, None)
+                    sold_log.append(f"{quantity}g {name.title()}")
+                user["grams"] = max(0, int(user.get("grams", 0))) + total_earnings
+                stats = user.setdefault("stats", {})
+                stats["total_earned"] = max(0, int(stats.get("total_earned", 0))) + total_earnings
+                check_achievements(user)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+        if sale_error:
+            return await ctx.send(sale_error)
         embed = discord.Embed(title="🤝 Market Sale", color=discord.Color.green())
         embed.add_field(name="Sold", value="\n".join(sold_log), inline=False)
         embed.add_field(
@@ -297,39 +307,49 @@ class Economy(commands.Cog):
             district_multiplier = max(1.0, float(district.get("multiplier", 1.10)))
         sold_log = []
         total_earnings = 0
+        sale_error = None
         async with self.bot.db.lock:
             stash = user.setdefault("concentrates", {})
             if amount.lower() == "all":
                 sale_items = [(name, max(0, int(qty))) for name, qty in list(stash.items()) if int(qty) > 0]
                 if not sale_items:
-                    return await ctx.send("🍯 No concentrates to sell.")
+                    sale_error = "🍯 No concentrates to sell."
             else:
                 if not type_name:
-                    return await ctx.send("❌ Usage: `/sellconc amount:<amount> type_name:<type>`")
-                try:
-                    quantity = require_positive_amount(amount)
-                except ValueError:
-                    return await ctx.send("❌ Amount must be a positive whole number.")
-                clean_name = type_name.lower().strip()
-                if max(0, int(stash.get(clean_name, 0))) < quantity:
-                    return await ctx.send("❌ Not enough.")
-                sale_items = [(clean_name, quantity)]
-            for concentrate_type, quantity in sale_items:
-                multiplier = max(0.0, float(CONCENTRATE_TYPES.get(concentrate_type, {}).get("value_mult", 2.0)))
-                unit_price = max(
-                    0,
-                    int(50 * multiplier * market_multiplier * district_multiplier),
-                )
-                total_earnings += unit_price * quantity
-                stash[concentrate_type] = max(0, int(stash.get(concentrate_type, 0))) - quantity
-                if stash[concentrate_type] <= 0:
-                    stash.pop(concentrate_type, None)
-                sold_log.append(f"{quantity}g {concentrate_type.title()}")
-            user["grams"] = max(0, int(user.get("grams", 0))) + total_earnings
-            stats = user.setdefault("stats", {})
-            stats["total_earned"] = max(0, int(stats.get("total_earned", 0))) + total_earnings
-            check_achievements(user)
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                    sale_error = "❌ Usage: `/sellconc amount:<amount> type_name:<type>`"
+                    sale_items = []
+                else:
+                    try:
+                        quantity = require_positive_amount(amount)
+                    except ValueError:
+                        sale_error = "❌ Amount must be a positive whole number."
+                        sale_items = []
+                    else:
+                        clean_name = type_name.lower().strip()
+                        if max(0, int(stash.get(clean_name, 0))) < quantity:
+                            sale_error = "❌ Not enough."
+                            sale_items = []
+                        else:
+                            sale_items = [(clean_name, quantity)]
+            if sale_error is None:
+                for concentrate_type, quantity in sale_items:
+                    multiplier = max(0.0, float(CONCENTRATE_TYPES.get(concentrate_type, {}).get("value_mult", 2.0)))
+                    unit_price = max(
+                        0,
+                        int(50 * multiplier * market_multiplier * district_multiplier),
+                    )
+                    total_earnings += unit_price * quantity
+                    stash[concentrate_type] = max(0, int(stash.get(concentrate_type, 0))) - quantity
+                    if stash[concentrate_type] <= 0:
+                        stash.pop(concentrate_type, None)
+                    sold_log.append(f"{quantity}g {concentrate_type.title()}")
+                user["grams"] = max(0, int(user.get("grams", 0))) + total_earnings
+                stats = user.setdefault("stats", {})
+                stats["total_earned"] = max(0, int(stats.get("total_earned", 0))) + total_earnings
+                check_achievements(user)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+        if sale_error:
+            return await ctx.send(sale_error)
         await ctx.send(f"🍯 Sold **{', '.join(sold_log)}** for **${total_earnings:,}**.")
 
     async def _settle_expired_auctions(self, scope_id: int, world=None):
