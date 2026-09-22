@@ -247,12 +247,11 @@ class Economy(commands.Cog):
                 if max(0, int(stash.get(clean_name, 0))) < quantity:
                     return await ctx.send(f"❌ You don't have {quantity}g of {clean_name}.")
                 sale_items = [(clean_name, quantity)]
-            skill_multiplier = 1.0 + max(0, int(user.get("skills", {}).get("dealmaker", 0))) * 0.05
             for name, quantity in sale_items:
                 base_value = max(0, int(GROWTH_CYCLES.get(name, {"base_value": 10}).get("base_value", 10)))
                 unit_price = max(
                     0,
-                    int(base_value * market_multiplier * district_multiplier * skill_multiplier),
+                    int(base_value * market_multiplier * district_multiplier),
                 )
                 total_earnings += unit_price * quantity
                 stash[name] = max(0, int(stash.get(name, 0))) - quantity
