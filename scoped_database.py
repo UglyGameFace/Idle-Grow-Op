@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import MutableMapping
 from typing import Any
 
+from guild_config import WORLD_SETTINGS_KEY
 from persistence_scope import (
     RecordKey,
     global_account_key,
@@ -96,7 +97,7 @@ def make_default_world() -> dict[str, Any]:
         },
         "auctions": {},
         "auction_counter": 0,
-        "settings": {},
+        WORLD_SETTINGS_KEY: {},
         WORLD_MODE_CONFIG_KEY: new_world_mode_config(),
         SIGNATURE_CONFIG_KEY: default_signature_config(),
         SIGNATURE_STATE_KEY: default_signature_state(),
