@@ -42,9 +42,8 @@ def test_admin_uses_only_explicit_active_scope_profile_persistence():
     assert ".db.save(" not in source
 
 
-def test_wipe_resets_only_the_targets_selected_profile():
+def test_wipe_resets_only_gameplay_in_the_targets_selected_profile():
     source = (ROOT / "admin.py").read_text(encoding="utf-8")
 
-    assert "profile.clear()" in source
-    assert "profile.update(make_default_profile())" in source
+    assert "reset_gameplay_profile(profile)" in source
     assert "scope.label" in source
