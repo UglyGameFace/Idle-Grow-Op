@@ -417,25 +417,30 @@ class Economy(commands.Cog):
             return await ctx.send(str(exc))
         world = await self.bot.db.get_world(scope.scope_id)
         clean_item = item_name.lower().strip()
+        list_error = None
+        auction_id = None
         async with self.bot.db.lock:
             await self._settle_expired_auctions(scope.scope_id, world)
             if inv_get(user, clean_item) < 1 or not inv_take(user, clean_item, 1):
-                return await ctx.send(f"❌ You don't have **{clean_item}**.")
-            auctions = world.setdefault("auctions", {})
-            auction_id = str(int(world.get("auction_counter", 1000)) + 1)
-            world["auction_counter"] = int(auction_id)
-            auctions[auction_id] = {
-                "seller_id": ctx.author.id,
-                "seller_name": ctx.author.name,
-                "item_name": clean_item,
-                "start_price": valid_start,
-                "current_bid": valid_start,
-                "highest_bidder": None,
-                "buyout": valid_buyout,
-                "end_time": time.time() + 3600,
-            }
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
-            self.bot.db.mark_world_dirty(scope.scope_id)
+                list_error = f"❌ You don\'t have **{clean_item}**."
+            else:
+                auctions = world.setdefault("auctions", {})
+                auction_id = str(int(world.get("auction_counter", 1000)) + 1)
+                world["auction_counter"] = int(auction_id)
+                auctions[auction_id] = {
+                    "seller_id": ctx.author.id,
+                    "seller_name": ctx.author.name,
+                    "item_name": clean_item,
+                    "start_price": valid_start,
+                    "current_bid": valid_start,
+                    "highest_bidder": None,
+                    "buyout": valid_buyout,
+                    "end_time": time.time() + 3600,
+                }
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                self.bot.db.mark_world_dirty(scope.scope_id)
+        if list_error:
+            return await ctx.send(list_error)
         await ctx.send(f"🔨 **Listed!** {clean_item} for ${valid_start:,}. ID: `{auction_id}`")
 
     @commands.hybrid_command(name="bid")
@@ -446,43 +451,69 @@ class Economy(commands.Cog):
         except WorldModeDenied as exc:
             return await ctx.send(str(exc))
         world = await self.bot.db.get_world(scope.scope_id)
+        bid_error = None
+        bought_out = False
+        valid_bid = 0
         async with self.bot.db.lock:
             await self._settle_expired_auctions(scope.scope_id, world)
             auctions = world.setdefault("auctions", {})
             auction = auctions.get(auction_id)
             if auction is None:
-                return await ctx.send("❌ Invalid or expired Auction ID.")
-            if int(auction["seller_id"]) == ctx.author.id:
-                return await ctx.send("❌ You can't bid on your own item.")
-            buyout = max(0, int(auction.get("buyout", 0)))
-            requested = buyout if buyout and amount >= buyout else amount
-            previous_bidder_id = auction.get("highest_bidder")
-            try:
-                valid_bid = validate_bid_amount(
-                    requested,
-                    current_bid=auction["current_bid"],
-                    end_time=auction["end_time"],
-                    now=time.time(),
-                    allow_equal=previous_bidder_id is None,
-                )
-            except ValueError as exc:
-                return await ctx.send(f"❌ {exc}.")
-            current_bid = max(0, int(auction["current_bid"]))
-            bidder_balance = max(0, int(user.get("grams", 0)))
-            required_funds = valid_bid - current_bid if previous_bidder_id == ctx.author.id else valid_bid
-            if bidder_balance < required_funds:
-                return await ctx.send("💸 Insufficient funds.")
+                bid_error = "❌ Invalid or expired Auction ID."
+            elif int(auction["seller_id"]) == ctx.author.id:
+                bid_error = "❌ You can\'t bid on your own item."
+            else:
+                buyout = max(0, int(auction.get("buyout", 0)))
+                requested = buyout if buyout and amount >= buyout else amount
+                previous_bidder_id = auction.get("highest_bidder")
+                try:
+                    valid_bid = validate_bid_amount(
+                        requested,
+                        current_bid=auction["current_bid"],
+                        end_time=auction["end_time"],
+                        now=time.time(),
+                        allow_equal=previous_bidder_id is None,
+                    )
+                except ValueError as exc:
+                    bid_error = f"❌ {exc}."
 
-            previous_bidder = None
-            previous_id = None
-            if previous_bidder_id is not None and previous_bidder_id != ctx.author.id:
-                previous_id = int(previous_bidder_id)
-                previous_bidder = await self.bot.db.get_profile(scope.scope_id, previous_id)
+            if bid_error is None:
+                current_bid = max(0, int(auction["current_bid"]))
+                bidder_balance = max(0, int(user.get("grams", 0)))
+                required_funds = valid_bid - current_bid if previous_bidder_id == ctx.author.id else valid_bid
+                if bidder_balance < required_funds:
+                    bid_error = "💸 Insufficient funds."
 
-            bought_out = bool(buyout and valid_bid >= buyout)
-            seller = None
-            seller_id = None
-            if bought_out:
+            if bid_error is None:
+                previous_bidder = None
+                previous_id = None
+                if previous_bidder_id is not None and previous_bidder_id != ctx.author.id:
+                    previous_id = int(previous_bidder_id)
+                    previous_bidder = await self.bot.db.get_profile(scope.scope_id, previous_id)
+
+                bought_out = bool(buyout and valid_bid >= buyout)
+                seller = None
+                seller_id = None
+                if bought_out:
+                    seller_id = int(auction["seller_id"])
+                    seller = await self.bot.db.get_profile(scope.scope_id, seller_id)
+
+                user["grams"] = bidder_balance - required_funds
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                if previous_bidder is not None and previous_id is not None:
+                    previous_bidder["grams"] = max(0, int(previous_bidder.get("grams", 0))) + current_bid
+                    self.bot.db.mark_profile_dirty(scope.scope_id, previous_id)
+                auction["current_bid"] = valid_bid
+                auction["highest_bidder"] = ctx.author.id
+                if bought_out:
+                    inv_add(user, auction["item_name"], 1)
+                    seller["grams"] = max(0, int(seller.get("grams", 0))) + valid_bid
+                    self.bot.db.mark_profile_dirty(scope.scope_id, seller_id)
+                    del auctions[auction_id]
+                self.bot.db.mark_world_dirty(scope.scope_id)
+        if bid_error:
+            return await ctx.send(bid_error)
+        if bought_out:
                 seller_id = int(auction["seller_id"])
                 seller = await self.bot.db.get_profile(scope.scope_id, seller_id)
 
