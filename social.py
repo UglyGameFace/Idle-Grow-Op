@@ -106,7 +106,7 @@ class Social(commands.Cog):
         )
         await ctx.send(embed=embed)
 
-    @commands.group(invoke_without_command=True, aliases=["c"])
+    @commands.hybrid_group(invoke_without_command=True, aliases=["c"])
     async def crew(self, ctx):
         guild_id = require_guild_id(ctx)
         scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
@@ -116,12 +116,12 @@ class Social(commands.Cog):
             return await ctx.send(str(exc))
         await ctx.send(
             "ℹ️ **Crew Commands:**\n"
-            "`!crew create <name>`\n"
-            "`!crew join <id>`\n"
-            "`!crew info`\n"
-            "`!crew deposit <amount>`\n"
-            "`!crew war` (Turf War)\n"
-            "`!district` (Check control)"
+            "`/crew create name:<name>`\n"
+            "`/crew join crew_id:<id>`\n"
+            "`/crew info`\n"
+            "`/crew deposit amount:<amount>`\n"
+            "`/crew war` (Turf War)\n"
+            "`/district` (Check control)"
         )
 
     @crew.command(name="create")
@@ -321,7 +321,7 @@ class Social(commands.Cog):
         else:
             await ctx.send(f"🛡️ **Failed.** {defender['name']} held the district.")
 
-    @commands.command(name="district")
+    @commands.hybrid_command(name="district")
     async def district(self, ctx):
         guild_id = require_guild_id(ctx)
         scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
