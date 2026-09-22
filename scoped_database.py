@@ -61,7 +61,6 @@ def make_default_profile() -> dict[str, Any]:
         "level": 1,
         "prestige": 0,
         "achievements": [],
-        "skills": {},
         "crew_id": None,
         "stats": {},
         "created_at": 0,
