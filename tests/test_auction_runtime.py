@@ -117,3 +117,31 @@ def test_buyout_transfers_escrowed_value_and_item_exactly_once():
         assert "bought out" in ctx.sent[-1][0][0].lower()
 
     asyncio.run(scenario())
+
+
+def test_first_bid_can_match_starting_price_but_repeat_bid_must_increase():
+    async def scenario():
+        db = AuctionDatabase()
+        bot = SimpleNamespace(db=db)
+        cog = Economy(bot)
+        ctx = ContextStub()
+
+        async def resolved_profile(_ctx, user_id=None):
+            return scope(), db.profiles[42]
+
+        cog._profile = resolved_profile
+
+        await Economy.bid.callback(cog, ctx, auction_id="1001", amount=100)
+
+        auction = db.world["auctions"]["1001"]
+        assert db.profiles[42]["grams"] == 900
+        assert auction["highest_bidder"] == 42
+        assert auction["current_bid"] == 100
+
+        before_balance = db.profiles[42]["grams"]
+        await Economy.bid.callback(cog, ctx, auction_id="1001", amount=100)
+
+        assert db.profiles[42]["grams"] == before_balance
+        assert "higher than the current bid" in ctx.sent[-1][0][0]
+
+    asyncio.run(scenario())
