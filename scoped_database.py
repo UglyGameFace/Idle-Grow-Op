@@ -1,4 +1,5 @@
 import asyncio
+from copy import deepcopy
 from collections.abc import MutableMapping
 from typing import Any
 
@@ -10,7 +11,11 @@ from persistence_scope import (
     guild_world_key,
 )
 from persistence_store import FlushResult, ScopedRecordStore
-from world_mode_contracts import WORLD_MODE_CONFIG_KEY, new_world_mode_config
+from world_mode_contracts import (
+    PLAYER_MODE_SELECTION_KEY,
+    WORLD_MODE_CONFIG_KEY,
+    new_world_mode_config,
+)
 from profile_signature_contracts import (
     GUILD_PRIVACY_KEY,
     GLOBAL_PRIVACY_KEY,
@@ -81,6 +86,25 @@ def make_default_profile() -> dict[str, Any]:
         "last_daily": 0,
         "last_login": 0,
     }
+
+
+def reset_gameplay_profile(profile: MutableMapping[str, Any]) -> MutableMapping[str, Any]:
+    """Reset gameplay while preserving user control/privacy preferences."""
+    preserved: dict[str, Any] = {}
+    settings = profile.get("settings")
+    if isinstance(settings, dict):
+        preserved["settings"] = deepcopy(settings)
+    guild_privacy = profile.get(GUILD_PRIVACY_KEY)
+    if isinstance(guild_privacy, dict):
+        preserved[GUILD_PRIVACY_KEY] = deepcopy(guild_privacy)
+    mode_selection = profile.get(PLAYER_MODE_SELECTION_KEY)
+    if isinstance(mode_selection, dict):
+        preserved[PLAYER_MODE_SELECTION_KEY] = deepcopy(mode_selection)
+
+    profile.clear()
+    profile.update(make_default_profile())
+    profile.update(preserved)
+    return profile
 
 
 def make_default_world() -> dict[str, Any]:
