@@ -103,6 +103,26 @@ Cleanup:
 - Existing flush serialization remains authoritative.
 - Change is limited to persistence_store.py and its focused tests.
 
+## Phase 2 Checkpoint: Completed Legacy Migration Cleanup
+Validated on exact head e4371540643a443c37800fae21b98eaf1a4a5e1b with CI run 698 successful.
+
+Evidence:
+- Git history commit 64bc1404e14511acca32afd79b521d07ef5bc73b records the successful production migration: 39 legacy profiles copied, 39 scoped profiles verified, zero profile mismatches, scoped world present, zero world mismatches.
+- Runtime code has no references to legacy Supabase users/world tables.
+- The old tables are referenced only by the completed one-time migration tool.
+- world_modes.py legacy compatibility remains runtime-active and is covered by tests; it protects guilds whose stored world predates world_mode_config.
+
+Removed as completed scaffolding:
+- tools/migrate_legacy_global_data.py
+- .github/workflows/migrate-legacy-data.yml
+- tests/test_legacy_global_migration.py
+- tests/test_legacy_migration_workflow_contract.py
+
+Preserved:
+- production scoped migrations and schema verification
+- runtime legacy world-mode compatibility
+- legacy Supabase data itself; repository cleanup does not delete rollback data
+
 ## Cleanup / Conflict Review
 Pending. Every affected subsystem will be checked after its behavioral audit for obsolete, duplicate, conflicting, partial, temporary, and superseded logic.
 
@@ -126,4 +146,4 @@ Pending. Every affected subsystem will be checked after its behavioral audit for
 - No open PR at audit start.
 
 ## Next Step
-Finish persistence/legacy ownership review: verify migration-tool history and runtime references, determine which compatibility paths must remain, then inspect process-lifetime cache growth and cross-record save semantics before removing any legacy artifacts.
+Audit process-lifetime cache growth and cross-record save semantics. Do not add eviction until mutable-reference lifetime and mutation safety are proven.
