@@ -5,6 +5,7 @@ import time
 import discord
 from discord.ext import commands, tasks
 
+from guild_config import ANNOUNCEMENT_CHANNEL_KEY, GAME_CHANNEL_KEY, WORLD_SETTINGS_KEY
 from notification_preferences import (
     ANNOUNCEMENT_ROLE_KEY,
     NOTIFICATION_CATEGORIES_KEY,
@@ -22,8 +23,6 @@ from world_modes import (
 
 
 NOTIFICATION_CANDIDATE_LIMIT = 500
-ANNOUNCEMENT_CHANNEL_KEY = "announcement_channel_id"
-GAME_CHANNEL_KEY = "game_channel_id"
 MAJOR_MARKET_CHANGE = 0.20
 MARKET_CHANGE_EPSILON = 1e-9
 
@@ -109,8 +108,8 @@ class Tasks(commands.Cog):
         async with self.bot.db.lock:
             local_world = await self.bot.db.get_world(guild.id)
             shared_world = await self.bot.db.get_world(OPEN_WORLD_SCOPE_ID)
-            local_settings = local_world.get("settings", {}) if isinstance(local_world, dict) else {}
-            shared_settings = shared_world.setdefault("settings", {})
+            local_settings = local_world.get(WORLD_SETTINGS_KEY, {}) if isinstance(local_world, dict) else {}
+            shared_settings = shared_world.setdefault(WORLD_SETTINGS_KEY, {})
             changed = False
             for key in (ANNOUNCEMENT_CHANNEL_KEY, GAME_CHANNEL_KEY, ANNOUNCEMENT_ROLE_KEY):
                 value = local_settings.get(key)
@@ -247,7 +246,7 @@ class Tasks(commands.Cog):
             print(f"❌ Announcement configuration lookup failed for {guild.id}: {exc}")
             return None
 
-        settings = world.get("settings", {})
+        settings = world.get(WORLD_SETTINGS_KEY, {})
         announcement_id = settings.get(ANNOUNCEMENT_CHANNEL_KEY)
         channel_id = announcement_id or settings.get(GAME_CHANNEL_KEY)
         if not channel_id:
@@ -272,7 +271,7 @@ class Tasks(commands.Cog):
         role_id = None
         try:
             world = await self.bot.db.get_world(guild.id)
-            role_id = world.get("settings", {}).get(ANNOUNCEMENT_ROLE_KEY)
+            role_id = world.get(WORLD_SETTINGS_KEY, {}).get(ANNOUNCEMENT_ROLE_KEY)
         except Exception as exc:
             print(f"❌ Announcement role lookup failed for scope {guild.id}: {exc}")
 
