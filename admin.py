@@ -7,7 +7,7 @@ from discord.ext import commands
 
 from economy_integrity import require_positive_amount
 from persistence_context import require_guild_id
-from scoped_database import make_default_profile
+from scoped_database import reset_gameplay_profile
 from utils import inv_add
 from world_modes import resolve_game_scope
 
@@ -108,7 +108,7 @@ class Admin(commands.Cog):
 
     @commands.command(name="wipeuser", hidden=True)
     async def wipeuser(self, ctx, target: discord.User):
-        """Reset a user's profile in the current server only."""
+        """Reset gameplay in the user's active save while preserving preferences."""
         guild_id = require_guild_id(ctx)
         scope = await resolve_game_scope(self.bot.db, guild_id, target.id)
         await ctx.send(
@@ -129,8 +129,7 @@ class Admin(commands.Cog):
 
         async with self.bot.db.lock:
             profile = await self.bot.db.get_profile(scope.scope_id, target.id)
-            profile.clear()
-            profile.update(make_default_profile())
+            reset_gameplay_profile(profile)
             self.bot.db.mark_profile_dirty(scope.scope_id, target.id)
         await ctx.send(f"💀 **Wiped {target.name}'s {scope.label} profile.**")
 
