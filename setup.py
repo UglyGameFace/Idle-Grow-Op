@@ -11,7 +11,7 @@ from guild_config import (
     ANNOUNCEMENT_CHANNEL_KEY,
     ERROR_LOG_CHANNEL_KEY,
     GAME_CHANNEL_KEY,
-    WORLD_WORLD_SETTINGS_KEY,
+    WORLD_SETTINGS_KEY,
 )
 from notification_preferences import (
     ANNOUNCEMENT_ROLE_KEY,
