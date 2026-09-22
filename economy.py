@@ -230,7 +230,7 @@ class Economy(commands.Cog):
                     return await ctx.send("🎒 Your flower stash is empty.")
             else:
                 if not strain_name:
-                    return await ctx.send("❌ Usage: `!sell <amount> <strain>`")
+                    return await ctx.send("❌ Usage: `/sell amount:<amount> strain_name:<strain>`")
                 try:
                     quantity = require_positive_amount(amount)
                 except ValueError:
@@ -264,7 +264,7 @@ class Economy(commands.Cog):
         )
         await ctx.send(embed=embed)
 
-    @commands.command(name="sellconc")
+    @commands.hybrid_command(name="sellconc")
     async def sellconc(self, ctx, amount: str = "all", *, type_name: str = None):
         scope, user = await self._profile(ctx)
         if await jail_guard(ctx, user, "sell"):
@@ -289,7 +289,7 @@ class Economy(commands.Cog):
                     return await ctx.send("🍯 No concentrates to sell.")
             else:
                 if not type_name:
-                    return await ctx.send("❌ Usage: `!sellconc <amount> <type>`")
+                    return await ctx.send("❌ Usage: `/sellconc amount:<amount> type_name:<type>`")
                 try:
                     quantity = require_positive_amount(amount)
                 except ValueError:
@@ -341,7 +341,7 @@ class Economy(commands.Cog):
             self.bot.db.mark_world_dirty(scope_id)
         return changed
 
-    @commands.group(invoke_without_command=True)
+    @commands.hybrid_group(invoke_without_command=True)
     async def auction(self, ctx):
         scope, world = await self._world(ctx)
         try:
@@ -364,7 +364,7 @@ class Economy(commands.Cog):
                 f"Buyout: {f'${buyout:,}' if buyout else 'N/A'}\nEnds in: {minutes}m {seconds}s"
             )
             embed.add_field(name=f"ID: {auction_id} | {auction['item_name']}", value=description, inline=True)
-        embed.set_footer(text="Use !bid <id> <amount> or !auction list <item> <price> <buyout>")
+        embed.set_footer(text="Use /bid auction_id:<id> amount:<amount> or /auction list item_name:<item> start_price:<price> buyout:<buyout>")
         await ctx.send(embed=embed)
 
     @auction.command(name="list")
@@ -401,7 +401,7 @@ class Economy(commands.Cog):
             self.bot.db.mark_world_dirty(scope.scope_id)
         await ctx.send(f"🔨 **Listed!** {clean_item} for ${valid_start:,}. ID: `{auction_id}`")
 
-    @commands.command(name="bid")
+    @commands.hybrid_command(name="bid")
     async def bid(self, ctx, auction_id: str, amount: int):
         scope, user = await self._profile(ctx)
         try:
