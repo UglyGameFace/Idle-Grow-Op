@@ -10,8 +10,9 @@ from profile_signature_contracts import (
     default_signature_config,
     default_signature_state,
 )
+from guild_config import WORLD_SETTINGS_KEY
 from scoped_database import make_default_account, make_default_profile, make_default_world
-from world_mode_contracts import WORLD_MODE_CONFIG_KEY, new_world_mode_config
+from world_mode_contracts import OPEN_WORLD_SCOPE_ID, WORLD_MODE_CONFIG_KEY, new_world_mode_config
 
 
 def test_database_profile_signature_defaults_use_canonical_builders():
@@ -36,3 +37,18 @@ def test_removed_durability_state_is_not_created_for_new_profiles():
     profile = make_default_profile()
 
     assert "item_wear" not in profile
+
+
+def test_database_world_settings_use_canonical_key():
+    world = make_default_world()
+
+    assert WORLD_SETTINGS_KEY in world
+    assert world[WORLD_SETTINGS_KEY] == {}
+
+
+def test_open_world_scope_is_owned_by_pure_world_mode_contract():
+    import world_modes
+    import world_mode_contracts
+
+    assert OPEN_WORLD_SCOPE_ID == 1
+    assert world_modes.OPEN_WORLD_SCOPE_ID == world_mode_contracts.OPEN_WORLD_SCOPE_ID
