@@ -65,4 +65,6 @@ def test_sesh_config_is_guild_world_scoped_and_dirty_tracked():
     assert 'world.setdefault(SESH_CONFIG_KEY, {})' in SETUP_SOURCE
     assert 'self.bot.db.mark_world_dirty(int(guild_id))' in SETUP_SOURCE
     assert 'await self.bot.db.get_world(int(guild_id))' in SETUP_SOURCE
-    assert 'world.setdefault(SESH_CONFIG_KEY, {})' in SESH_SOURCE
+    assert 'raw = world.get(SESH_CONFIG_KEY)' in SESH_SOURCE
+    assert 'return world, dict(raw) if isinstance(raw, dict) else {}' in SESH_SOURCE
+    assert 'config = world.setdefault(SESH_CONFIG_KEY, {})' in SESH_SOURCE
