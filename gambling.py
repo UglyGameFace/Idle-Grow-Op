@@ -4,11 +4,18 @@ import asyncio
 import random
 import re
 import secrets
+import time
 from typing import Any
 
 import discord
 from discord.ext import commands
 
+from casino_contracts import (
+    CASINO_ESCROW_KEY,
+    blackjack_escrow_amount,
+    make_blackjack_escrow,
+    reconcile_expired_casino_escrow,
+)
 from persistence_context import GuildContextRequired, require_guild_id
 from progression_core import add_progress, check_achievements
 from utils import GAMBLE_CONFIG, SLOTS_PAYOUTS, SLOTS_SYMBOLS, jail_guard
@@ -176,26 +183,37 @@ class BlackjackView(discord.ui.View):
         async with self._settle_lock:
             if self.ended:
                 return
-            self.ended = True
+
+            title, color = (
+                "🃏 Blackjack escrow already reconciled",
+                discord.Color.gold(),
+            )
             async with self.cog.bot.db.lock:
                 profile = await self.cog.bot.db.get_profile(self.scope_id, self.user_id)
-                if timeout_refund:
-                    profile["grams"] = int(profile.get("grams", 0) or 0) + self.bet
-                    title, color = "🃏 Blackjack expired — wager refunded", discord.Color.gold()
-                elif result == "win":
-                    profile["grams"] = int(profile.get("grams", 0) or 0) + payout
-                    update_gamble_stats(profile, "blackjack", payout - self.bet, self.bet)
-                    title, color = f"🃏 Won {_fmt_cash(payout)}", discord.Color.green()
-                elif result == "tie":
-                    profile["grams"] = int(profile.get("grams", 0) or 0) + self.bet
-                    update_gamble_stats(profile, "blackjack", 0, self.bet)
-                    title, color = "🃏 Push — wager returned", discord.Color.gold()
-                else:
-                    update_gamble_stats(profile, "blackjack", -self.bet, self.bet)
-                    title, color = f"🃏 Lost {_fmt_cash(self.bet)}", discord.Color.red()
-                if not timeout_refund:
-                    _record_game_progress(profile, self.user_id, won=result == "win")
-                self.cog.bot.db.mark_profile_dirty(self.scope_id, self.user_id)
+                if reconcile_expired_casino_escrow(profile, now=time.time()):
+                    self.cog.bot.db.mark_profile_dirty(self.scope_id, self.user_id)
+
+                if blackjack_escrow_amount(profile) == self.bet:
+                    profile.pop(CASINO_ESCROW_KEY, None)
+                    if timeout_refund:
+                        profile["grams"] = int(profile.get("grams", 0) or 0) + self.bet
+                        title, color = "🃏 Blackjack expired — wager refunded", discord.Color.gold()
+                    elif result == "win":
+                        profile["grams"] = int(profile.get("grams", 0) or 0) + payout
+                        update_gamble_stats(profile, "blackjack", payout - self.bet, self.bet)
+                        title, color = f"🃏 Won {_fmt_cash(payout)}", discord.Color.green()
+                    elif result == "tie":
+                        profile["grams"] = int(profile.get("grams", 0) or 0) + self.bet
+                        update_gamble_stats(profile, "blackjack", 0, self.bet)
+                        title, color = "🃏 Push — wager returned", discord.Color.gold()
+                    else:
+                        update_gamble_stats(profile, "blackjack", -self.bet, self.bet)
+                        title, color = f"🃏 Lost {_fmt_cash(self.bet)}", discord.Color.red()
+                    if not timeout_refund:
+                        _record_game_progress(profile, self.user_id, won=result == "win")
+                    self.cog.bot.db.mark_profile_dirty(self.scope_id, self.user_id)
+
+            self.ended = True
             self.clear_items()
             embed = discord.Embed(title=title, color=color)
             embed.add_field(name="Your Hand", value=f"{self.cards(self.player)}\nValue: **{self.value(self.player)}**")
@@ -442,30 +460,62 @@ class Gambling(commands.Cog):
         blackjack_error=None
         wager=None
         async with self.bot.db.lock:
-            wager=_parse_bet(bet,int(profile.get("grams",0) or 0),min_bet=int(_cfg("blackjack_min_bet",200)))
-            if wager is None:
-                blackjack_error="❌ Invalid bet or insufficient funds."
+            if reconcile_expired_casino_escrow(profile, now=time.time()):
+                self.bot.db.mark_profile_dirty(scope.scope_id,ctx.author.id)
+            if CASINO_ESCROW_KEY in profile:
+                blackjack_error="❌ You already have an active Blackjack hand. Finish it or let it expire."
             else:
-                profile["grams"]-=wager; self.bot.db.mark_profile_dirty(scope.scope_id,ctx.author.id)
+                wager=_parse_bet(bet,int(profile.get("grams",0) or 0),min_bet=int(_cfg("blackjack_min_bet",200)))
+                if wager is None:
+                    blackjack_error="❌ Invalid bet or insufficient funds."
+                else:
+                    profile["grams"]-=wager
+                    profile[CASINO_ESCROW_KEY]=make_blackjack_escrow(wager,now=time.time())
+                    self.bot.db.mark_profile_dirty(scope.scope_id,ctx.author.id)
         if blackjack_error: return await ctx.send(blackjack_error)
-        deck=[2,3,4,5,6,7,8,9,10,"J","Q","K","A"]*4; random.shuffle(deck); player=[deck.pop(),deck.pop()]; dealer=[deck.pop(),deck.pop()]
+
+        deck=[2,3,4,5,6,7,8,9,10,"J","Q","K","A"]*4
+        random.shuffle(deck)
+        player=[deck.pop(),deck.pop()]
+        dealer=[deck.pop(),deck.pop()]
         view=BlackjackView(self,ctx,scope.scope_id,ctx.author.id,wager,deck,player,dealer)
         if view.value(player) == 21:
             result = "tie" if view.value(dealer) == 21 else "win"
             payout = wager if result == "tie" else int(wager * 2.5)
+            natural_error = None
             async with self.bot.db.lock:
                 profile = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
-                profile["grams"] = int(profile.get("grams", 0) or 0) + payout
-                update_gamble_stats(profile, "blackjack", payout - wager, wager)
-                _record_game_progress(profile, ctx.author.id, won=result == "win")
-                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                if reconcile_expired_casino_escrow(profile, now=time.time()):
+                    self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                if blackjack_escrow_amount(profile) != wager:
+                    natural_error = "🃏 Blackjack wager was already reconciled."
+                else:
+                    profile.pop(CASINO_ESCROW_KEY, None)
+                    profile["grams"] = int(profile.get("grams", 0) or 0) + payout
+                    update_gamble_stats(profile, "blackjack", payout - wager, wager)
+                    _record_game_progress(profile, ctx.author.id, won=result == "win")
+                    self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+            if natural_error:
+                return await ctx.send(natural_error)
             if result == "tie":
                 await ctx.send("🃏 **PUSH!** Both have 21. Wager returned.")
             else:
                 await ctx.send(f"🃏 **BLACKJACK!** Natural 21 — won **{_fmt_cash(payout)}**.")
             return
-        embed=discord.Embed(title=f"🃏 Blackjack (Bet: {_fmt_cash(wager)})",color=discord.Color.blue()); embed.add_field(name="Your Hand",value=f"{view.cards(player)}\nValue: **{view.value(player)}**"); embed.add_field(name="Dealer Hand",value=f"[{dealer[0]}] [?]")
-        view.message=await ctx.send(embed=embed,view=view)
+
+        embed=discord.Embed(title=f"🃏 Blackjack (Bet: {_fmt_cash(wager)})",color=discord.Color.blue())
+        embed.add_field(name="Your Hand",value=f"{view.cards(player)}\nValue: **{view.value(player)}**")
+        embed.add_field(name="Dealer Hand",value=f"[{dealer[0]}] [?]")
+        try:
+            view.message=await ctx.send(embed=embed,view=view)
+        except Exception:
+            async with self.bot.db.lock:
+                profile = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
+                if blackjack_escrow_amount(profile) == wager:
+                    profile["grams"] = int(profile.get("grams", 0) or 0) + wager
+                    profile.pop(CASINO_ESCROW_KEY, None)
+                    self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+            raise
 
     @commands.hybrid_command(name="roulette", aliases=["roul"])
     async def roulette(self, ctx, arg1=None,arg2=None):
