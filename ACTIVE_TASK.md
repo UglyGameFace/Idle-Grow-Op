@@ -147,6 +147,34 @@ Scalability risk retained for later architecture work:
 - Safe eviction cannot be added naively because callers hold live mutable record references across awaits; eviction could orphan an active object before mark_dirty().
 - No heuristic LRU/TTL eviction was added during this correctness phase.
 
+## Phase 3 Checkpoint: Background and Async Lifecycle Reliability
+Validated on exact head 36285d1e99df22858716f4bbdf65e68bec2b8f48 with CI run 717 successful.
+
+Root causes:
+- Scheduled Discord loops could still allow unexpected top-level exceptions to escape. One loop could terminate while unrelated loops continued, producing a misleading half-working bot.
+- Notification delivery committed ready flags outside the per-user failure boundary, so a commit error could abort the rest of that notification iteration.
+- Profile-signature privacy cleanup spawned detached tasks that were not owned or cancelled by cog unload.
+- Profile-signature startup reconciliation used one global boolean set before work completed; a transient per-guild failure was never retried on reconnect.
+- Sesh private-room cleanup could surface unhandled detached-task exceptions.
+- Sesh restart reconciliation attempted each guild once and then ended permanently, leaving stale descriptors/rooms after transient startup failures.
+
+Completed:
+- Wrapped each scheduled game/notification/status iteration in an exception boundary that logs the failure and preserves future iterations.
+- Isolated Open World routing failures so local world processing continues.
+- Moved notification flag commits inside the per-user failure boundary.
+- Added owned profile-signature cleanup task tracking and cancellation on cog unload.
+- Replaced one-shot profile reconciliation with per-guild successful reconciliation tracking and reconnect retry behavior.
+- Added guild-join reconciliation for profile signatures.
+- Contained private Sesh cleanup failures.
+- Added bounded Sesh restart reconciliation retries for only failed guilds.
+- Added behavioral async lifecycle tests for scheduled-loop containment, cleanup cancellation, profile reconnect retry, private Sesh cleanup failure containment, and Sesh restart retry behavior.
+- Replaced obsolete source-shape assertions with direct Open World single-processing assertions.
+
+Cleanup:
+- No watchdog process, duplicate scheduler, or second reconciliation system was added.
+- Existing discord.py cog/task ownership remains authoritative.
+- Obsolete open_world_processed scaffolding was removed rather than retained for tests.
+
 ## Cleanup / Conflict Review
 Pending. Every affected subsystem will be checked after its behavioral audit for obsolete, duplicate, conflicting, partial, temporary, and superseded logic.
 
@@ -170,4 +198,4 @@ Pending. Every affected subsystem will be checked after its behavioral audit for
 - No open PR at audit start.
 
 ## Next Step
-Audit background-loop, listener, and detached-task ownership for duplicate scheduling, silent loop death, reconnect behavior, and stale asynchronous work. Preserve one authoritative owner for each background behavior.
+Audit real command callbacks and their error paths across farming, economy, progression, lab, crime, gambling, social, setup, and optional systems. Add runtime coverage where static command/tree contracts currently provide false confidence.
