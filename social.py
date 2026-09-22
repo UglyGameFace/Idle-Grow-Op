@@ -436,10 +436,23 @@ class Social(commands.Cog):
             return await ctx.send(str(exc))
         world = await self.bot.db.get_world(scope.scope_id)
         district = world.get("district", {})
-        owner = district.get("owner_name", "None")
-        multiplier = max(1.0, float(district.get("multiplier", 1.0)))
+        now = time.time()
+        active = bool(
+            district.get("owner_crew_id")
+            and now < float(district.get("expires_at", 0) or 0)
+        )
+        owner = district.get("owner_name") if active else "None"
+        multiplier = (
+            max(1.0, float(district.get("multiplier", 1.0)))
+            if active
+            else 1.0
+        )
         bonus = int((multiplier - 1) * 100)
-        remaining = max(0, int((float(district.get("expires_at", 0)) - time.time()) / 60))
+        remaining = (
+            max(0, int((float(district.get("expires_at", 0)) - now) / 60))
+            if active
+            else 0
+        )
         embed = discord.Embed(title="🏙️ District Control", color=0xE67E22)
         embed.description = (
             f"**World:** {scope.emoji} {scope.label}\n"
