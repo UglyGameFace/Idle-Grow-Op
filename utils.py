@@ -138,16 +138,9 @@ def inv_take(user, key, amount=1):
     return True
 
 
-def heat_value(user):
-    return int(user.get("heat", 0) or 0)
-
-
-def set_heat(user, value):
-    user["heat"] = max(0, min(100, int(value)))
-
-
 def add_heat(user, delta):
-    set_heat(user, heat_value(user) + int(delta))
+    current = int(user.get("heat", 0) or 0)
+    user["heat"] = max(0, min(100, current + int(delta)))
 
 
 def jail_left_seconds(user):
