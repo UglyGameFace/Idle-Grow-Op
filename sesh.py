@@ -256,7 +256,8 @@ class Sesh(commands.Cog):
 
     async def _guild_config(self, guild_id: int) -> tuple[dict, dict]:
         world = await self.bot.db.get_world(guild_id)
-        return world, world.setdefault(SESH_CONFIG_KEY, {})
+        raw = world.get(SESH_CONFIG_KEY)
+        return world, dict(raw) if isinstance(raw, dict) else {}
 
     async def _persist_descriptor(
         self,
@@ -1186,7 +1187,11 @@ class Sesh(commands.Cog):
     @commands.has_permissions(manage_guild=True)
     async def seshconfig_disable(self, ctx: commands.Context) -> None:
         async with self.bot.db.lock:
-            _, config = await self._guild_config(ctx.guild.id)
+            world = await self.bot.db.get_world(ctx.guild.id)
+            config = world.setdefault(SESH_CONFIG_KEY, {})
+            if not isinstance(config, dict):
+                config = {}
+                world[SESH_CONFIG_KEY] = config
             config[SESH_ENABLED_KEY] = False
             self.bot.db.mark_world_dirty(ctx.guild.id)
         ended = await self.end_guild_sessions(
