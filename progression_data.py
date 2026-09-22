@@ -135,7 +135,6 @@ ACHIEVEMENTS: dict[str, Achievement] = {item.id: item for item in _ACHIEVEMENTS}
 
 DAILY_QUEST_TEMPLATES = [
     DailyQuestTemplate("dq_plant", "🌰 Plant Seeds", "Plant some seeds.", "plant", 2, 5),
-    DailyQuestTemplate("dq_water", "💧 Water Plants", "Keep your garden alive.", "water", 2, 6),
     DailyQuestTemplate("dq_harvest", "✂️ Harvest", "Harvest ready plants.", "harvest", 1, 4),
     DailyQuestTemplate("dq_collect", "📦 Collect Lab Output", "Collect finished lab batches.", "collect_dabs", 10, 60, 5),
     DailyQuestTemplate("dq_steal", "🔫 Rob Players", "Attempt robberies.", "steal", 1, 4, 3),
