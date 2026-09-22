@@ -36,7 +36,7 @@ jobs:
 
       - name: Reject undefined runtime names
         run: |
-          ruff check             main.py utils.py persistence_bootstrap.py persistence_context.py persistence_scope.py persistence_store.py scoped_database.py supabase_scoped_backend.py             admin.py ai.py crime.py crime_integrity.py economy.py economy_integrity.py farming.py gambling.py lab.py notification_preferences.py onboarding.py             progression.py progression_core.py progression_data.py quick.py profile_signatures.py sesh.py setup.py social.py tasks.py world_modes.py             --select F821,F822,F823
+          ruff check             main.py guild_config.py utils.py persistence_bootstrap.py persistence_context.py persistence_scope.py persistence_store.py scoped_database.py supabase_scoped_backend.py             admin.py ai.py crime.py crime_integrity.py economy.py economy_integrity.py farming.py gambling.py lab.py notification_preferences.py onboarding.py             progression.py progression_core.py progression_data.py quick.py profile_signatures.py sesh.py setup.py social.py tasks.py world_modes.py             --select F821,F822,F823
 
       - name: Run tests
         id: pytest
