@@ -123,6 +123,30 @@ Preserved:
 - runtime legacy world-mode compatibility
 - legacy Supabase data itself; repository cleanup does not delete rollback data
 
+## Phase 2 Checkpoint: Atomic Cross-Record Persistence
+Validated on exact head 5cd54dcea66a99955fdcc91797010c62d47ddf90 with CI run 705 successful.
+
+Root cause:
+- SupabaseScopedBackend.save_many() grouped dirty records by table and executed one upsert request per table.
+- One logical game action can dirty both a profile and world state, such as auction listing or crew creation.
+- A failure between table requests could persist only half of that logical action.
+
+Completed:
+- Added migration 003_atomic_scoped_record_batch.sql.
+- Added one PostgreSQL function, idle_grow_save_scoped_records, that upserts global accounts, guild profiles, and guild worlds inside one database transaction.
+- SupabaseScopedBackend now sends one RPC per dirty flush instead of separate table writes.
+- Schema verification requires migration 003 and verifies the atomic RPC is callable.
+- Added backend tests proving a mixed account/profile/world batch produces exactly one RPC.
+- Added migration contract coverage for transaction framing, all three upserts, permissions, and schema version.
+
+Deployment blocker:
+- Production Supabase must apply migrations/003_atomic_scoped_record_batch.sql before deploying this branch. The bot intentionally refuses startup against schema version 002.
+
+Scalability risk retained for later architecture work:
+- ScopedRecordStore caches every loaded mutable record for process lifetime.
+- Safe eviction cannot be added naively because callers hold live mutable record references across awaits; eviction could orphan an active object before mark_dirty().
+- No heuristic LRU/TTL eviction was added during this correctness phase.
+
 ## Cleanup / Conflict Review
 Pending. Every affected subsystem will be checked after its behavioral audit for obsolete, duplicate, conflicting, partial, temporary, and superseded logic.
 
@@ -146,4 +170,4 @@ Pending. Every affected subsystem will be checked after its behavioral audit for
 - No open PR at audit start.
 
 ## Next Step
-Audit process-lifetime cache growth and cross-record save semantics. Do not add eviction until mutable-reference lifetime and mutation safety are proven.
+Audit background-loop, listener, and detached-task ownership for duplicate scheduling, silent loop death, reconnect behavior, and stale asynchronous work. Preserve one authoritative owner for each background behavior.
