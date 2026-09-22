@@ -124,3 +124,80 @@ def test_wipeuser_resets_gameplay_but_preserves_control_preferences():
         assert "Wiped Target" in ctx.sent[-1][0][0]
 
     asyncio.run(scenario())
+
+
+def test_setmoney_mutates_only_target_active_profile():
+    async def scenario():
+        db = MemoryDatabase()
+        ctx = ContextStub()
+        target = SimpleNamespace(id=42, name="Target")
+        cog = Admin(SimpleNamespace(db=db))
+
+        await Admin.setmoney.callback(cog, ctx, target, 1_234)
+
+        profile = db.profiles[(123, 42)]
+        assert profile["grams"] == 1_234
+        assert db.dirty_profiles == {(123, 42)}
+        assert "$1,234" in ctx.sent[-1][0][0]
+
+    asyncio.run(scenario())
+
+
+def test_setmoney_rejects_negative_balance_without_mutation():
+    async def scenario():
+        db = MemoryDatabase()
+        ctx = ContextStub()
+        target = SimpleNamespace(id=42, name="Target")
+        cog = Admin(SimpleNamespace(db=db))
+        before = dict(db.profiles[(123, 42)])
+
+        await Admin.setmoney.callback(cog, ctx, target, -1)
+
+        assert db.profiles[(123, 42)] == before
+        assert db.dirty_profiles == set()
+        assert "cannot be negative" in ctx.sent[-1][0][0]
+
+    asyncio.run(scenario())
+
+
+def test_giveitem_and_setlevel_apply_validated_owner_mutations():
+    async def scenario():
+        db = MemoryDatabase()
+        ctx = ContextStub()
+        target = SimpleNamespace(id=42, name="Target")
+        cog = Admin(SimpleNamespace(db=db))
+
+        await Admin.giveitem.callback(cog, ctx, target, "Pager", 3)
+        await Admin.setlevel.callback(cog, ctx, target, 7)
+
+        profile = db.profiles[(123, 42)]
+        assert profile["items"]["pager"] == 4
+        assert profile["level"] == 7
+        assert profile["xp"] == 0
+        assert db.dirty_profiles == {(123, 42)}
+
+    asyncio.run(scenario())
+
+
+def test_giveitem_and_setlevel_reject_non_positive_amounts():
+    async def scenario():
+        db = MemoryDatabase()
+        ctx = ContextStub()
+        target = SimpleNamespace(id=42, name="Target")
+        cog = Admin(SimpleNamespace(db=db))
+        before = {
+            "items": dict(db.profiles[(123, 42)]["items"]),
+            "level": db.profiles[(123, 42)]["level"],
+            "xp": db.profiles[(123, 42)]["xp"],
+        }
+
+        await Admin.giveitem.callback(cog, ctx, target, "pager", 0)
+        await Admin.setlevel.callback(cog, ctx, target, 0)
+
+        profile = db.profiles[(123, 42)]
+        assert profile["items"] == before["items"]
+        assert profile["level"] == before["level"]
+        assert profile["xp"] == before["xp"]
+        assert db.dirty_profiles == set()
+
+    asyncio.run(scenario())
