@@ -11,7 +11,7 @@ MAIN_SOURCE = (ROOT / "main.py").read_text(encoding="utf-8")
 
 
 def test_live_signatures_have_one_persisted_bot_owned_card_per_channel():
-    assert 'SIGNATURE_STATE_KEY = "profile_signature_state"' in SOURCE
+    assert 'SIGNATURE_STATE_KEY = "profile_signature_state"' in CONTRACT_SOURCE
     assert 'SIGNATURE_MARKER = "Idle Grow Live Signature"' in SOURCE
     assert 'state[str(channel_id)] = {' in SOURCE
     assert 'message.author.id != self.bot.user.id' in SOURCE
