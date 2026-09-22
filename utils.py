@@ -87,14 +87,6 @@ GROWTH_CYCLES = {
     "durban poison": {"time": 55000, "base_value": 2800, "yield": (110, 220), "level_req": 50, "genetics": ["Sativa", "Landrace"], "display_name": "Durban Poison"},
 }
 
-QUEST_TEMPLATES = [
-    {"type": "harvest_any", "min": 5, "max": 15, "reward_xp": 100, "reward_cash": 500, "title": "Green Thumb", "desc": "Harvest {} plants."},
-    {"type": "earn_cash", "min": 1000, "max": 5000, "reward_xp": 150, "reward_cash": 1000, "title": "Money Maker", "desc": "Earn ${:,} from sales."},
-    {"type": "process_dabs", "min": 10, "max": 50, "reward_xp": 200, "reward_cash": 1500, "title": "Lab Rat", "desc": "Process {}g of concentrates."},
-    {"type": "gamble_win", "min": 3, "max": 5, "reward_xp": 300, "reward_cash": 2000, "title": "High Roller", "desc": "Win {} gambles."},
-    {"type": "buy_item", "min": 1, "max": 3, "reward_xp": 50, "reward_cash": 300, "title": "Consumer", "desc": "Buy {} items from the shop."},
-]
-
 SLOTS_SYMBOLS = ["🍒", "🍋", "🍇", "💎", "7️⃣"]
 SLOTS_PAYOUTS = {"🍒": 2.0, "🍋": 3.0, "🍇": 5.0, "💎": 10.0, "7️⃣": 25.0}
 GAMBLE_CONFIG = {
@@ -147,17 +139,6 @@ CONCENTRATE_TYPES = {
     "rosin": {"level_req": 20, "req_item": "rosin press", "yield_ratio": 0.18, "value_mult": 5.0},
     "live resin": {"level_req": 30, "req_item": "rosin press", "yield_ratio": 0.10, "value_mult": 7.0},
     "diamonds": {"level_req": 50, "req_item": "rosin press", "yield_ratio": 0.05, "value_mult": 12.0},
-}
-
-ACHIEVEMENTS = {
-    "first_grow": {"name": "🌱 First Harvest", "desc": "Harvest your first plant", "reward": 500},
-    "green_thumb": {"name": "🌿 Green Thumb", "desc": "Harvest 100 plants", "reward": 5000},
-    "weed_baron": {"name": "💰 Weed Baron", "desc": "Earn $1,000,000 total", "reward": 50000},
-    "dab_king": {"name": "🍯 Dab King", "desc": "Process 100g concentrates", "reward": 10000},
-    "iron_lungs": {"name": "😮‍💨 Iron Lungs", "desc": "Reach High Tolerance (Level 50)", "reward": 25000},
-    "robbery_king": {"name": "🔫 Stickup Kid", "desc": "Successfully rob 50 times", "reward": 15000},
-    "prestige_1": {"name": "👑 Ascended", "desc": "Prestige for the first time", "reward": 100000},
-    "loyalist": {"name": "📅 Loyalist", "desc": "Reach a 30-day streak", "reward": 50000},
 }
 
 SPECIAL_EVENTS = {
@@ -266,36 +247,6 @@ def get_plant_grow_time(user, world, plant):
         base *= 0.50
     return int(max(60, base))
 
-
-def _xp_needed_for_level(level):
-    return int(100 * (max(1, int(level)) ** 1.5))
-
-
-async def add_xp(ctx, user, amount, source="activity"):
-    user["xp"] = int(user.get("xp", 0)) + int(amount)
-    level = int(user.get("level", 1))
-    if user["xp"] >= _xp_needed_for_level(level):
-        user["xp"] -= _xp_needed_for_level(level)
-        user["level"] = level + 1
-        if ctx:
-            await ctx.send(f"🎉 **Level Up!** You are now level {user['level']}!")
-
-
-def add_quest_progress(user, quest_type, amount=1):
-    for quest in user.get("daily_quests", []):
-        if quest.get("type") == quest_type and not quest.get("completed", False):
-            quest["progress"] = quest.get("progress", 0) + amount
-            if quest["progress"] >= quest.get("target", 1):
-                quest["progress"] = quest.get("target", 1)
-                quest["completed"] = True
-
-
-def add__progress(user, quest_type, amount=1):
-    return add_quest_progress(user, quest_type, amount)
-
-
-async def check_achievements(ctx, user):
-    pass
 
 
 def _shop_price(item):

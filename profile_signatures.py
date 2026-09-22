@@ -15,7 +15,8 @@ import discord
 from discord.ext import commands
 
 from persistence_context import GuildContextRequired, require_guild_id
-from utils import _xp_needed_for_level, get_plant_grow_time
+from progression_core import xp_needed_for_level
+from utils import get_plant_grow_time
 from world_modes import MODE_LABELS, resolve_game_scope
 
 
@@ -447,7 +448,7 @@ def _inventory_summary(profile: dict[str, Any]) -> str:
 def _xp_line(profile: dict[str, Any]) -> str:
     level = max(1, _safe_int(profile.get("level"), 1))
     xp = max(0, _safe_int(profile.get("xp")))
-    needed = max(1, _safe_int(_xp_needed_for_level(level), 1))
+    needed = max(1, _safe_int(xp_needed_for_level(level), 1))
     percent = min(100, int((xp / needed) * 100))
     filled = min(10, max(0, percent // 10))
     bar = "🟦" * filled + "⬜" * (10 - filled)
@@ -1247,7 +1248,7 @@ class ProfileSignatures(commands.Cog):
         if "level" in visible:
             level = max(1, _safe_int(profile.get("level"), 1))
             xp = max(0, _safe_int(profile.get("xp")))
-            needed = max(1, _safe_int(_xp_needed_for_level(level), 1))
+            needed = max(1, _safe_int(xp_needed_for_level(level), 1))
             lines.append(f"⭐ **Level {level}** • {xp:,}/{needed:,} XP")
         if "crew" in visible:
             crew = _crew_name(profile, world)

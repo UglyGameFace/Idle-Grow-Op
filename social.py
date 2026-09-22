@@ -6,7 +6,7 @@ from discord.ext import commands
 
 from economy_integrity import require_positive_amount
 from persistence_context import GuildContextRequired, require_guild_id
-from utils import _xp_needed_for_level
+from progression_core import add_progress, check_achievements, credit_xp, xp_needed_for_level
 from world_modes import WorldModeDenied, require_multiplayer, resolve_game_scope
 
 
@@ -67,7 +67,7 @@ class Social(commands.Cog):
 
         level = max(1, int(user.get("level", 1)))
         xp = max(0, int(user.get("xp", 0)))
-        needed = max(1, int(_xp_needed_for_level(level)))
+        needed = max(1, int(xp_needed_for_level(level)))
         percent = min(100, int((xp / needed) * 100))
         filled = int(percent / 10)
         progress = "🟦" * filled + "⬜" * (10 - filled)
@@ -247,6 +247,8 @@ class Social(commands.Cog):
                 return await ctx.send("💸 Insufficient funds.")
             user["grams"] = balance - deposit
             crew["bank"] = max(0, int(crew.get("bank", 0))) + deposit
+            add_progress(user, "crew_deposit_cash", deposit, user_id=ctx.author.id)
+            check_achievements(user)
             self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
             self.bot.db.mark_world_dirty(scope.scope_id)
 
@@ -371,7 +373,8 @@ class Social(commands.Cog):
             cooldown = max(0, int(SUPPORT_COOLDOWN_SECONDS.get(service_name, 7200)))
             if now - last_reward < cooldown:
                 return
-            user_data["xp"] = max(0, int(user_data.get("xp", 0))) + SUPPORT_REWARD_XP
+            credit_xp(user_data, SUPPORT_REWARD_XP)
+            check_achievements(user_data)
             cooldowns[service_name] = now
             self.bot.db.mark_profile_dirty(reward_scope.scope_id, rewarded_user.id)
 

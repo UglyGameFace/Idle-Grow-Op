@@ -14,6 +14,7 @@ import discord
 from discord.ext import commands
 
 from persistence_context import GuildContextRequired, require_guild_id
+from progression_core import credit_xp
 from world_modes import mark_game_profile_dirty, resolve_game_scope
 
 
@@ -666,7 +667,7 @@ class Sesh(commands.Cog):
                     max(0, round(rate * multiplier)),
                 )
                 if gain:
-                    profile["xp"] = int(profile.get("xp", 0)) + gain
+                    credit_xp(profile, gain)
                     social_stats = profile.setdefault("social_stats", {})
                     social_stats["sesh_xp"] = (
                         int(social_stats.get("sesh_xp", 0)) + gain
@@ -688,7 +689,7 @@ class Sesh(commands.Cog):
                             bonus,
                             SESH_XP_MAX_PER_USER - state.total_awarded,
                         )
-                        profile["xp"] += reward
+                        credit_xp(profile, reward)
                         state.total_awarded += reward
                         state.streak_awarded.add(milestone)
                         mark_game_profile_dirty(self.bot.db, scope, member.id)
@@ -760,7 +761,7 @@ class Sesh(commands.Cog):
                     scope.scope_id,
                     member.id,
                 )
-                profile["xp"] = int(profile.get("xp", 0)) + reward
+                credit_xp(profile, reward)
                 mark_game_profile_dirty(self.bot.db, scope, member.id)
                 state.total_awarded += reward
             state.rotation_awarded += 1
