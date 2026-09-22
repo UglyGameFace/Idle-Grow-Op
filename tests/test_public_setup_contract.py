@@ -5,6 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SETUP_SOURCE = (ROOT / "setup.py").read_text(encoding="utf-8")
 MAIN_SOURCE = (ROOT / "main.py").read_text(encoding="utf-8")
 TASKS_SOURCE = (ROOT / "tasks.py").read_text(encoding="utf-8")
+CONFIG_SOURCE = (ROOT / "guild_config.py").read_text(encoding="utf-8")
 
 
 def test_setup_is_public_manage_server_ui_without_channel_ids():
@@ -22,10 +23,11 @@ def test_all_channel_configuration_is_guild_world_scoped():
         'ERROR_LOG_CHANNEL_KEY = "error_log_channel_id"',
         'GAME_CHANNEL_KEY = "game_channel_id"',
         'ANNOUNCEMENT_CHANNEL_KEY = "announcement_channel_id"',
+        'WORLD_SETTINGS_KEY = "settings"',
     ):
-        assert key in SETUP_SOURCE
+        assert key in CONFIG_SOURCE
     assert "await self.bot.db.get_world(int(guild_id))" in SETUP_SOURCE
-    assert "world.setdefault(SETTINGS_KEY, {})" in SETUP_SOURCE
+    assert "world.setdefault(WORLD_SETTINGS_KEY, {})" in SETUP_SOURCE
     assert "self.bot.db.mark_world_dirty(int(guild_id))" in SETUP_SOURCE
     assert "settings.pop(key, None)" in SETUP_SOURCE
     assert "settings[key] = int(channel_id)" in SETUP_SOURCE
@@ -93,8 +95,8 @@ def test_game_channel_is_recommended_not_a_command_lock():
 
 
 def test_announcement_routing_uses_explicit_channel_then_game_fallback():
-    assert 'ANNOUNCEMENT_CHANNEL_KEY = "announcement_channel_id"' in TASKS_SOURCE
-    assert 'GAME_CHANNEL_KEY = "game_channel_id"' in TASKS_SOURCE
+    assert 'ANNOUNCEMENT_CHANNEL_KEY = "announcement_channel_id"' in CONFIG_SOURCE
+    assert 'GAME_CHANNEL_KEY = "game_channel_id"' in CONFIG_SOURCE
     assert "announcement_id = settings.get(ANNOUNCEMENT_CHANNEL_KEY)" in TASKS_SOURCE
     assert "channel_id = announcement_id or settings.get(GAME_CHANNEL_KEY)" in TASKS_SOURCE
     assert "guild.get_channel(int(channel_id))" in TASKS_SOURCE
@@ -118,7 +120,7 @@ def test_error_reporting_uses_current_guild_configuration_only():
     assert "os.getenv(\"ERROR_LOG_CHANNEL_ID\"" not in MAIN_SOURCE
     assert "resolved_guild_id = int(guild_id)" in MAIN_SOURCE
     assert "await bot.db.get_world(resolved_guild_id)" in MAIN_SOURCE
-    assert 'world.get("settings", {}).get("error_log_channel_id")' in MAIN_SOURCE
+    assert "world.get(WORLD_SETTINGS_KEY, {}).get(ERROR_LOG_CHANNEL_KEY)" in MAIN_SOURCE
     assert "resolved_channel_id = int(channel_id)" in MAIN_SOURCE
     assert "guild.get_channel(resolved_channel_id)" in MAIN_SOURCE
     assert "guild_id=interaction.guild_id" in MAIN_SOURCE
