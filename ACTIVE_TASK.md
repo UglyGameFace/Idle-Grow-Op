@@ -175,6 +175,34 @@ Cleanup:
 - Existing discord.py cog/task ownership remains authoritative.
 - Obsolete open_world_processed scaffolding was removed rather than retained for tests.
 
+## Phase 4 Checkpoint: Gameplay Progression and Command Runtime
+Validated on exact head e6166da99efe4d7f6d3c3c62f794d077d203209e with CI run 723 successful.
+
+Root causes:
+- Two incompatible progression generations were live at once.
+- Farming called an empty legacy achievement stub from utils.py instead of progression_core.py.
+- Legacy daily-quest helpers expected a `type` field while current quests use `event`.
+- XP thresholds were duplicated and /growlevel displayed a fourth conflicting formula.
+- Several XP award paths could accumulate XP without applying level transitions.
+- Daily quests referenced nonexistent breeding and market-contract features.
+- Economy /leaderboard treated authoritative backend tuple rows as dictionaries and could crash at runtime.
+- /qplant bypassed the canonical plant quest progression path.
+
+Completed:
+- Made progression_core.py the single owner of XP thresholds and level transitions.
+- Routed daily, achievement, farming, lab, crime, casino, Sesh, support-reward, profile-display, and quick-plant progression through the canonical implementation.
+- Wired real quest events to plant, water, harvest, collect_dabs, buy, steal, heist, raid, launder, casino_play, gamble_win, crew_deposit_cash, and Quick Plant.
+- Removed impossible breed and market-contract quests from the selectable pool.
+- Removed the obsolete progression tables/helpers/stub from utils.py.
+- Fixed /leaderboard to consume the backend's (user_id, balance) tuple contract.
+- Replaced stale AI guidance for nonexistent /tasks with /growquests.
+- Added callback-level runtime regressions for leaderboard, farming, lab collection, laundering, crew deposits, casino progression, and Quick Plant.
+
+Cleanup:
+- No compatibility shim preserves the old progression implementation.
+- Current progression ownership is explicit and storage-agnostic in progression_core.py.
+- The old empty achievement stub and old quest schema are gone.
+
 ## Cleanup / Conflict Review
 Pending. Every affected subsystem will be checked after its behavioral audit for obsolete, duplicate, conflicting, partial, temporary, and superseded logic.
 
@@ -198,4 +226,4 @@ Pending. Every affected subsystem will be checked after its behavioral audit for
 - No open PR at audit start.
 
 ## Next Step
-Audit real command callbacks and their error paths across farming, economy, progression, lab, crime, gambling, social, setup, and optional systems. Add runtime coverage where static command/tree contracts currently provide false confidence.
+Audit gameplay/catalog consistency: verify every advertised weather modifier, watering effect, equipment, consumable, shop description, and help/onboarding promise has one real runtime owner. Remove or repair legacy promises that have no backing mechanic.
