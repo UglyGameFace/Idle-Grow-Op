@@ -39,6 +39,7 @@ class ScopedRecordStore:
         self._default_factory = default_factory
         self._cache: dict[str, MutableMapping[str, Any]] = {}
         self._dirty: set[str] = set()
+        self._versions: dict[str, int] = {}
         self._load_locks: dict[str, asyncio.Lock] = {}
         self._flush_lock = asyncio.Lock()
 
@@ -68,24 +69,31 @@ class ScopedRecordStore:
             loaded = await self._backend.load(key)
             if loaded is None:
                 record = deepcopy(self._default_factory(key))
-                self._dirty.add(cache_key)
             else:
                 record = deepcopy(dict(loaded))
 
             self._cache[cache_key] = record
+            self._versions.setdefault(cache_key, 0)
+            if loaded is None:
+                self._mark_cache_key_dirty(cache_key)
             return record
+
+    def _mark_cache_key_dirty(self, cache_key: str) -> None:
+        self._versions[cache_key] = self._versions.get(cache_key, 0) + 1
+        self._dirty.add(cache_key)
 
     def mark_dirty(self, key: RecordKey) -> None:
         cache_key = key.cache_key
         if cache_key not in self._cache:
             raise KeyError(f"cannot mark uncached record dirty: {cache_key}")
-        self._dirty.add(cache_key)
+        self._mark_cache_key_dirty(cache_key)
 
     def evict(self, key: RecordKey) -> None:
         cache_key = key.cache_key
         if cache_key in self._dirty:
             raise RuntimeError(f"cannot evict dirty record: {cache_key}")
         self._cache.pop(cache_key, None)
+        self._versions.pop(cache_key, None)
         self._load_locks.pop(cache_key, None)
 
     async def flush(self) -> FlushResult:
@@ -94,6 +102,10 @@ class ScopedRecordStore:
             if not snapshot_keys:
                 return FlushResult(saved_keys=())
 
+            snapshot_versions = {
+                cache_key: self._versions.get(cache_key, 0)
+                for cache_key in snapshot_keys
+            }
             records: dict[RecordKey, Mapping[str, Any]] = {}
             for cache_key in snapshot_keys:
                 record = self._cache.get(cache_key)
@@ -104,5 +116,6 @@ class ScopedRecordStore:
             await self._backend.save_many(records)
 
             for cache_key in snapshot_keys:
-                self._dirty.discard(cache_key)
+                if self._versions.get(cache_key, 0) == snapshot_versions[cache_key]:
+                    self._dirty.discard(cache_key)
             return FlushResult(saved_keys=snapshot_keys)
