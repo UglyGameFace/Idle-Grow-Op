@@ -245,6 +245,12 @@ def get_plant_grow_time(user, world, plant):
         base *= 0.90
     if has_item(user, "nutes"):
         base *= 0.50
+
+    weather_name = str((world or {}).get("weather", "") or "")
+    growth_speed = float(WEATHER_TYPES.get(weather_name, {}).get("growth", 1.0) or 1.0)
+    if growth_speed > 0:
+        base /= growth_speed
+
     return int(max(60, base))
 
 
