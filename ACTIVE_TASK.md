@@ -259,6 +259,27 @@ Cleanup:
 - No persistence module imports Discord UI code.
 - Runtime modules may re-export imported constants for compatibility, but the literal definitions now have one source of truth.
 
+## Phase 7 Checkpoint: Global Mutation Lock Reliability
+Validated on exact head 4ebab6c237949cd3221b573efb3dd100812fd102 with CI run 808 successful.
+
+Root cause:
+- Gameplay modules shared one global database mutation lock.
+- Multiple commands performed Discord response awaits while holding that lock.
+- A slow Discord API response in one command/server could therefore block unrelated state mutations across the process.
+
+Completed:
+- Moved Discord response delivery outside the database lock for economy transfers, purchases, sales, auctions, heists, crew-heists, crime failures, crew management, and turf-war paths.
+- Preserved validation and all state mutation under the lock.
+- Removed a duplicated auction mutation block found during the refactor.
+- Added runtime auction coverage for buyout atomicity, seller-load failure safety, and first-bid starting-price behavior.
+- Tightened bid validation so the first bidder may meet the listing start price while later bids must increase it.
+- Re-scanned gameplay modules after the refactor and found no remaining Discord/network response awaits inside self.bot.db.lock blocks.
+
+Cleanup:
+- The global mutation lock remains authoritative for state serialization.
+- No lock was removed from mutation code; only external/network awaits were moved out.
+- Intermediate CI failures from the staged refactor are resolved; exact head is green.
+
 ## Cleanup / Conflict Review
 Pending. Every affected subsystem will be checked after its behavioral audit for obsolete, duplicate, conflicting, partial, temporary, and superseded logic.
 
@@ -282,4 +303,4 @@ Pending. Every affected subsystem will be checked after its behavioral audit for
 - No open PR at audit start.
 
 ## Next Step
-Resume command-runtime coverage across the remaining gameplay and admin/user flows. Prioritize callbacks with persistence mutations, cross-player value exchange, cooldowns, and failure paths that are still protected mainly by static source contracts.
+Continue callback-level runtime auditing for remaining high-risk mutations: expired-auction settlement, admin owner commands, cross-player transfers/crime, and any command still protected mainly by source-text contracts. Add failure-path regressions before final cleanup.
