@@ -190,6 +190,11 @@ class Economy(commands.Cog):
         if int(user.get("level", 1)) < int(item.get("level_req", 1)):
             return await ctx.send("🔒 Level locked.")
         async with self.bot.db.lock:
+            if (
+                item.get("type") in {"equipment", "tool", "defense"}
+                and inv_get(user, clean_name) > 0
+            ):
+                return await ctx.send(f"✅ You already own **{clean_name.title()}**.")
             balance = max(0, int(user.get("grams", 0)))
             if balance < cost:
                 return await ctx.send("💸 Too poor.")
