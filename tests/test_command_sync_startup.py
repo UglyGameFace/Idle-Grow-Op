@@ -85,6 +85,26 @@ def test_global_sync_retries_temporary_discord_http_failure(monkeypatch):
     assert {command.name for command in synced} >= main.REQUIRED_PUBLIC_COMMANDS
 
 
+def test_global_sync_rejects_partial_or_unexpected_publication():
+    local_commands = command_set("shop", "plant")
+    incomplete_remote = command_set("shop")
+    extra_remote = command_set("shop", "plant", "ghost")
+
+    with pytest.raises(RuntimeError, match="complete local command tree"):
+        asyncio.run(
+            main.sync_global_commands(
+                FakeTree(local_commands, sync_effects=[incomplete_remote])
+            )
+        )
+
+    with pytest.raises(RuntimeError, match="complete local command tree"):
+        asyncio.run(
+            main.sync_global_commands(
+                FakeTree(local_commands, sync_effects=[extra_remote])
+            )
+        )
+
+
 def test_global_sync_blocks_startup_after_bounded_failures(monkeypatch):
     class FakeHTTPException(Exception):
         pass
