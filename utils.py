@@ -1,53 +1,9 @@
-import os
 import time
 
 import discord
 
 
-def _env(key, default):
-    return os.getenv(key, str(default))
-
-
-def _env_int(key, default):
-    try:
-        return int(os.getenv(key, default))
-    except (TypeError, ValueError):
-        return default
-
-
-def _env_str(key, default):
-    return os.getenv(key, default)
-
-
-GAME_VERSION_DISPLAY = "4.2.0+TYCOON"
-
 POT_UPGRADE_LIMITS = {"clay pot": 3, "plastic pot": 5, "smart pot": 10}
-
-STREAK_BONUSES = {
-    7: {"mult": 1.1, "name": "Regular"},
-    14: {"mult": 1.25, "name": "Dedicated"},
-    30: {"mult": 1.5, "name": "Addict"},
-    60: {"mult": 2.0, "name": "Legend"},
-    100: {"mult": 3.0, "name": "Godlike"},
-}
-
-SKILLS_CONFIG = {
-    "botanist": {
-        "name": "Master Botanist",
-        "max": 5,
-        "effect": lambda lvl: 1.0 + (lvl * 0.05),
-    },
-    "chemist": {
-        "name": "Mad Chemist",
-        "max": 3,
-        "effect": lambda lvl: 1.0 + (lvl * 0.10),
-    },
-    "dealmaker": {
-        "name": "Dealmaker",
-        "max": 5,
-        "effect": lambda lvl: 1.0 - (lvl * 0.02),
-    },
-}
 
 WEATHER_TYPES = {
     "Sunny ☀️": {"growth": 1.15, "price": 1.10},
@@ -137,23 +93,6 @@ SPECIAL_EVENTS = {
         "multiplier": 0.6,
     },
 }
-
-SESH_MESSAGES = ["Pass the boof.", "Sesh time.", "Who's holding?", "Cloud 9.", "Stay lifted."]
-SESH_COLORS = {"SESH": 0x2ECC71, "MOVIE": 0x3498DB, "KARAOKE": 0x9B59B6, "DEFAULT": 0xE74C3C}
-SESSION_MEDIA = {
-    "SESH": ["https://media.tenor.com/26AHD1wUpdF7i96da/giphy.gif"],
-    "MOVIE": [],
-    "KARAOKE": [],
-}
-JAIL_ACTION_BLOCK = {
-    "plant", "harvest", "process", "sell", "buy", "shop", "heist", "raid",
-    "crew", "district", "gamble", "slots", "dice", "steal", "trade",
-    "launder", "lab", "sellconc", "auction", "daily", "water",
-}
-
-STONER_ROLE_ID = _env_int("STONER_ROLE_ID", 0)
-STONER_ROLE_NAME = _env_str("STONER_ROLE_NAME", "Stoner")
-
 
 def _norm_item_key(key):
     return str(key or "").lower().strip().replace("_", " ")
