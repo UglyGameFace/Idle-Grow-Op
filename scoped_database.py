@@ -9,6 +9,18 @@ from persistence_scope import (
     guild_world_key,
 )
 from persistence_store import FlushResult, ScopedRecordStore
+from profile_signature_contracts import (
+    GUILD_PRIVACY_KEY,
+    GLOBAL_PRIVACY_KEY,
+    IDENTITY_KEY,
+    SIGNATURE_CONFIG_KEY,
+    SIGNATURE_STATE_KEY,
+    default_global_privacy,
+    default_guild_privacy,
+    default_profile_identity,
+    default_signature_config,
+    default_signature_state,
+)
 
 
 FLUSH_INTERVAL_SECONDS = 10
@@ -34,11 +46,8 @@ def make_default_account() -> dict[str, Any]:
         "cosmetics": {},
         "collection": {},
         "global_achievements": [],
-        "profile_identity": {"platforms": {}},
-        "profile_privacy": {
-            "signature_enabled": True,
-            "visible_fields": ["level", "crew", "grow_status"],
-        },
+        IDENTITY_KEY: default_profile_identity(),
+        GLOBAL_PRIVACY_KEY: default_global_privacy(),
     }
 
 
@@ -50,7 +59,6 @@ def make_default_profile() -> dict[str, Any]:
         "jail_until": 0,
         "items": {},
         "inventory": [],
-        "item_wear": {},
         "flower_stash": {},
         "concentrates": {},
         "plants": [],
@@ -66,10 +74,7 @@ def make_default_profile() -> dict[str, Any]:
         "created_at": 0,
         "daily_streak": 0,
         "settings": {"notifications": True},
-        "profile_signature_privacy": {
-            "signature_disabled": False,
-            "hidden_fields": [],
-        },
+        GUILD_PRIVACY_KEY: default_guild_privacy(),
         "daily_quests": [],
         "last_daily": 0,
         "last_login": 0,
@@ -98,19 +103,8 @@ def make_default_world() -> dict[str, Any]:
             "configured": False,
             "updated_at": 0,
         },
-        "profile_signature_config": {
-            "enabled": False,
-            "channel_ids": [],
-            "allowed_fields": [
-                "level",
-                "crew",
-                "grow_status",
-                "rank",
-                "achievements",
-                "platforms",
-            ],
-        },
-        "profile_signature_state": {},
+        SIGNATURE_CONFIG_KEY: default_signature_config(),
+        SIGNATURE_STATE_KEY: default_signature_state(),
     }
 
 
