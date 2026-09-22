@@ -74,6 +74,13 @@ class Crime(commands.Cog):
         return max(0, int(user.get("jail_until", 0) or 0) - int(self._now()))
 
     @staticmethod
+    def _jail_duration_seconds(user: dict, seconds: int) -> int:
+        duration = max(0, int(seconds))
+        if has_item(user, "lawyer"):
+            duration = int(duration * 0.75)
+        return duration
+
+    @staticmethod
     def _get_user_cooldown(user: dict, key: str) -> float:
         return float(user.setdefault("cooldowns", {}).get(key, 0) or 0)
 
@@ -245,13 +252,15 @@ class Crime(commands.Cog):
                     add_heat(user, HEAT_GAIN_WIN + config["heat_mod"])
                     stats["heist_profit"] = max(0, int(stats.get("heist_profit", 0))) + payout
                     jail_minutes = 0
+                    jail_seconds = 0
                     loss = 0
                 else:
                     requested_loss = max(150, int(config["buyin"] * random.uniform(0.30, 0.70)))
                     loss = calculate_capped_loss(user["grams"], requested_loss)
                     user["grams"] -= loss
                     jail_minutes = random.randint(HEIST_JAIL_MIN, HEIST_JAIL_MAX)
-                    user["jail_until"] = int(self._now() + jail_minutes * 60)
+                    jail_seconds = self._jail_duration_seconds(user, jail_minutes * 60)
+                    user["jail_until"] = int(self._now() + jail_seconds)
                     add_heat(user, HEAT_GAIN_FAIL + config["heat_mod"])
                     stats["heists_lost"] = max(0, int(stats.get("heists_lost", 0))) + 1
                     payout = 0
@@ -282,7 +291,7 @@ class Crime(commands.Cog):
                     f"**Plan:** {config['plan']}\n"
                     f"🎯 Odds: **{int(config['chance'] * 100)}%**\n"
                     f"💸 Additional loss: **${loss:,}**\n"
-                    f"🚔 Jail: **{jail_minutes}m**\n"
+                    f"🚔 Jail: **{self._fmt_time(jail_seconds)}**\n"
                     f"🚓 Heat: **{int(user.get('heat', 0))}%**"
                 ),
                 color=0xE74C3C,
@@ -369,7 +378,10 @@ class Crime(commands.Cog):
                     balance = max(0, int(member.get("grams", 0)))
                     loss = calculate_capped_loss(balance, int(balance * 0.04))
                     member["grams"] = balance - loss
-                    member["jail_until"] = int(self._now() + jail_minutes * 60)
+                    member["jail_until"] = int(
+                        self._now()
+                        + self._jail_duration_seconds(member, jail_minutes * 60)
+                    )
                     add_heat(member, 6)
                     self.bot.db.mark_profile_dirty(scope.scope_id, member_id)
                 bank_gain = 0
@@ -393,7 +405,10 @@ class Crime(commands.Cog):
                 color=0x2ECC71,
             ))
         else:
-            await ctx.send(f"🚨 **Crew heist failed.** Eligible members were jailed for {jail_minutes}m.")
+            await ctx.send(
+                f"🚨 **Crew heist failed.** Base jail sentence: {jail_minutes}m. "
+                "Lawyer owners receive the advertised 25% reduction."
+            )
 
     async def _join_crew_heist(self, ctx, scope, user: dict) -> None:
         if self._in_jail(user) > 0:
@@ -540,7 +555,8 @@ class Crime(commands.Cog):
                 balance = max(0, int(robber.get("grams", 0)))
                 fine = calculate_capped_loss(balance, 1_000)
                 robber["grams"] = balance - fine
-                robber["jail_until"] = int(self._now() + 300)
+                jail_seconds = self._jail_duration_seconds(robber, 300)
+                robber["jail_until"] = int(self._now() + jail_seconds)
                 add_heat(robber, 25)
                 amount = 0
                 success = False
@@ -551,7 +567,9 @@ class Crime(commands.Cog):
         if success:
             await ctx.send(f"🔫 **SUCCESS!** Stole **${amount:,}** in dirty cash.")
         else:
-            await ctx.send(f"🚓 **BUSTED!** Fined ${fine:,} and jailed for 5m.")
+            await ctx.send(
+                f"🚓 **BUSTED!** Fined ${fine:,} and jailed for {self._fmt_time(jail_seconds)}."
+            )
 
     @commands.hybrid_command(name="launder")
     @commands.cooldown(1, 30, commands.BucketType.user)
