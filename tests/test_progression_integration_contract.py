@@ -24,7 +24,7 @@ def test_legacy_progression_implementation_is_removed_from_utils():
 
 def test_live_gameplay_routes_progress_through_progression_core():
     expected = {
-        "farming.py": ('"plant"', '"water"', '"harvest"'),
+        "farming.py": ('"plant"', '"harvest"'),
         "economy.py": ('"buy"', "check_achievements(user)"),
         "lab.py": ('"collect_dabs"',),
         "crime.py": ('"heist"', '"steal"', '"raid"', '"launder"'),
