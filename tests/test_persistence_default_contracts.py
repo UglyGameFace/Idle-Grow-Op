@@ -52,3 +52,14 @@ def test_open_world_scope_is_owned_by_pure_world_mode_contract():
 
     assert OPEN_WORLD_SCOPE_ID == 1
     assert world_modes.OPEN_WORLD_SCOPE_ID == world_mode_contracts.OPEN_WORLD_SCOPE_ID
+
+
+def test_new_world_starts_with_no_phantom_district_bonus():
+    world = make_default_world()
+
+    assert world["district"] == {
+        "owner_crew_id": None,
+        "owner_name": None,
+        "multiplier": 1.0,
+        "expires_at": 0,
+    }
