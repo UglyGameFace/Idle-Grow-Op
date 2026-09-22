@@ -80,7 +80,14 @@ def test_sesh_rewards_follow_each_participants_active_save():
 def test_background_jobs_process_open_world_once_and_filter_dormant_saves():
     tasks = source("tasks.py")
     assert "OPEN_WORLD_SCOPE_ID" in tasks
-    assert "open_world_processed" in tasks
+    game_once = tasks.split("async def _game_cycle_once", 1)[1].split(
+        "async def _run_game_cycle_for", 1
+    )[0]
+    notification_once = tasks.split("async def _notification_check_once", 1)[1].split(
+        "async def _run_notification_check_for", 1
+    )[0]
+    assert game_once.count("_WorldGuildProxy(") == 1
+    assert notification_once.count("_WorldGuildProxy(") == 1
     assert "policy_allows_open_world" in tasks
     assert "policy_uses_local_world" in tasks
     assert "resolve_game_scope" in tasks
