@@ -8,6 +8,7 @@ from game_hub import (
     HubConcentrateSelect,
     HubStealTargetSelect,
     SAFE_HUB_COMMANDS,
+    _keno_bet_token,
 )
 from utils import CONCENTRATE_TYPES
 from world_modes import GameScope, MODE_SERVER, POLICY_SERVER
@@ -233,3 +234,13 @@ def test_casino_page_uses_game_picker_and_requires_explicit_selection():
 
 def test_casino_launcher_allowlist_covers_every_selectable_game():
     assert {key for key, _label, _emoji in CASINO_GAMES} <= SAFE_HUB_COMMANDS
+
+
+
+def test_keno_launcher_disambiguates_small_numeric_bets_from_picks():
+    assert _keno_bet_token("10") == "$10"
+    assert _keno_bet_token("$25") == "$25"
+    assert _keno_bet_token("1,000") == "$1000"
+    assert _keno_bet_token("1k") == "1k"
+    assert _keno_bet_token("half") == "half"
+    assert _keno_bet_token("25%") == "25%"
