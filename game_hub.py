@@ -117,6 +117,13 @@ def _cash(value: Any) -> str:
     return "$" + f"{_positive_int(value):,}"
 
 
+def _keno_bet_token(value: str) -> str:
+    """Prevent small numeric Keno wagers from being parsed as number picks."""
+    raw = str(value or "").strip()
+    numeric = raw.replace(",", "").lstrip("$")
+    return f"${numeric}" if numeric.isdigit() else raw
+
+
 class HubInteractionContext:
     """Restricted Context adapter used only by allow-listed player actions."""
 
@@ -666,7 +673,7 @@ class HubCasinoBetModal(discord.ui.Modal):
                 arg1=values[0] if len(values) > 0 else None,
                 arg2=values[1] if len(values) > 1 else None,
                 arg3=values[2] if len(values) > 2 else None,
-                arg4=bet,
+                arg4=_keno_bet_token(bet),
             )
 
         await interaction.response.send_message(
