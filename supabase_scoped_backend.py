@@ -55,7 +55,7 @@ class SupabaseScopedBackend:
             )
         except Exception as exc:
             raise SupabaseSchemaError(
-                "Enterprise scoped Supabase schema is unavailable. Run migrations/001_guild_scoped_persistence.sql, migrations/002_enterprise_casino_metrics.sql, and migrations/003_atomic_scoped_record_batch.sql."
+                "Enterprise scoped Supabase schema is unavailable. Run migrations/001_guild_scoped_persistence.sql, migrations/002_enterprise_casino_metrics.sql, migrations/003_atomic_scoped_record_batch.sql, and migrations/004_batched_notification_candidates.sql."
             ) from exc
 
         if not (response.data or []):
