@@ -1065,6 +1065,7 @@ class GameHubView(discord.ui.View):
             view=view,
             ephemeral=True,
         )
+        view.message = await interaction.original_response()
 
     async def open_notifications(self, interaction: discord.Interaction) -> None:
         notifications = self.cog.bot.get_cog("NotificationPreferencesCog")
@@ -1302,6 +1303,13 @@ class GameHubView(discord.ui.View):
         await self.run_command(interaction, command_name)
 
     async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
         self.stop()
 
 
