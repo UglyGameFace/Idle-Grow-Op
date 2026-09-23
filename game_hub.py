@@ -301,6 +301,159 @@ class HubLaunderModal(discord.ui.Modal):
         )
 
 
+class HubConcentrateSelect(discord.ui.Select):
+    def __init__(self, view: "GameHubView", profile: dict) -> None:
+        level = max(1, _positive_int(profile.get("level")) or 1)
+        options = []
+        for name, data in CONCENTRATE_TYPES.items():
+            required_level = max(1, _positive_int(data.get("level_req")) or 1)
+            required_item = str(data.get("req_item") or "").strip()
+            status = f"Lv {required_level}"
+            if required_item:
+                status += f" • needs {required_item.title()}"
+            if level < required_level:
+                status = f"Locked • {status}"
+            options.append(
+                discord.SelectOption(
+                    label=name.title()[:100],
+                    value=name,
+                    description=status[:100],
+                    default=view.selected_concentrate == name,
+                )
+            )
+        super().__init__(
+            placeholder="Choose a concentrate to process…",
+            min_values=1,
+            max_values=1,
+            options=options[:25],
+            row=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        self.view.selected_concentrate = self.values[0]
+        await self.view.refresh(interaction)
+
+
+class HubProcessModal(discord.ui.Modal):
+    def __init__(self, view: "GameHubView", concentrate_type: str) -> None:
+        super().__init__(title=f"Process {concentrate_type.title()}")
+        self.hub_view = view
+        self.concentrate_type = concentrate_type
+        self.amount = discord.ui.TextInput(
+            label="Output amount (grams)",
+            placeholder="Example: 5",
+            default="1",
+            max_length=12,
+        )
+        self.add_item(self.amount)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        raw = str(self.amount.value).strip().replace(",", "")
+        try:
+            amount = int(raw)
+        except ValueError:
+            return await interaction.response.send_message(
+                "❌ Amount must be a whole number.",
+                ephemeral=True,
+            )
+        if amount <= 0:
+            return await interaction.response.send_message(
+                "❌ Amount must be positive.",
+                ephemeral=True,
+            )
+        await self.hub_view.run_command(
+            interaction,
+            "process",
+            concentrate_type=self.concentrate_type,
+            amount=str(amount),
+        )
+
+
+class HubCrewCreateModal(discord.ui.Modal):
+    def __init__(self, view: "GameHubView") -> None:
+        super().__init__(title="Create Crew")
+        self.hub_view = view
+        self.name_input = discord.ui.TextInput(
+            label="Crew name",
+            placeholder="Up to 50 characters",
+            max_length=50,
+        )
+        self.add_item(self.name_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.hub_view.run_command(
+            interaction,
+            "crew create",
+            name=str(self.name_input.value).strip(),
+        )
+
+
+class HubCrewJoinModal(discord.ui.Modal):
+    def __init__(self, view: "GameHubView") -> None:
+        super().__init__(title="Join Crew")
+        self.hub_view = view
+        self.crew_id = discord.ui.TextInput(
+            label="Crew ID",
+            placeholder="Example: 48219",
+            max_length=24,
+        )
+        self.add_item(self.crew_id)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.hub_view.run_command(
+            interaction,
+            "crew join",
+            crew_id=str(self.crew_id.value).strip(),
+        )
+
+
+class HubCrewDepositModal(discord.ui.Modal):
+    def __init__(self, view: "GameHubView") -> None:
+        super().__init__(title="Deposit to Crew Bank")
+        self.hub_view = view
+        self.amount = discord.ui.TextInput(
+            label="Amount",
+            placeholder="Example: 5000",
+            max_length=20,
+        )
+        self.add_item(self.amount)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        raw = str(self.amount.value).strip().replace(",", "").replace("$", "")
+        try:
+            amount = int(raw)
+        except ValueError:
+            return await interaction.response.send_message(
+                "❌ Deposit must be a whole number.",
+                ephemeral=True,
+            )
+        if amount <= 0:
+            return await interaction.response.send_message(
+                "❌ Deposit must be positive.",
+                ephemeral=True,
+            )
+        await self.hub_view.run_command(
+            interaction,
+            "crew deposit",
+            amount=amount,
+        )
+
+
+class HubStealTargetSelect(discord.ui.UserSelect):
+    def __init__(self, view: "GameHubView", *, disabled: bool = False) -> None:
+        super().__init__(
+            placeholder="Choose a player to rob…",
+            min_values=1,
+            max_values=1,
+            row=1,
+            disabled=disabled,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        self.view.selected_steal_target = self.values[0]
+        await self.view.refresh(interaction)
+
+
 class HubActionButton(discord.ui.Button):
     def __init__(
         self,
