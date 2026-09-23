@@ -208,7 +208,7 @@ class ScopedDatabaseManager:
         was_cached = self.store.is_cached(key)
         profile = await self.store.get(key)
 
-        if not was_cached:
+        if not was_cached and "level" in profile and "xp" in profile:
             before_progression = (profile.get("level"), profile.get("xp"))
             reconcile_level_xp(profile)
             if (profile.get("level"), profile.get("xp")) != before_progression:
