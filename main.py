@@ -29,6 +29,7 @@ GAME_EXTENSIONS = (
     "economy",
     "farming",
     "gambling",
+    "game_hub",
     "lab",
     "notification_preferences",
     "onboarding",
@@ -49,6 +50,7 @@ REQUIRED_PUBLIC_COMMANDS = frozenset(
         "setup",
         "start",
         "help",
+        "game",
         "notifications",
         "world-mode",
     }
