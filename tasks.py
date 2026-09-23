@@ -22,7 +22,6 @@ from world_modes import (
 )
 
 
-NOTIFICATION_CANDIDATE_LIMIT = 500
 MAJOR_MARKET_CHANGE = 0.20
 MARKET_CHANGE_EPSILON = 1e-9
 
@@ -374,76 +373,90 @@ class Tasks(commands.Cog):
 
     async def _run_notification_check_for(self, guilds):
         now = time.time()
-        for guild in guilds:
-            scope_id = int(guild.id)
-            guild_id = int(getattr(guild, "source_guild_id", guild.id))
-            try:
-                candidate_ids = await self.bot.db.list_guild_notification_candidates(
-                    scope_id,
-                    limit=NOTIFICATION_CANDIDATE_LIMIT,
-                )
-                world = await self.bot.db.get_world(scope_id)
-            except Exception as exc:
-                print(f"❌ Notification candidate query failed for scope {scope_id}: {exc}")
+        guild_by_scope = {int(guild.id): guild for guild in guilds}
+        if not guild_by_scope:
+            return
+
+        try:
+            candidates = await self.bot.db.list_notification_candidates(
+                tuple(guild_by_scope)
+            )
+        except Exception as exc:
+            logger.exception("Batched notification candidate query failed: %s", exc)
+            return
+
+        worlds: dict[int, dict] = {}
+        for scope_id, user_id in candidates:
+            resolved_scope_id = int(scope_id)
+            guild = guild_by_scope.get(resolved_scope_id)
+            if guild is None:
                 continue
-
-            for user_id in candidate_ids:
-                resolved_user_id = int(user_id)
-                try:
-                    if hasattr(guild, "resolve_player_scope"):
-                        scope = await guild.resolve_player_scope(self.bot.db, resolved_user_id)
-                        if scope is None or scope.scope_id != guild.id:
-                            continue
-                    else:
-                        scope = await resolve_game_scope(
-                            self.bot.db,
-                            guild_id,
-                            resolved_user_id,
-                        )
-                        if scope.scope_id != guild_id:
-                            continue
-
-                    pending = await self._notification_snapshot(
-                        scope_id,
-                        resolved_user_id,
-                        world,
-                        now,
-                    )
-                    if pending is None:
+            guild_id = int(getattr(guild, "source_guild_id", guild.id))
+            resolved_user_id = int(user_id)
+            try:
+                if hasattr(guild, "resolve_player_scope"):
+                    scope = await guild.resolve_player_scope(self.bot.db, resolved_user_id)
+                    if scope is None or scope.scope_id != guild.id:
                         continue
-                    plant_indexes, batch_indexes = pending
-                    target = await self.bot.fetch_user(resolved_user_id)
-                    notifications = []
-                    if plant_indexes:
-                        notifications.append(f"🌿 **{len(plant_indexes)} Plants** are ready!")
-                    if batch_indexes:
-                        notifications.append(f"⚗️ **{len(batch_indexes)} Batches** are done!")
-                    world_name = "Open World" if scope_id == OPEN_WORLD_SCOPE_ID else guild.name
-                    await target.send(
-                        embed=discord.Embed(
-                            title=f"📟 Pager Alert — {world_name}",
-                            description="\n".join(notifications),
-                            color=discord.Color.green(),
-                        )
-                    )
-                    await self._commit_notification_flags(
-                        scope_id,
+                else:
+                    scope = await resolve_game_scope(
+                        self.bot.db,
+                        guild_id,
                         resolved_user_id,
-                        world,
-                        now,
-                        plant_indexes,
-                        batch_indexes,
                     )
-                except discord.DiscordException:
+                    if scope.scope_id != guild_id:
+                        continue
+
+                world = worlds.get(resolved_scope_id)
+                if world is None:
+                    world = await self.bot.db.get_world(resolved_scope_id)
+                    worlds[resolved_scope_id] = world
+
+                pending = await self._notification_snapshot(
+                    resolved_scope_id,
+                    resolved_user_id,
+                    world,
+                    now,
+                )
+                if pending is None:
                     continue
-                except Exception as exc:
-                    logger.exception(
-                        "Notification check failed for scope %s, user %s: %s",
-                        scope_id,
-                        resolved_user_id,
-                        exc,
+                plant_indexes, batch_indexes = pending
+                target = await self.bot.fetch_user(resolved_user_id)
+                notifications = []
+                if plant_indexes:
+                    notifications.append(f"🌿 **{len(plant_indexes)} Plants** are ready!")
+                if batch_indexes:
+                    notifications.append(f"⚗️ **{len(batch_indexes)} Batches** are done!")
+                world_name = (
+                    "Open World"
+                    if resolved_scope_id == OPEN_WORLD_SCOPE_ID
+                    else guild.name
+                )
+                await target.send(
+                    embed=discord.Embed(
+                        title=f"📟 Pager Alert — {world_name}",
+                        description="\n".join(notifications),
+                        color=discord.Color.green(),
                     )
-                    continue
+                )
+                await self._commit_notification_flags(
+                    resolved_scope_id,
+                    resolved_user_id,
+                    world,
+                    now,
+                    plant_indexes,
+                    batch_indexes,
+                )
+            except discord.DiscordException:
+                continue
+            except Exception as exc:
+                logger.exception(
+                    "Notification check failed for scope %s, user %s: %s",
+                    resolved_scope_id,
+                    resolved_user_id,
+                    exc,
+                )
+                continue
 
     async def _notification_snapshot(
         self,
