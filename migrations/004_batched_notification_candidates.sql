@@ -9,7 +9,13 @@ immutable
 set search_path = public
 as $$
     select
-        coalesce(p_data #>> '{settings,notifications}', 'true') <> 'false'
+        (
+            case
+                when jsonb_typeof(p_data #> '{settings,notifications}') = 'boolean'
+                then (p_data #>> '{settings,notifications}')::boolean
+                else true
+            end
+        )
         and (
             exists (
                 select 1
@@ -20,7 +26,13 @@ as $$
                         else '[]'::jsonb
                     end
                 ) as plant
-                where coalesce(plant ->> 'notified', 'false') <> 'true'
+                where (
+                    case
+                        when jsonb_typeof(plant -> 'notified') = 'boolean'
+                        then (plant ->> 'notified')::boolean
+                        else false
+                    end
+                ) = false
             )
             or exists (
                 select 1
@@ -31,24 +43,25 @@ as $$
                         else '[]'::jsonb
                     end
                 ) as batch
-                where coalesce(batch ->> 'notified', 'false') <> 'true'
+                where (
+                    case
+                        when jsonb_typeof(batch -> 'notified') = 'boolean'
+                        then (batch ->> 'notified')::boolean
+                        else false
+                    end
+                ) = false
             )
         );
 $$;
 
-drop index if exists public.guild_profiles_notification_work_idx;
-
 alter table public.guild_profiles
-    drop column if exists has_notification_work;
-
-alter table public.guild_profiles
-    add column has_notification_work boolean generated always as (
+    add column if not exists has_pending_notification_work boolean generated always as (
         public.idle_grow_has_pending_notification_work(data)
     ) stored;
 
-create index guild_profiles_notification_work_idx
+create index if not exists guild_profiles_pending_notification_work_idx
     on public.guild_profiles (guild_id, user_id)
-    where has_notification_work;
+    where has_pending_notification_work;
 
 create or replace function public.idle_grow_list_notification_candidates(
     p_guild_ids bigint[]
@@ -63,7 +76,7 @@ set search_path = public
 as $$
     select profile.guild_id, profile.user_id
     from public.guild_profiles as profile
-    where profile.has_notification_work
+    where profile.has_pending_notification_work
       and profile.guild_id = any(coalesce(p_guild_ids, '{}'::bigint[]))
     order by profile.guild_id, profile.user_id;
 $$;
