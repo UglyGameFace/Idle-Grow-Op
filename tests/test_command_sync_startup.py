@@ -252,7 +252,7 @@ class SmokeBackend:
     ):
         return []
 
-    async def list_guild_notification_candidates(self, guild_id, *, limit=500):
+    async def list_notification_candidates(self, guild_ids):
         return []
 
 
