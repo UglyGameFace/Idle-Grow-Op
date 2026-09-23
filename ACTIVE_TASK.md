@@ -13,7 +13,7 @@ This audit covers the complete Idle Grow repository and deployed behavior:
 - CI/tests, Discloud deployment assumptions, stale compatibility logic, temporary artifacts, duplicated ownership, and dead code
 
 ## Status
-SOURCE / CI AUDIT COMPLETE — DEPLOYMENT VALIDATION BLOCKED
+SOURCE / CI AUDIT COMPLETE + EGRESS HARDENED — DEPLOYMENT VALIDATION BLOCKED
 
 ## Phase 1 Complete: Command Surface and Runtime Baseline
 Validated on exact head cae20b52d942a6a21137005f53a5778ad03d2149 with CI run 690 successful.
@@ -326,6 +326,29 @@ Cleanup:
 - User-facing slash guidance now has a direct loaded-tree contract instead of relying on decorator/source-text assumptions.
 - Removed command names are protected from accidental reintroduction into the published command tree.
 
+## Phase 10 Checkpoint: Supabase Egress Hardening
+Validated on exact head 43e1d2ffb3632844dc3cd449fddec269397a203c with CI run 851 successful.
+
+Observed production concern:
+- Supabase organization usage showed prior-cycle egress overage and current-cycle egress already materially consumed.
+- The Idle Grow notification loop previously issued one Supabase candidate query per active scope every two minutes.
+- At large guild counts, request fan-out scales with guild count even when most scopes have no actionable notifications.
+
+Completed:
+- Added migration 004_batched_notification_candidates.sql.
+- Added an additive generated column, has_pending_notification_work, that respects global and per-category notification preferences and excludes already-notified work.
+- Added an indexed batched RPC, idle_grow_list_notification_candidates(bigint[]), returning only guild_id/user_id pairs for active scopes.
+- Replaced per-guild notification candidate reads with one batched scope query.
+- Added an in-memory notification candidate set in ScopedDatabaseManager.
+- Candidate scopes are primed from Supabase only once per process lifetime; subsequent two-minute scans reuse memory.
+- Profile loads and every dirty profile mutation keep the candidate set synchronized locally.
+- Cached profile state wins over stale database prime rows, preventing a mutation-vs-prime race.
+- Notification world records are loaded lazily only for scopes that actually have candidates.
+- Added schema, backend, task-loop, and manager runtime regressions proving batching and no-repeat reads after prime.
+
+Deployment requirement:
+- Production Supabase must apply migrations/004_batched_notification_candidates.sql after migration 003 and before deploying this exact audited head.
+
 ## Cleanup / Conflict Review
 COMPLETE for repository source and CI scope.
 
@@ -360,4 +383,4 @@ Repository/source audit work is complete. Remaining closure work is external dep
 - No open PR at audit start.
 
 ## Next Step
-Do not deploy this branch against schema 002. Apply and verify `migrations/003_atomic_scoped_record_batch.sql` in production Supabase first. Then deploy the exact audited head to Discloud and validate startup schema verification, extension loading, global command sync, representative live commands, and background cycles before closing this master audit.
+Apply and verify `migrations/004_batched_notification_candidates.sql` in production Supabase. Then deploy the exact audited head and validate startup schema verification, extension loading, global command sync, representative live commands, background cycles, and post-deploy Supabase egress trend before closing this master audit.
