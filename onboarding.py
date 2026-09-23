@@ -204,6 +204,21 @@ class OnboardingView(discord.ui.View):
     async def _edit(self, interaction: discord.Interaction, embed: discord.Embed) -> None:
         await interaction.response.edit_message(embed=embed, view=self)
 
+    @discord.ui.button(label="Play Game", emoji="🎮", style=discord.ButtonStyle.success, row=1)
+    async def play_game(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        hub = self.cog.bot.get_cog("GameHub")
+        if hub is None or not hasattr(hub, "send_hub_interaction"):
+            await interaction.response.send_message(
+                "⚠️ The game menu is temporarily unavailable.",
+                ephemeral=True,
+            )
+            return
+        await hub.send_hub_interaction(interaction)
+
     @discord.ui.button(label="Next Step", emoji="🧭", style=discord.ButtonStyle.success, row=0)
     async def next_step(
         self,
@@ -282,17 +297,21 @@ class Onboarding(commands.Cog):
         )
         embed.add_field(
             name=step.title,
-            value=f"Run **`{step.command}`**\n{step.reason}",
+            value=(
+                f"Tap **🎮 Play Game** below and use the highlighted section.\n"
+                f"{step.reason}\n"
+                f"Command shortcut: **`{step.command}`**"
+            ),
             inline=False,
         )
         embed.add_field(
             name="The money loop",
-            value="Buy a seed → plant → check progress → harvest → sell → upgrade and repeat.",
+            value="Open **🎮 Play Game** → Grow/Shop → plant → harvest → sell → upgrade and repeat.",
             inline=False,
         )
         embed.add_field(
             name="Easy bonuses",
-            value="Use `/growdaily` and `/growquests`. Use `/notifications` to control ready-work DMs for this save.",
+            value="Use **Progress** for rewards/quests and **Settings** for private ready-work alerts.",
             inline=False,
         )
         embed.set_footer(text="This guide only reads your save. It never spends, grants, moves, or resets anything.")
