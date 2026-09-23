@@ -6,13 +6,14 @@ import discord
 from discord.ext import commands, tasks
 
 from guild_config import ANNOUNCEMENT_CHANNEL_KEY, GAME_CHANNEL_KEY, WORLD_SETTINGS_KEY
+from plant_lifecycle import plant_is_ready
 from notification_preferences import (
     ANNOUNCEMENT_ROLE_KEY,
     NOTIFICATION_CATEGORIES_KEY,
     build_announcement_delivery,
     normalize_notification_preferences,
 )
-from utils import SPECIAL_EVENTS, WEATHER_TYPES, get_plant_grow_time
+from utils import SPECIAL_EVENTS, WEATHER_TYPES
 from world_modes import (
     OPEN_WORLD_SCOPE_ID,
     normalize_world_mode_config,
@@ -480,10 +481,9 @@ class Tasks(commands.Cog):
             plant_indexes = []
             if preferences.plant_ready:
                 for index, plant in enumerate(profile.get("plants", [])):
-                    if plant.get("notified"):
+                    if not isinstance(plant, dict) or plant.get("notified"):
                         continue
-                    grow_time = get_plant_grow_time(profile, world, plant)
-                    if now - float(plant.get("planted_at", now)) >= grow_time:
+                    if plant_is_ready(profile, world, plant, now=now):
                         plant_indexes.append(index)
 
             batch_indexes = []
