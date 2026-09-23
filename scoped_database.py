@@ -207,17 +207,16 @@ class ScopedDatabaseManager:
             raise RuntimeError("database backend does not support list_guild_casino_leaderboard")
         return await query(guild_id, metric=metric, limit=limit)
 
-    async def list_guild_notification_candidates(
+    async def list_notification_candidates(
         self,
-        guild_id: Any,
-        *,
-        limit: int = 500,
-    ) -> list[int]:
-        return await self._run_backend_query(
-            "list_guild_notification_candidates",
-            guild_id,
-            limit=limit,
-        )
+        guild_ids: list[Any] | tuple[Any, ...] | set[Any],
+    ) -> list[tuple[int, int]]:
+        query = getattr(self.backend, "list_notification_candidates", None)
+        if query is None:
+            raise RuntimeError(
+                "database backend does not support list_notification_candidates"
+            )
+        return await query(guild_ids)
 
     async def _run_backend_query(
         self,
