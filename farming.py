@@ -37,7 +37,10 @@ class Farming(commands.Cog):
             return
 
         if not strain_name:
-            return await ctx.send("🌱 **Usage:** `/plant strain_name:<strain>` (example: `/plant strain_name:schwag`)")
+            return await ctx.send(
+                "🌱 Open **`/game` → Grow** to choose an owned seed and plant it, "
+                "or use the shortcut `/plant strain_name:<strain>`."
+            )
 
         clean_name = strain_name.lower().replace(" seed", "").strip()
         seed_item_name = f"{clean_name} seed"
@@ -57,7 +60,7 @@ class Farming(commands.Cog):
             elif inv_get(user, seed_item_name) < 1:
                 plant_error = (
                     f"❌ You don\'t have any **{clean_name.title()} Seeds**!\n"
-                    f"Use `/shop`, then `/buy item_name:{seed_item_name}`."
+                    "Open **`/game` → Grow → Seed Shop** to buy one without typing item names."
                 )
             else:
                 max_pots = effective_pot_capacity(user, scope)
@@ -177,7 +180,7 @@ class Farming(commands.Cog):
         if not plants:
             embed = discord.Embed(
                 title="🌱 Your Garden",
-                description="Empty. Use `/start` for your next step or `/plant` after buying a seed.",
+                description="Empty. Open **`/game` → Grow** to buy, choose, and plant a seed.",
                 color=0x2F3136,
             )
             return await ctx.send(embed=embed)
@@ -210,7 +213,9 @@ class Farming(commands.Cog):
 
         embed.description = "\n\n".join(lines)
         if ready_count > 0:
-            embed.set_footer(text=f"{ready_count} plants ready! Run /harvest")
+            embed.set_footer(
+                text=f"{ready_count} plants ready! Use Game → Grow → Harvest Ready or /harvest."
+            )
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="strains", aliases=["seeds"])
