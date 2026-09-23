@@ -32,6 +32,8 @@ class FakeDatabase:
         self.profiles = {}
         self.lock = asyncio.Lock()
         self.dirty_worlds = set()
+        self.notification_candidates = []
+        self.notification_calls = []
 
     async def get_world(self, scope_id):
         return self.worlds.setdefault(int(scope_id), {})
@@ -41,6 +43,12 @@ class FakeDatabase:
 
     def mark_world_dirty(self, scope_id):
         self.dirty_worlds.add(int(scope_id))
+
+
+    async def list_notification_candidates(self, guild_ids):
+        normalized = tuple(sorted(int(value) for value in guild_ids))
+        self.notification_calls.append(normalized)
+        return list(self.notification_candidates)
 
 
 class FakeBot:
@@ -142,5 +150,18 @@ def test_open_world_routing_copies_only_the_selected_guild_channel_settings():
         assert settings["game_channel_id"] == 456
         assert settings["unrelated"] is True
         assert OPEN_WORLD_SCOPE_ID in database.dirty_worlds
+
+    asyncio.run(scenario())
+
+
+def test_notification_scan_batches_multiple_scopes_into_one_backend_query():
+    async def scenario():
+        database = FakeDatabase()
+        guilds = [FakeGuild(401), FakeGuild(402), FakeGuild(403)]
+        cog = Tasks(FakeBot(database, guilds))
+
+        await cog._run_notification_check_for(guilds)
+
+        assert database.notification_calls == [(401, 402, 403)]
 
     asyncio.run(scenario())

@@ -167,10 +167,28 @@ def test_auction_prices_must_be_positive_and_coherent():
 
 def test_expired_or_non_increasing_bids_are_rejected():
     assert validate_bid_amount(101, current_bid=100, end_time=200, now=100) == 101
+    assert (
+        validate_bid_amount(
+            100,
+            current_bid=100,
+            end_time=200,
+            now=100,
+            allow_equal=True,
+        )
+        == 100
+    )
     with pytest.raises(ValueError, match="expired"):
         validate_bid_amount(101, current_bid=100, end_time=100, now=100)
     with pytest.raises(ValueError, match="higher"):
         validate_bid_amount(100, current_bid=100, end_time=200, now=100)
+    with pytest.raises(ValueError, match="starting price"):
+        validate_bid_amount(
+            99,
+            current_bid=100,
+            end_time=200,
+            now=100,
+            allow_equal=True,
+        )
 
 
 def test_pot_upgrade_limit_is_enforced_before_capacity_changes():

@@ -3,6 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / "profile_signatures.py").read_text(encoding="utf-8")
+CONTRACT_SOURCE = (ROOT / "profile_signature_contracts.py").read_text(encoding="utf-8")
 SETUP_SOURCE = (ROOT / "setup.py").read_text(encoding="utf-8")
 SOCIAL_SOURCE = (ROOT / "social.py").read_text(encoding="utf-8")
 DB_SOURCE = (ROOT / "scoped_database.py").read_text(encoding="utf-8")
@@ -10,7 +11,7 @@ MAIN_SOURCE = (ROOT / "main.py").read_text(encoding="utf-8")
 
 
 def test_live_signatures_have_one_persisted_bot_owned_card_per_channel():
-    assert 'SIGNATURE_STATE_KEY = "profile_signature_state"' in SOURCE
+    assert 'SIGNATURE_STATE_KEY = "profile_signature_state"' in CONTRACT_SOURCE
     assert 'SIGNATURE_MARKER = "Idle Grow Live Signature"' in SOURCE
     assert 'state[str(channel_id)] = {' in SOURCE
     assert 'message.author.id != self.bot.user.id' in SOURCE
@@ -56,9 +57,9 @@ def test_privacy_and_configuration_changes_invalidate_in_flight_cards():
 
 
 def test_platforms_and_privacy_use_scoped_persistence():
-    assert 'IDENTITY_KEY = "profile_identity"' in SOURCE
-    assert 'GLOBAL_PRIVACY_KEY = "profile_privacy"' in SOURCE
-    assert 'GUILD_PRIVACY_KEY = "profile_signature_privacy"' in SOURCE
+    assert 'IDENTITY_KEY = "profile_identity"' in CONTRACT_SOURCE
+    assert 'GLOBAL_PRIVACY_KEY = "profile_privacy"' in CONTRACT_SOURCE
+    assert 'GUILD_PRIVACY_KEY = "profile_signature_privacy"' in CONTRACT_SOURCE
     assert "await self.bot.db.get_account" in SOURCE
     assert "self.bot.db.mark_account_dirty" in SOURCE
     assert "await self.bot.db.get_profile" in SOURCE
@@ -109,9 +110,8 @@ def test_setup_is_optional_disabled_by_default_and_channel_selected():
     assert "async def build_signature_panel" in SETUP_SOURCE
     assert "invalidate_guild_cards" in SETUP_SOURCE
     assert '"profile_signatures"' in MAIN_SOURCE
-    assert '"profile_signature_config": {' in DB_SOURCE
-    assert '"enabled": False' in DB_SOURCE
-    assert '"profile_signature_state": {}' in DB_SOURCE
+    assert "SIGNATURE_CONFIG_KEY: default_signature_config()" in DB_SOURCE
+    assert "SIGNATURE_STATE_KEY: default_signature_state()" in DB_SOURCE
 
 
 def test_runtime_never_uses_webhooks_or_reposts_user_content():

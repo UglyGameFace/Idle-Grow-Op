@@ -118,13 +118,25 @@ def validate_auction_prices(start_price: Any, buyout: Any = 0) -> tuple[int, int
     return start, buyout_amount
 
 
-def validate_bid_amount(amount: Any, *, current_bid: Any, end_time: Any, now: float) -> int:
+def validate_bid_amount(
+    amount: Any,
+    *,
+    current_bid: Any,
+    end_time: Any,
+    now: float,
+    allow_equal: bool = False,
+) -> int:
     """Validate a bid before any bidder or seller balance is touched."""
     bid = require_positive_amount(amount)
     if now >= float(end_time):
         raise ValueError("auction has expired")
-    if bid <= int(current_bid):
-        raise ValueError("bid must be higher than the current bid")
+    floor = int(current_bid)
+    if bid < floor or (bid == floor and not allow_equal):
+        raise ValueError(
+            "bid must meet the starting price"
+            if allow_equal
+            else "bid must be higher than the current bid"
+        )
     return bid
 
 

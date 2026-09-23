@@ -35,9 +35,17 @@ class Query:
         return Response([])
 
 
+class RpcQuery:
+    def execute(self):
+        return Response(None)
+
+
 class FakeClient:
     def table(self, table_name):
         return Query(self, table_name)
+
+    def rpc(self, _name, _params):
+        return RpcQuery()
 
 
 class Factory:

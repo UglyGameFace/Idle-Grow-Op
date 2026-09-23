@@ -15,21 +15,26 @@ import discord
 from discord.ext import commands
 
 from persistence_context import GuildContextRequired, require_guild_id
-from utils import _xp_needed_for_level, get_plant_grow_time
+from profile_signature_contracts import (
+    ALL_PROFILE_FIELDS,
+    DEFAULT_SERVER_ALLOWED_FIELDS,
+    DEFAULT_VISIBLE_FIELDS,
+    FIELD_LABELS,
+    GLOBAL_PRIVACY_KEY,
+    GUILD_PRIVACY_KEY,
+    IDENTITY_KEY,
+    SIGNATURE_ALLOWED_FIELDS_KEY,
+    SIGNATURE_CHANNELS_KEY,
+    SIGNATURE_CONFIG_KEY,
+    SIGNATURE_ENABLED_KEY,
+    SIGNATURE_STATE_KEY,
+)
+from progression_core import xp_needed_for_level
+from utils import get_plant_grow_time
 from world_modes import MODE_LABELS, resolve_game_scope
 
 
 logger = logging.getLogger(__name__)
-
-SIGNATURE_CONFIG_KEY = "profile_signature_config"
-SIGNATURE_STATE_KEY = "profile_signature_state"
-SIGNATURE_ENABLED_KEY = "enabled"
-SIGNATURE_CHANNELS_KEY = "channel_ids"
-SIGNATURE_ALLOWED_FIELDS_KEY = "allowed_fields"
-
-IDENTITY_KEY = "profile_identity"
-GLOBAL_PRIVACY_KEY = "profile_privacy"
-GUILD_PRIVACY_KEY = "profile_signature_privacy"
 
 SIGNATURE_MARKER = "Idle Grow Live Signature"
 SIGNATURE_DEBOUNCE_SECONDS = 2.5
@@ -37,23 +42,6 @@ SIGNATURE_CHANNEL_COOLDOWN_SECONDS = 8.0
 SIGNATURE_USER_COOLDOWN_SECONDS = 20.0
 SIGNATURE_SAME_SPEAKER_REFRESH_SECONDS = 90.0
 SIGNATURE_HISTORY_SCAN_LIMIT = 100
-
-FIELD_LABELS = {
-    "level": "Level & XP",
-    "crew": "Crew",
-    "grow_status": "Grow status",
-    "wealth": "Balance / net worth",
-    "inventory": "Inventory summary",
-    "rank": "Server rank",
-    "achievements": "Achievements",
-    "activity": "Activity details",
-    "platforms": "Gaming & social platforms",
-}
-ALL_PROFILE_FIELDS = tuple(FIELD_LABELS)
-DEFAULT_VISIBLE_FIELDS = frozenset({"level", "crew", "grow_status"})
-DEFAULT_SERVER_ALLOWED_FIELDS = frozenset(
-    {"level", "crew", "grow_status", "rank", "achievements", "platforms"}
-)
 
 _SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]{2,64}$")
 _STEAM_ID_RE = re.compile(r"^\d{15,20}$")
@@ -447,7 +435,7 @@ def _inventory_summary(profile: dict[str, Any]) -> str:
 def _xp_line(profile: dict[str, Any]) -> str:
     level = max(1, _safe_int(profile.get("level"), 1))
     xp = max(0, _safe_int(profile.get("xp")))
-    needed = max(1, _safe_int(_xp_needed_for_level(level), 1))
+    needed = max(1, _safe_int(xp_needed_for_level(level), 1))
     percent = min(100, int((xp / needed) * 100))
     filled = min(10, max(0, percent // 10))
     bar = "🟦" * filled + "⬜" * (10 - filled)
@@ -850,18 +838,22 @@ class ProfileSignatures(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self._pending: dict[tuple[int, int], asyncio.Task] = {}
+        self._cleanup_tasks: set[asyncio.Task] = set()
         self._channel_generation: dict[tuple[int, int], int] = {}
         self._channel_locks: dict[tuple[int, int], asyncio.Lock] = {}
         self._channel_last_update: dict[tuple[int, int], float] = {}
         self._user_last_update: dict[tuple[int, int], float] = {}
         self._rank_cache: dict[int, tuple[float, dict[int, int]]] = {}
-        self._reconciled = False
+        self._reconciled_guild_ids: set[int] = set()
 
     def cog_unload(self) -> None:
-        for task in list(self._pending.values()):
-            task.cancel()
+        for task in [*self._pending.values(), *self._cleanup_tasks]:
+            if not task.done():
+                task.cancel()
         self._pending.clear()
+        self._cleanup_tasks.clear()
         self._channel_generation.clear()
+        self._reconciled_guild_ids.clear()
 
     def _lock_for(self, guild_id: int, channel_id: int) -> asyncio.Lock:
         key = (int(guild_id), int(channel_id))
@@ -914,8 +906,10 @@ class ProfileSignatures(commands.Cog):
             runner(),
             name=f"profile-signature-privacy-cleanup-{user_id}",
         )
+        self._cleanup_tasks.add(task)
 
         def report_failure(done: asyncio.Task) -> None:
+            self._cleanup_tasks.discard(done)
             if done.cancelled():
                 return
             try:
@@ -1241,7 +1235,7 @@ class ProfileSignatures(commands.Cog):
         if "level" in visible:
             level = max(1, _safe_int(profile.get("level"), 1))
             xp = max(0, _safe_int(profile.get("xp")))
-            needed = max(1, _safe_int(_xp_needed_for_level(level), 1))
+            needed = max(1, _safe_int(xp_needed_for_level(level), 1))
             lines.append(f"⭐ **Level {level}** • {xp:,}/{needed:,} XP")
         if "crew" in visible:
             crew = _crew_name(profile, world)
@@ -1816,19 +1810,30 @@ class ProfileSignatures(commands.Cog):
                 updated_at=float(current.get("updated_at", 0) or 0),
             )
 
+    async def _reconcile_guild_if_needed(self, guild: discord.Guild) -> bool:
+        guild_id = int(guild.id)
+        if guild_id in self._reconciled_guild_ids:
+            return True
+        try:
+            await self.reconcile_guild(guild)
+        except Exception:
+            logger.exception(
+                "Could not reconcile profile signatures for guild %s; will retry later",
+                guild_id,
+            )
+            return False
+        self._reconciled_guild_ids.add(guild_id)
+        return True
+
     @commands.Cog.listener()
     async def on_ready(self) -> None:
-        if self._reconciled:
-            return
-        self._reconciled = True
         for guild in list(self.bot.guilds):
-            try:
-                await self.reconcile_guild(guild)
-            except Exception:
-                logger.exception(
-                    "Could not reconcile profile signatures for guild %s",
-                    guild.id,
-                )
+            await self._reconcile_guild_if_needed(guild)
+
+    @commands.Cog.listener()
+    async def on_guild_join(self, guild: discord.Guild) -> None:
+        self._reconciled_guild_ids.discard(int(guild.id))
+        await self._reconcile_guild_if_needed(guild)
 
 
 async def setup(bot: commands.Bot) -> None:

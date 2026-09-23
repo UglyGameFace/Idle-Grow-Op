@@ -73,7 +73,7 @@ def test_owned_seed_is_planted_before_buying_more():
     assert step.command == "/plant strain_name:schwag"
 
 
-def test_growing_plant_uses_status_until_watering_is_due():
+def test_growing_plant_stays_on_status_until_ready():
     profile = {
         "grams": 485,
         "level": 1,
@@ -81,14 +81,11 @@ def test_growing_plant_uses_status_until_watering_is_due():
             {
                 "strain": "mexican brick",
                 "planted_at": 900,
-                "last_watered": 900,
-                "water_count": 1,
-                "quality": 1.0,
             }
         ],
     }
     assert choose_onboarding_step(scope(), profile, {}, now=1000).key == "status"
-    assert choose_onboarding_step(scope(), profile, {}, now=1301).key == "water"
+    assert choose_onboarding_step(scope(), profile, {}, now=1301).key == "status"
 
 
 def test_ready_plant_is_harvested_before_other_actions():
@@ -101,9 +98,6 @@ def test_ready_plant_is_harvested_before_other_actions():
                 {
                     "strain": "schwag",
                     "planted_at": 0,
-                    "last_watered": 0,
-                    "water_count": 1,
-                    "quality": 1.0,
                 }
             ],
         },

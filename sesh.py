@@ -14,6 +14,7 @@ import discord
 from discord.ext import commands
 
 from persistence_context import GuildContextRequired, require_guild_id
+from progression_core import credit_xp
 from world_modes import mark_game_profile_dirty, resolve_game_scope
 
 
@@ -40,7 +41,10 @@ ROTATION_BONUS_COOLDOWN_SECONDS = 120
 ROTATION_BONUS_MAX_PER_SESSION = 6
 VOICE_GRACE_SECONDS = 90
 MEDIA_MIN_SCORE = 8
+SESH_RECONCILE_ATTEMPTS = 3
+SESH_RECONCILE_RETRY_SECONDS = 5
 
+SESH_CONFIG_KEY = "sesh_config"
 SESH_ENABLED_KEY = "enabled"
 ALLOW_ALL_VOICE_ROOMS_KEY = "allow_all_voice_rooms"
 VOICE_CHANNELS_KEY = "voice_channels"
@@ -252,7 +256,8 @@ class Sesh(commands.Cog):
 
     async def _guild_config(self, guild_id: int) -> tuple[dict, dict]:
         world = await self.bot.db.get_world(guild_id)
-        return world, world.setdefault("sesh_config", {})
+        raw = world.get(SESH_CONFIG_KEY)
+        return world, dict(raw) if isinstance(raw, dict) else {}
 
     async def _persist_descriptor(
         self,
@@ -278,60 +283,81 @@ class Sesh(commands.Cog):
 
     async def _reconcile_stale_sessions(self) -> None:
         await self.bot.wait_until_ready()
-        for guild in self.bot.guilds:
-            try:
-                world = await self.bot.db.get_world(guild.id)
-                stale = dict(world.get("active_sesh_sessions") or {})
-                tracked_temp_ids = {
-                    int(item.get("temporary_voice_channel_id") or 0)
-                    for item in stale.values()
-                    if item.get("temporary_voice_channel_id")
-                }
-                for item in stale.values():
-                    channel = guild.get_channel(int(item.get("text_channel_id") or 0))
-                    message_id = int(item.get("message_id") or 0)
-                    if channel and message_id:
-                        try:
-                            message = await channel.fetch_message(message_id)
-                            await message.edit(
-                                content="⚠️ This Sesh ended during a bot restart.",
-                                view=None,
-                            )
-                        except (
-                            discord.NotFound,
-                            discord.Forbidden,
-                            discord.HTTPException,
-                        ):
-                            pass
-
-                    temp = guild.get_channel(
-                        int(item.get("temporary_voice_channel_id") or 0)
+        pending = list(self.bot.guilds)
+        for attempt in range(1, SESH_RECONCILE_ATTEMPTS + 1):
+            failed = []
+            for guild in pending:
+                try:
+                    await self._reconcile_stale_guild(guild)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    failed.append(guild)
+                    logger.exception(
+                        "Sesh stale reconciliation failed for guild %s on attempt %s/%s",
+                        guild.id,
+                        attempt,
+                        SESH_RECONCILE_ATTEMPTS,
                     )
-                    if temp and _voice_like(temp):
-                        await self._evacuate_and_delete_temp_channel(
-                            temp,
-                            reason="stale restart cleanup",
-                        )
+            if not failed:
+                return
+            pending = failed
+            if attempt < SESH_RECONCILE_ATTEMPTS:
+                await asyncio.sleep(SESH_RECONCILE_RETRY_SECONDS * attempt)
 
-                # Also remove clearly marked orphan rooms even when a descriptor write
-                # was interrupted before shutdown.
-                for channel in guild.voice_channels:
-                    if channel.id in tracked_temp_ids:
-                        continue
-                    if channel.name.startswith(TEMP_CHANNEL_MARKER):
-                        await self._evacuate_and_delete_temp_channel(
-                            channel,
-                            reason="orphaned temporary Sesh cleanup",
-                        )
+        logger.error(
+            "Sesh stale reconciliation exhausted retries for guilds: %s",
+            ", ".join(str(guild.id) for guild in pending),
+        )
 
-                if stale:
-                    world["active_sesh_sessions"] = {}
-                    self.bot.db.mark_world_dirty(guild.id)
-            except Exception:
-                logger.exception(
-                    "Sesh stale reconciliation failed for guild %s",
-                    guild.id,
+    async def _reconcile_stale_guild(self, guild: discord.Guild) -> None:
+        world = await self.bot.db.get_world(guild.id)
+        stale = dict(world.get("active_sesh_sessions") or {})
+        tracked_temp_ids = {
+            int(item.get("temporary_voice_channel_id") or 0)
+            for item in stale.values()
+            if item.get("temporary_voice_channel_id")
+        }
+        for item in stale.values():
+            channel = guild.get_channel(int(item.get("text_channel_id") or 0))
+            message_id = int(item.get("message_id") or 0)
+            if channel and message_id:
+                try:
+                    message = await channel.fetch_message(message_id)
+                    await message.edit(
+                        content="⚠️ This Sesh ended during a bot restart.",
+                        view=None,
+                    )
+                except (
+                    discord.NotFound,
+                    discord.Forbidden,
+                    discord.HTTPException,
+                ):
+                    pass
+
+            temp = guild.get_channel(
+                int(item.get("temporary_voice_channel_id") or 0)
+            )
+            if temp and _voice_like(temp):
+                await self._evacuate_and_delete_temp_channel(
+                    temp,
+                    reason="stale restart cleanup",
                 )
+
+        # Also remove clearly marked orphan rooms even when a descriptor write
+        # was interrupted before shutdown.
+        for channel in guild.voice_channels:
+            if channel.id in tracked_temp_ids:
+                continue
+            if channel.name.startswith(TEMP_CHANNEL_MARKER):
+                await self._evacuate_and_delete_temp_channel(
+                    channel,
+                    reason="orphaned temporary Sesh cleanup",
+                )
+
+        if stale:
+            world["active_sesh_sessions"] = {}
+            self.bot.db.mark_world_dirty(guild.id)
 
     def _configured_voice_channel(
         self,
@@ -643,7 +669,7 @@ class Sesh(commands.Cog):
                     max(0, round(rate * multiplier)),
                 )
                 if gain:
-                    profile["xp"] = int(profile.get("xp", 0)) + gain
+                    credit_xp(profile, gain)
                     social_stats = profile.setdefault("social_stats", {})
                     social_stats["sesh_xp"] = (
                         int(social_stats.get("sesh_xp", 0)) + gain
@@ -665,7 +691,7 @@ class Sesh(commands.Cog):
                             bonus,
                             SESH_XP_MAX_PER_USER - state.total_awarded,
                         )
-                        profile["xp"] += reward
+                        credit_xp(profile, reward)
                         state.total_awarded += reward
                         state.streak_awarded.add(milestone)
                         mark_game_profile_dirty(self.bot.db, scope, member.id)
@@ -737,7 +763,7 @@ class Sesh(commands.Cog):
                     scope.scope_id,
                     member.id,
                 )
-                profile["xp"] = int(profile.get("xp", 0)) + reward
+                credit_xp(profile, reward)
                 mark_game_profile_dirty(self.bot.db, scope, member.id)
                 state.total_awarded += reward
             state.rotation_awarded += 1
@@ -915,6 +941,12 @@ class Sesh(commands.Cog):
                 )
         except asyncio.CancelledError:
             raise
+        except Exception:
+            logger.exception(
+                "Private Sesh cleanup failed guild=%s channel=%s",
+                key[0],
+                channel_id,
+            )
         finally:
             self._private_cleanup_tasks.pop(key, None)
 
@@ -1155,7 +1187,11 @@ class Sesh(commands.Cog):
     @commands.has_permissions(manage_guild=True)
     async def seshconfig_disable(self, ctx: commands.Context) -> None:
         async with self.bot.db.lock:
-            _, config = await self._guild_config(ctx.guild.id)
+            world = await self.bot.db.get_world(ctx.guild.id)
+            config = world.setdefault(SESH_CONFIG_KEY, {})
+            if not isinstance(config, dict):
+                config = {}
+                world[SESH_CONFIG_KEY] = config
             config[SESH_ENABLED_KEY] = False
             self.bot.db.mark_world_dirty(ctx.guild.id)
         ended = await self.end_guild_sessions(

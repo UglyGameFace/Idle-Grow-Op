@@ -7,8 +7,10 @@ from progression_core import (
     claim_daily,
     ensure_daily_quests,
     ensure_progression,
+    xp_needed_for_level,
 )
 from progression_data import ACHIEVEMENTS
+from utils import has_item
 from world_modes import resolve_game_scope
 
 
@@ -33,7 +35,11 @@ class Progression(commands.Cog):
     async def _claim_daily(self, ctx):
         scope, profile = await self._profile(ctx)
         async with self.bot.db.lock:
-            result = claim_daily(profile, user_id=ctx.author.id)
+            result = claim_daily(
+                profile,
+                user_id=ctx.author.id,
+                reward_multiplier=1.20 if has_item(profile, "pager") else 1.0,
+            )
             if result["ok"]:
                 check_achievements(profile)
                 self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
@@ -122,7 +128,7 @@ class Progression(commands.Cog):
         _, profile = await self._profile(ctx)
         level = max(1, int(profile.get("level", 1)))
         xp = max(0, int(profile.get("xp", 0)))
-        next_level_xp = max(100, level * 500)
+        next_level_xp = xp_needed_for_level(level)
         embed = discord.Embed(title=f"📈 {ctx.author.display_name}'s Progress", color=discord.Color.green())
         embed.add_field(name="Level", value=f"**{level:,}**", inline=True)
         embed.add_field(name="XP", value=f"**{xp:,}/{next_level_xp:,}**", inline=True)

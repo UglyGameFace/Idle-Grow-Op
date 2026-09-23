@@ -1,9 +1,11 @@
+import logging
 import random
 import time
 
 import discord
 from discord.ext import commands, tasks
 
+from guild_config import ANNOUNCEMENT_CHANNEL_KEY, GAME_CHANNEL_KEY, WORLD_SETTINGS_KEY
 from notification_preferences import (
     ANNOUNCEMENT_ROLE_KEY,
     NOTIFICATION_CATEGORIES_KEY,
@@ -20,11 +22,10 @@ from world_modes import (
 )
 
 
-NOTIFICATION_CANDIDATE_LIMIT = 500
-ANNOUNCEMENT_CHANNEL_KEY = "announcement_channel_id"
-GAME_CHANNEL_KEY = "game_channel_id"
 MAJOR_MARKET_CHANGE = 0.20
 MARKET_CHANGE_EPSILON = 1e-9
+
+logger = logging.getLogger(__name__)
 
 
 class _WorldGuildProxy:
@@ -106,8 +107,8 @@ class Tasks(commands.Cog):
         async with self.bot.db.lock:
             local_world = await self.bot.db.get_world(guild.id)
             shared_world = await self.bot.db.get_world(OPEN_WORLD_SCOPE_ID)
-            local_settings = local_world.get("settings", {}) if isinstance(local_world, dict) else {}
-            shared_settings = shared_world.setdefault("settings", {})
+            local_settings = local_world.get(WORLD_SETTINGS_KEY, {}) if isinstance(local_world, dict) else {}
+            shared_settings = shared_world.setdefault(WORLD_SETTINGS_KEY, {})
             changed = False
             for key in (ANNOUNCEMENT_CHANNEL_KEY, GAME_CHANNEL_KEY, ANNOUNCEMENT_ROLE_KEY):
                 value = local_settings.get(key)
@@ -125,14 +126,24 @@ class Tasks(commands.Cog):
     @tasks.loop(minutes=15)
     async def game_cycle(self):
         """Advance every active local world and the shared Open World once."""
+        try:
+            await self._game_cycle_once()
+        except Exception:
+            logger.exception("Scheduled game cycle failed; the next iteration will still run")
+
+    async def _game_cycle_once(self):
         local_guilds, open_world_guilds = await self._active_cycle_guilds()
         cycle_guilds = list(local_guilds)
-        open_world_processed = False
         if open_world_guilds:
-            if not open_world_processed:
-                routing_guild = await self._open_world_notification_guild(open_world_guilds)
-                if routing_guild is not None:
+            routing_guild = await self._open_world_notification_guild(open_world_guilds)
+            if routing_guild is not None:
+                try:
                     await self._sync_open_world_routing(routing_guild)
+                except Exception:
+                    logger.exception(
+                        "Open World routing sync failed for game cycle; local worlds will continue"
+                    )
+                else:
                     cycle_guilds.append(
                         _WorldGuildProxy(
                             routing_guild,
@@ -140,7 +151,6 @@ class Tasks(commands.Cog):
                             open_world_guilds,
                         )
                     )
-                    open_world_processed = True
         await self._run_game_cycle_for(cycle_guilds)
 
     async def _run_game_cycle_for(self, guilds):
@@ -235,7 +245,7 @@ class Tasks(commands.Cog):
             print(f"❌ Announcement configuration lookup failed for {guild.id}: {exc}")
             return None
 
-        settings = world.get("settings", {})
+        settings = world.get(WORLD_SETTINGS_KEY, {})
         announcement_id = settings.get(ANNOUNCEMENT_CHANNEL_KEY)
         channel_id = announcement_id or settings.get(GAME_CHANNEL_KEY)
         if not channel_id:
@@ -260,7 +270,7 @@ class Tasks(commands.Cog):
         role_id = None
         try:
             world = await self.bot.db.get_world(guild.id)
-            role_id = world.get("settings", {}).get(ANNOUNCEMENT_ROLE_KEY)
+            role_id = world.get(WORLD_SETTINGS_KEY, {}).get(ANNOUNCEMENT_ROLE_KEY)
         except Exception as exc:
             print(f"❌ Announcement role lookup failed for scope {guild.id}: {exc}")
 
@@ -298,10 +308,8 @@ class Tasks(commands.Cog):
                 "expires": now + event_data["duration"],
                 "name": event_data["name"],
             }
-            if event_data["effect"] == "price_up":
-                world["market_multiplier"] = 1.5
-            elif event_data["effect"] == "price_down":
-                world["market_multiplier"] = 0.6
+            if event_data["effect"] == "market_multiplier":
+                world["market_multiplier"] = float(event_data["multiplier"])
             return True
 
         weather_names = list(WEATHER_TYPES.keys())
@@ -334,14 +342,26 @@ class Tasks(commands.Cog):
     @tasks.loop(minutes=2)
     async def notification_check(self):
         """Check active local saves and the shared Open World once each."""
+        try:
+            await self._notification_check_once()
+        except Exception:
+            logger.exception(
+                "Scheduled notification check failed; the next iteration will still run"
+            )
+
+    async def _notification_check_once(self):
         local_guilds, open_world_guilds = await self._active_cycle_guilds()
         notification_guilds = list(local_guilds)
-        open_world_processed = False
         if open_world_guilds:
-            if not open_world_processed:
-                routing_guild = await self._open_world_notification_guild(open_world_guilds)
-                if routing_guild is not None:
+            routing_guild = await self._open_world_notification_guild(open_world_guilds)
+            if routing_guild is not None:
+                try:
                     await self._sync_open_world_routing(routing_guild)
+                except Exception:
+                    logger.exception(
+                        "Open World routing sync failed for notifications; local saves will continue"
+                    )
+                else:
                     notification_guilds.append(
                         _WorldGuildProxy(
                             routing_guild,
@@ -349,80 +369,94 @@ class Tasks(commands.Cog):
                             open_world_guilds,
                         )
                     )
-                    open_world_processed = True
         await self._run_notification_check_for(notification_guilds)
 
     async def _run_notification_check_for(self, guilds):
         now = time.time()
-        for guild in guilds:
-            scope_id = int(guild.id)
-            guild_id = int(getattr(guild, "source_guild_id", guild.id))
-            try:
-                candidate_ids = await self.bot.db.list_guild_notification_candidates(
-                    scope_id,
-                    limit=NOTIFICATION_CANDIDATE_LIMIT,
-                )
-                world = await self.bot.db.get_world(scope_id)
-            except Exception as exc:
-                print(f"❌ Notification candidate query failed for scope {scope_id}: {exc}")
+        guild_by_scope = {int(guild.id): guild for guild in guilds}
+        if not guild_by_scope:
+            return
+
+        try:
+            candidates = await self.bot.db.list_notification_candidates(
+                tuple(guild_by_scope)
+            )
+        except Exception as exc:
+            logger.exception("Batched notification candidate query failed: %s", exc)
+            return
+
+        worlds: dict[int, dict] = {}
+        for scope_id, user_id in candidates:
+            resolved_scope_id = int(scope_id)
+            guild = guild_by_scope.get(resolved_scope_id)
+            if guild is None:
                 continue
-
-            for user_id in candidate_ids:
-                resolved_user_id = int(user_id)
-                try:
-                    if hasattr(guild, "resolve_player_scope"):
-                        scope = await guild.resolve_player_scope(self.bot.db, resolved_user_id)
-                        if scope is None or scope.scope_id != guild.id:
-                            continue
-                    else:
-                        scope = await resolve_game_scope(
-                            self.bot.db,
-                            guild_id,
-                            resolved_user_id,
-                        )
-                        if scope.scope_id != guild_id:
-                            continue
-
-                    pending = await self._notification_snapshot(
-                        scope_id,
-                        resolved_user_id,
-                        world,
-                        now,
-                    )
-                    if pending is None:
+            guild_id = int(getattr(guild, "source_guild_id", guild.id))
+            resolved_user_id = int(user_id)
+            try:
+                if hasattr(guild, "resolve_player_scope"):
+                    scope = await guild.resolve_player_scope(self.bot.db, resolved_user_id)
+                    if scope is None or scope.scope_id != guild.id:
                         continue
-                    plant_indexes, batch_indexes = pending
-                    target = await self.bot.fetch_user(resolved_user_id)
-                    notifications = []
-                    if plant_indexes:
-                        notifications.append(f"🌿 **{len(plant_indexes)} Plants** are ready!")
-                    if batch_indexes:
-                        notifications.append(f"⚗️ **{len(batch_indexes)} Batches** are done!")
-                    world_name = "Open World" if scope_id == OPEN_WORLD_SCOPE_ID else guild.name
-                    await target.send(
-                        embed=discord.Embed(
-                            title=f"📟 Pager Alert — {world_name}",
-                            description="\n".join(notifications),
-                            color=discord.Color.green(),
-                        )
+                else:
+                    scope = await resolve_game_scope(
+                        self.bot.db,
+                        guild_id,
+                        resolved_user_id,
                     )
-                except discord.DiscordException:
-                    continue
-                except Exception as exc:
-                    print(
-                        f"❌ Notification check failed for scope {scope_id}, "
-                        f"user {resolved_user_id}: {exc}"
-                    )
-                    continue
+                    if scope.scope_id != guild_id:
+                        continue
 
+                world = worlds.get(resolved_scope_id)
+                if world is None:
+                    world = await self.bot.db.get_world(resolved_scope_id)
+                    worlds[resolved_scope_id] = world
+
+                pending = await self._notification_snapshot(
+                    resolved_scope_id,
+                    resolved_user_id,
+                    world,
+                    now,
+                )
+                if pending is None:
+                    continue
+                plant_indexes, batch_indexes = pending
+                target = await self.bot.fetch_user(resolved_user_id)
+                notifications = []
+                if plant_indexes:
+                    notifications.append(f"🌿 **{len(plant_indexes)} Plants** are ready!")
+                if batch_indexes:
+                    notifications.append(f"⚗️ **{len(batch_indexes)} Batches** are done!")
+                world_name = (
+                    "Open World"
+                    if resolved_scope_id == OPEN_WORLD_SCOPE_ID
+                    else guild.name
+                )
+                await target.send(
+                    embed=discord.Embed(
+                        title=f"📟 Pager Alert — {world_name}",
+                        description="\n".join(notifications),
+                        color=discord.Color.green(),
+                    )
+                )
                 await self._commit_notification_flags(
-                    scope_id,
+                    resolved_scope_id,
                     resolved_user_id,
                     world,
                     now,
                     plant_indexes,
                     batch_indexes,
                 )
+            except discord.DiscordException:
+                continue
+            except Exception as exc:
+                logger.exception(
+                    "Notification check failed for scope %s, user %s: %s",
+                    resolved_scope_id,
+                    resolved_user_id,
+                    exc,
+                )
+                continue
 
     async def _notification_snapshot(
         self,
@@ -512,6 +546,12 @@ class Tasks(commands.Cog):
     @tasks.loop(minutes=5)
     async def status_cycle(self):
         """Rotate status without exposing one server's private world state."""
+        try:
+            await self._status_cycle_once()
+        except Exception:
+            logger.exception("Scheduled status cycle failed; the next iteration will still run")
+
+    async def _status_cycle_once(self):
         server_count = len(self.bot.guilds)
         statuses = [
             f"Growing in {server_count:,} servers 🌿",

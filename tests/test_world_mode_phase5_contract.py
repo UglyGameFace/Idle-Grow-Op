@@ -24,11 +24,19 @@ def test_background_policy_detection_normalizes_the_complete_world_record():
 def test_background_cycles_build_one_deduplicated_scope_list():
     assert "class _WorldGuildProxy" in TASKS
     assert "OPEN_WORLD_SCOPE_ID" in TASKS
-    assert "open_world_processed" in TASKS
     assert "policy_allows_open_world" in TASKS
     assert "policy_uses_local_world" in TASKS
     assert "_run_game_cycle_for" in TASKS
     assert "_run_notification_check_for" in TASKS
+
+    game_once = TASKS.split("async def _game_cycle_once", 1)[1].split(
+        "async def _run_game_cycle_for", 1
+    )[0]
+    notification_once = TASKS.split("async def _notification_check_once", 1)[1].split(
+        "async def _run_notification_check_for", 1
+    )[0]
+    assert game_once.count("_WorldGuildProxy(") == 1
+    assert notification_once.count("_WorldGuildProxy(") == 1
 
 
 def test_open_world_uses_one_safe_notification_guild_and_shared_member_lookup():
@@ -51,8 +59,9 @@ def test_notification_candidates_are_filtered_before_snapshot_or_mutation():
 
 
 def test_open_world_auction_and_world_processing_can_only_run_once_per_tick():
-    game_cycle = TASKS.split("async def game_cycle", 1)[1].split("async def", 1)[0]
-    assert "open_world_processed = False" in game_cycle
-    assert "if not open_world_processed" in game_cycle
-    assert "open_world_processed = True" in game_cycle
-    assert "_WorldGuildProxy" in game_cycle
+    game_cycle = TASKS.split("async def _game_cycle_once", 1)[1].split(
+        "async def _run_game_cycle_for", 1
+    )[0]
+    assert game_cycle.count("_WorldGuildProxy(") == 1
+    assert game_cycle.count("await self._run_game_cycle_for(cycle_guilds)") == 1
+    assert "open_world_processed" not in game_cycle

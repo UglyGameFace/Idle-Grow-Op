@@ -9,6 +9,7 @@ from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 
+from guild_config import ERROR_LOG_CHANNEL_KEY, WORLD_SETTINGS_KEY
 from persistence_bootstrap import build_scoped_database
 
 
@@ -101,18 +102,18 @@ async def sync_global_commands(
         if not synced_names:
             raise RuntimeError("Discord returned an empty global command set; refusing startup")
 
-        missing_remote = REQUIRED_PUBLIC_COMMANDS - synced_names
-        if missing_remote:
+        missing_remote = local_names - synced_names
+        unexpected_remote = synced_names - local_names
+        if missing_remote or unexpected_remote:
+            detail = []
+            if missing_remote:
+                detail.append("missing: " + ", ".join(sorted(missing_remote)))
+            if unexpected_remote:
+                detail.append("unexpected: " + ", ".join(sorted(unexpected_remote)))
             raise RuntimeError(
-                "Discord sync omitted required public commands: "
-                + ", ".join(sorted(missing_remote))
-            )
-
-        stale_remote = STALE_PUBLIC_COMMANDS & synced_names
-        if stale_remote:
-            raise RuntimeError(
-                "Discord sync retained stale commands: "
-                + ", ".join(sorted(stale_remote))
+                "Discord sync did not publish the complete local command tree ("
+                + "; ".join(detail)
+                + ")"
             )
 
         logger.info(
@@ -155,7 +156,7 @@ async def _configured_error_channel(guild_id: int | None):
         return None
     try:
         world = await bot.db.get_world(resolved_guild_id)
-        channel_id = world.get("settings", {}).get("error_log_channel_id")
+        channel_id = world.get(WORLD_SETTINGS_KEY, {}).get(ERROR_LOG_CHANNEL_KEY)
     except Exception:
         logger.exception("Failed to resolve error channel for guild %s", resolved_guild_id)
         return None

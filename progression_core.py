@@ -32,6 +32,29 @@ def _integer(value: Any, default: int = 0) -> int:
         return default
 
 
+def xp_needed_for_level(level: Any) -> int:
+    """Return the canonical XP required to advance from the supplied level."""
+    resolved = max(1, _integer(level, 1))
+    return int(100 * (resolved ** 1.5))
+
+
+def credit_xp(profile: dict, amount: Any) -> list[int]:
+    """Credit non-negative XP and apply every level-up crossed by the balance."""
+    gained = max(0, _integer(amount))
+    level = max(1, _integer(profile.get("level"), 1))
+    xp = max(0, _integer(profile.get("xp"))) + gained
+    reached: list[int] = []
+
+    while xp >= xp_needed_for_level(level):
+        xp -= xp_needed_for_level(level)
+        level += 1
+        reached.append(level)
+
+    profile["level"] = level
+    profile["xp"] = xp
+    return reached
+
+
 def ensure_progression(profile: dict) -> None:
     profile.setdefault("stats", {})
     if not isinstance(profile["stats"], dict):
@@ -104,7 +127,7 @@ def _completion_bonus(profile: dict) -> dict | None:
         "bonus_xp": max(150, int(total_xp * 0.25)),
     }
     profile["grams"] = _integer(profile.get("grams")) + bonus["bonus_cash"]
-    profile["xp"] = _integer(profile.get("xp")) + bonus["bonus_xp"]
+    credit_xp(profile, bonus["bonus_xp"])
     profile["daily_quests_bonus_claimed"] = True
     return bonus
 
@@ -137,7 +160,7 @@ def add_progress(
             cash = max(0, _integer(quest.get("reward_cash")))
             xp = max(0, _integer(quest.get("reward_xp")))
             profile["grams"] = _integer(profile.get("grams")) + cash
-            profile["xp"] = _integer(profile.get("xp")) + xp
+            credit_xp(profile, xp)
             completed.append(
                 {
                     "id": quest.get("id"),
@@ -170,7 +193,7 @@ def check_achievements(profile: dict) -> list[dict]:
         profile["achievements"].append(achievement_id)
         timestamps[achievement_id] = time.time()
         profile["grams"] = _integer(profile.get("grams")) + achievement.reward_cash
-        profile["xp"] = _integer(profile.get("xp")) + achievement.reward_xp
+        credit_xp(profile, achievement.reward_xp)
         unlocked.append(
             {
                 "id": achievement_id,
@@ -183,7 +206,12 @@ def check_achievements(profile: dict) -> list[dict]:
     return unlocked
 
 
-def claim_daily(profile: dict, *, user_id: int | None = None) -> dict:
+def claim_daily(
+    profile: dict,
+    *,
+    user_id: int | None = None,
+    reward_multiplier: float = 1.0,
+) -> dict:
     ensure_progression(profile)
     today = _today()
     if profile.get("last_daily_claim") == today:
@@ -205,10 +233,11 @@ def claim_daily(profile: dict, *, user_id: int | None = None) -> dict:
     level = max(1, _integer(profile.get("level"), 1))
     streak = max(1, _integer(profile.get("daily_streak"), 1))
     multiplier = 1.0 + min(1.0, streak / 30.0) * 0.60
-    cash = int((400 + level * 45) * multiplier)
-    xp = int((80 + level * 8) * multiplier)
+    reward_multiplier = max(0.0, float(reward_multiplier))
+    cash = int((400 + level * 45) * multiplier * reward_multiplier)
+    xp = int((80 + level * 8) * multiplier * reward_multiplier)
     profile["grams"] = _integer(profile.get("grams")) + cash
-    profile["xp"] = _integer(profile.get("xp")) + xp
+    credit_xp(profile, xp)
     stats = profile.setdefault("stats", {})
     stats["daily_claims"] = _integer(stats.get("daily_claims")) + 1
     ensure_daily_quests(profile, user_id=user_id)

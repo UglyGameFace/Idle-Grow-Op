@@ -8,30 +8,26 @@ import discord
 from discord.ext import commands
 
 from persistence_context import GuildContextRequired, require_guild_id
+from world_mode_contracts import (
+    DEFAULT_PLAYER_MODE,
+    DEFAULT_SWITCH_COOLDOWN_SECONDS,
+    MODE_OPEN,
+    MODE_SERVER,
+    MODE_SOLO,
+    OPEN_WORLD_SCOPE_ID,
+    PLAYER_MODE_SELECTION_KEY,
+    POLICY_CHOICE,
+    POLICY_OPEN,
+    POLICY_SERVER,
+    POLICY_SOLO,
+    VALID_PLAYER_MODES,
+    VALID_POLICIES,
+    WORLD_MODE_CONFIG_KEY,
+    legacy_world_mode_config,
+    new_world_mode_config as new_world_mode_config,
+)
 
 
-# Discord guild snowflakes are far larger than 1. This reserved positive scope lets
-# the existing, proven guild-profile/world persistence tables hold one shared Open
-# World without a parallel database implementation or a destructive migration.
-OPEN_WORLD_SCOPE_ID = 1
-
-WORLD_MODE_CONFIG_KEY = "world_mode_config"
-PLAYER_MODE_SELECTION_KEY = "world_mode_selection"
-
-POLICY_SERVER = "server"
-POLICY_SOLO = "solo"
-POLICY_OPEN = "open"
-POLICY_CHOICE = "choice"
-
-MODE_SERVER = "server"
-MODE_SOLO = "solo"
-MODE_OPEN = "open"
-
-VALID_POLICIES = {POLICY_SERVER, POLICY_SOLO, POLICY_OPEN, POLICY_CHOICE}
-VALID_PLAYER_MODES = {MODE_SOLO, MODE_OPEN}
-
-DEFAULT_PLAYER_MODE = MODE_SOLO
-DEFAULT_SWITCH_COOLDOWN_SECONDS = 7 * 24 * 60 * 60
 SOLO_POT_CAP = 5
 SOLO_PROCESSING_QUEUE_CAP = 3
 SOLO_MARKET_MULTIPLIER_CAP = 1.25
@@ -118,29 +114,6 @@ class PlayerModeSelection:
     selected_at: float
     switch_available_at: float
     explicit: bool
-
-
-def new_world_mode_config() -> dict[str, Any]:
-    """Safe default for a newly created guild world."""
-    return {
-        "policy": POLICY_SOLO,
-        "default_player_mode": DEFAULT_PLAYER_MODE,
-        "switch_cooldown_seconds": DEFAULT_SWITCH_COOLDOWN_SECONDS,
-        "configured": False,
-        "updated_at": 0,
-    }
-
-
-def legacy_world_mode_config() -> dict[str, Any]:
-    """Compatibility interpretation for worlds created before mode controls."""
-    return {
-        "policy": POLICY_SERVER,
-        "default_player_mode": DEFAULT_PLAYER_MODE,
-        "switch_cooldown_seconds": DEFAULT_SWITCH_COOLDOWN_SECONDS,
-        "configured": False,
-        "legacy_compatibility": True,
-        "updated_at": 0,
-    }
 
 
 def normalize_world_mode_config(world: dict[str, Any] | None) -> dict[str, Any]:
@@ -420,7 +393,6 @@ async def world_mode_status(database, guild_id: int) -> str:
     world = await database.get_world(int(guild_id))
     config = normalize_world_mode_config(world)
     policy = config["policy"]
-    label = POLICY_LABELS[policy]
     if policy == POLICY_SERVER and config.get("legacy_compatibility"):
         return "🟡 **Current Server World** — compatibility mode preserving existing local multiplayer"
     if policy == POLICY_SOLO:

@@ -15,6 +15,7 @@ from crime_integrity import (
 )
 from economy_integrity import require_positive_amount
 from persistence_context import require_guild_id
+from progression_core import add_progress, check_achievements, credit_xp
 from utils import add_heat, has_item, jail_guard
 from world_modes import (
     WorldModeDenied,
@@ -46,6 +47,15 @@ class Crime(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    @staticmethod
+    def _record_heist_progress(user: dict, user_id: int, success: bool) -> None:
+        stats = user.setdefault("stats", {})
+        stats["heists_run"] = max(0, int(stats.get("heists_run", 0))) + 1
+        if success:
+            stats["heists_won"] = max(0, int(stats.get("heists_won", 0))) + 1
+        add_progress(user, "heist", 1, user_id=user_id)
+        check_achievements(user)
+
     def _now(self) -> float:
         return time.time()
 
@@ -62,6 +72,13 @@ class Crime(commands.Cog):
 
     def _in_jail(self, user: dict) -> int:
         return max(0, int(user.get("jail_until", 0) or 0) - int(self._now()))
+
+    @staticmethod
+    def _jail_duration_seconds(user: dict, seconds: int) -> int:
+        duration = max(0, int(seconds))
+        if has_item(user, "lawyer"):
+            duration = int(duration * 0.75)
+        return duration
 
     @staticmethod
     def _get_user_cooldown(user: dict, key: str) -> float:
@@ -167,7 +184,7 @@ class Crime(commands.Cog):
             ),
         }
 
-    @commands.command(name="heist", aliases=["heists"])
+    @commands.hybrid_command(name="heist", aliases=["heists"])
     async def heist(self, ctx, mode: str = "solo", arg: str = None):
         guild_id = require_guild_id(ctx)
         scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
@@ -197,7 +214,7 @@ class Crime(commands.Cog):
                 return await ctx.send(str(exc))
             await self._raid(ctx, scope, user, arg)
         else:
-            await ctx.send("Usage: `!heist solo [plan]`, `!heist crew`, `!heist join`, or `!heist raid <crew_id>`")
+            await ctx.send("Usage: `/heist mode:solo arg:<plan>`, `/heist mode:crew`, `/heist mode:join`, or `/heist mode:raid arg:<crew_id>`")
 
     async def _solo_heist(self, ctx, scope, user: dict, plan: str) -> None:
         key = self._session_key(scope.scope_id, "user", ctx.author.id)
@@ -207,50 +224,53 @@ class Crime(commands.Cog):
 
         _ACTIVE_HEISTS[key] = {"ends": self._now() + 8}
         try:
+            heist_error = None
             async with self.bot.db.lock:
                 last = self._get_user_cooldown(user, "heist_solo")
                 remaining = int(last + HEIST_SOLO_COOLDOWN - self._now())
                 if remaining > 0:
-                    await ctx.send(f"⏳ Solo heist cooldown: **{self._fmt_time(remaining)}**")
-                    return
-
-                heat = self._apply_heat_decay(user)
-                level = max(1, int(user.get("level", 1) or 1))
-                prestige = max(0, int(user.get("prestige", 0) or 0))
-                config = self._solo_profile(level, prestige, heat, plan)
-                balance = max(0, int(user.get("grams", 0) or 0))
-                if balance < config["buyin"]:
-                    await ctx.send(f"💸 You need **${config['buyin']:,}** for this job.")
-                    return
-
-                user["grams"] = balance - config["buyin"]
-                stats = user.setdefault("stats", {})
-                stats["heists_run"] = max(0, int(stats.get("heists_run", 0))) + 1
-                success = self._roll(config["chance"])
-
-                if success:
-                    payout = random.randint(*config["reward"])
-                    xp = random.randint(*config["xp"])
-                    user["grams"] += payout
-                    user["xp"] = max(0, int(user.get("xp", 0))) + xp
-                    add_heat(user, HEAT_GAIN_WIN + config["heat_mod"])
-                    stats["heists_won"] = max(0, int(stats.get("heists_won", 0))) + 1
-                    stats["heist_profit"] = max(0, int(stats.get("heist_profit", 0))) + payout
-                    jail_minutes = 0
-                    loss = 0
+                    heist_error = f"⏳ Solo heist cooldown: **{self._fmt_time(remaining)}**"
                 else:
-                    requested_loss = max(150, int(config["buyin"] * random.uniform(0.30, 0.70)))
-                    loss = calculate_capped_loss(user["grams"], requested_loss)
-                    user["grams"] -= loss
-                    jail_minutes = random.randint(HEIST_JAIL_MIN, HEIST_JAIL_MAX)
-                    user["jail_until"] = int(self._now() + jail_minutes * 60)
-                    add_heat(user, HEAT_GAIN_FAIL + config["heat_mod"])
-                    stats["heists_lost"] = max(0, int(stats.get("heists_lost", 0))) + 1
-                    payout = 0
-                    xp = 0
+                    heat = self._apply_heat_decay(user)
+                    level = max(1, int(user.get("level", 1) or 1))
+                    prestige = max(0, int(user.get("prestige", 0) or 0))
+                    config = self._solo_profile(level, prestige, heat, plan)
+                    balance = max(0, int(user.get("grams", 0) or 0))
+                    if balance < config["buyin"]:
+                        heist_error = f"💸 You need **${config['buyin']:,}** for this job."
+                    else:
+                        user["grams"] = balance - config["buyin"]
+                        stats = user.setdefault("stats", {})
+                        success = self._roll(config["chance"])
 
-                self._set_user_cooldown(user, "heist_solo", self._now())
-                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                        if success:
+                            payout = random.randint(*config["reward"])
+                            xp = random.randint(*config["xp"])
+                            user["grams"] += payout
+                            credit_xp(user, xp)
+                            add_heat(user, HEAT_GAIN_WIN + config["heat_mod"])
+                            stats["heist_profit"] = max(0, int(stats.get("heist_profit", 0))) + payout
+                            jail_minutes = 0
+                            jail_seconds = 0
+                            loss = 0
+                        else:
+                            requested_loss = max(150, int(config["buyin"] * random.uniform(0.30, 0.70)))
+                            loss = calculate_capped_loss(user["grams"], requested_loss)
+                            user["grams"] -= loss
+                            jail_minutes = random.randint(HEIST_JAIL_MIN, HEIST_JAIL_MAX)
+                            jail_seconds = self._jail_duration_seconds(user, jail_minutes * 60)
+                            user["jail_until"] = int(self._now() + jail_seconds)
+                            add_heat(user, HEAT_GAIN_FAIL + config["heat_mod"])
+                            stats["heists_lost"] = max(0, int(stats.get("heists_lost", 0))) + 1
+                            payout = 0
+                            xp = 0
+
+                        self._record_heist_progress(user, ctx.author.id, success)
+                        self._set_user_cooldown(user, "heist_solo", self._now())
+                        self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+            if heist_error:
+                await ctx.send(heist_error)
+                return
         finally:
             _ACTIVE_HEISTS.pop(key, None)
 
@@ -273,7 +293,7 @@ class Crime(commands.Cog):
                     f"**Plan:** {config['plan']}\n"
                     f"🎯 Odds: **{int(config['chance'] * 100)}%**\n"
                     f"💸 Additional loss: **${loss:,}**\n"
-                    f"🚔 Jail: **{jail_minutes}m**\n"
+                    f"🚔 Jail: **{self._fmt_time(jail_seconds)}**\n"
                     f"🚓 Heat: **{int(user.get('heat', 0))}%**"
                 ),
                 color=0xE74C3C,
@@ -291,28 +311,33 @@ class Crime(commands.Cog):
             return await ctx.send("❌ Crew data missing.")
 
         key = self._session_key(scope.scope_id, "crew", crew_id)
+        start_error = None
         async with self.bot.db.lock:
             remaining = self._crew_cooldown_left(crew, "heist")
             if remaining > 0:
-                return await ctx.send(f"⏳ Crew cooldown: **{self._fmt_time(remaining)}**")
-            if _ACTIVE_HEISTS.get(key, {}).get("join_until", 0) > self._now():
-                return await ctx.send("⏳ Crew heist already forming. Use `!heist join`.")
-            _ACTIVE_HEISTS[key] = {
-                "join_until": self._now() + HEIST_JOIN_WINDOW,
-                "members": {int(ctx.author.id): int(scope.guild_id)},
-                "host_id": int(ctx.author.id),
-            }
+                start_error = f"⏳ Crew cooldown: **{self._fmt_time(remaining)}**"
+            elif _ACTIVE_HEISTS.get(key, {}).get("join_until", 0) > self._now():
+                start_error = "⏳ Crew heist already forming. Use `/heist mode:join`."
+            else:
+                _ACTIVE_HEISTS[key] = {
+                    "join_until": self._now() + HEIST_JOIN_WINDOW,
+                    "members": {int(ctx.author.id): int(scope.guild_id)},
+                    "host_id": int(ctx.author.id),
+                }
+        if start_error:
+            return await ctx.send(start_error)
 
         await ctx.send(embed=discord.Embed(
             title="🧪 Crew Heist Forming",
             description=(
                 f"**{crew.get('name', 'Crew')}** is starting a job!\n"
-                f"Type `!heist join` within **{HEIST_JOIN_WINDOW}s**.\nNeed 2+ members."
+                f"Run `/heist mode:join` within **{HEIST_JOIN_WINDOW}s**.\nNeed 2+ members."
             ),
             color=0x9B59B6,
         ))
         await asyncio.sleep(HEIST_JOIN_WINDOW + 1)
 
+        settlement_error = None
         async with self.bot.db.lock:
             session = _ACTIVE_HEISTS.pop(key, None)
             if not session:
@@ -320,55 +345,65 @@ class Crime(commands.Cog):
             world = await self.bot.db.get_world(scope.scope_id)
             crew = self._get_crews(world).get(str(crew_id))
             if not crew:
-                return await ctx.send("❌ Crew data missing.")
-
-            valid_members: list[tuple[int, dict]] = []
-            for member_id, member_guild_id in session.get("members", {}).items():
-                member_scope = await resolve_game_scope(
-                    self.bot.db,
-                    int(member_guild_id),
-                    int(member_id),
-                )
-                if member_scope.scope_id != scope.scope_id:
-                    continue
-                member = await self.bot.db.get_profile(scope.scope_id, int(member_id))
-                if self._in_jail(member) <= 0 and str(member.get("crew_id")) == str(crew_id):
-                    valid_members.append((int(member_id), member))
-            if len(valid_members) < 2:
-                return await ctx.send("❌ Heist cancelled: not enough eligible crew members joined.")
-
-            levels = [max(1, int(member.get("level", 1))) for _, member in valid_members]
-            power = self._calc_power(levels)
-            chance = max(0.18, min(0.88, 0.46 + power * 0.06 + len(valid_members) * 0.03))
-            success = self._roll(chance)
-            base = int(2_600 + power * 1_200)
-            total = random.randint(int(base * 0.7), int(base * 1.3))
-
-            if success:
-                split = calculate_crew_payout(total, len(valid_members), bank_rate=0.30)
-                crew["bank"] = max(0, int(crew.get("bank", 0))) + split.crew_bank_gain + split.remainder
-                for member_id, member in valid_members:
-                    member["grams"] = max(0, int(member.get("grams", 0))) + split.member_gain
-                    add_heat(member, 2)
-                    self.bot.db.mark_profile_dirty(scope.scope_id, member_id)
-                bank_gain = split.crew_bank_gain + split.remainder
-                member_gain = split.member_gain
-                jail_minutes = 0
+                settlement_error = "❌ Crew data missing."
             else:
-                jail_minutes = random.randint(2, 7)
-                for member_id, member in valid_members:
-                    balance = max(0, int(member.get("grams", 0)))
-                    loss = calculate_capped_loss(balance, int(balance * 0.04))
-                    member["grams"] = balance - loss
-                    member["jail_until"] = int(self._now() + jail_minutes * 60)
-                    add_heat(member, 6)
-                    self.bot.db.mark_profile_dirty(scope.scope_id, member_id)
-                bank_gain = 0
-                member_gain = 0
+                valid_members: list[tuple[int, dict]] = []
+                for member_id, member_guild_id in session.get("members", {}).items():
+                    member_scope = await resolve_game_scope(
+                        self.bot.db,
+                        int(member_guild_id),
+                        int(member_id),
+                    )
+                    if member_scope.scope_id != scope.scope_id:
+                        continue
+                    member = await self.bot.db.get_profile(scope.scope_id, int(member_id))
+                    if self._in_jail(member) <= 0 and str(member.get("crew_id")) == str(crew_id):
+                        valid_members.append((int(member_id), member))
 
-            self._set_crew_cooldown(crew, "heist")
-            self.bot.db.mark_world_dirty(scope.scope_id)
+                if len(valid_members) < 2:
+                    settlement_error = "❌ Heist cancelled: not enough eligible crew members joined."
+                else:
+                    levels = [max(1, int(member.get("level", 1))) for _, member in valid_members]
+                    power = self._calc_power(levels)
+                    chance = max(0.18, min(0.88, 0.46 + power * 0.06 + len(valid_members) * 0.03))
+                    success = self._roll(chance)
+                    base = int(2_600 + power * 1_200)
+                    total = random.randint(int(base * 0.7), int(base * 1.3))
 
+                    if success:
+                        split = calculate_crew_payout(total, len(valid_members), bank_rate=0.30)
+                        crew["bank"] = max(0, int(crew.get("bank", 0))) + split.crew_bank_gain + split.remainder
+                        for member_id, member in valid_members:
+                            member["grams"] = max(0, int(member.get("grams", 0))) + split.member_gain
+                            add_heat(member, 2)
+                            self.bot.db.mark_profile_dirty(scope.scope_id, member_id)
+                        bank_gain = split.crew_bank_gain + split.remainder
+                        member_gain = split.member_gain
+                        jail_minutes = 0
+                    else:
+                        jail_minutes = random.randint(2, 7)
+                        for member_id, member in valid_members:
+                            balance = max(0, int(member.get("grams", 0)))
+                            loss = calculate_capped_loss(balance, int(balance * 0.04))
+                            member["grams"] = balance - loss
+                            member["jail_until"] = int(
+                                self._now()
+                                + self._jail_duration_seconds(member, jail_minutes * 60)
+                            )
+                            add_heat(member, 6)
+                            self.bot.db.mark_profile_dirty(scope.scope_id, member_id)
+                        bank_gain = 0
+                        member_gain = 0
+
+                    for member_id, member in valid_members:
+                        self._record_heist_progress(member, member_id, success)
+                        self.bot.db.mark_profile_dirty(scope.scope_id, member_id)
+
+                    self._set_crew_cooldown(crew, "heist")
+                    self.bot.db.mark_world_dirty(scope.scope_id)
+
+        if settlement_error:
+            return await ctx.send(settlement_error)
         if success:
             await ctx.send(embed=discord.Embed(
                 title="🏦 Crew Heist Success",
@@ -380,7 +415,10 @@ class Crime(commands.Cog):
                 color=0x2ECC71,
             ))
         else:
-            await ctx.send(f"🚨 **Crew heist failed.** Eligible members were jailed for {jail_minutes}m.")
+            await ctx.send(
+                f"🚨 **Crew heist failed.** Base jail sentence: {jail_minutes}m. "
+                "Lawyer owners receive the advertised 25% reduction."
+            )
 
     async def _join_crew_heist(self, ctx, scope, user: dict) -> None:
         if self._in_jail(user) > 0:
@@ -389,11 +427,15 @@ class Crime(commands.Cog):
         if not crew_id:
             return await ctx.send("❌ You need a crew.")
         key = self._session_key(scope.scope_id, "crew", crew_id)
+        join_error = None
         async with self.bot.db.lock:
             session = _ACTIVE_HEISTS.get(key)
             if not session or session.get("join_until", 0) <= self._now():
-                return await ctx.send("❌ No heist is forming.")
-            session.setdefault("members", {})[int(ctx.author.id)] = int(scope.guild_id)
+                join_error = "❌ No heist is forming."
+            else:
+                session.setdefault("members", {})[int(ctx.author.id)] = int(scope.guild_id)
+        if join_error:
+            return await ctx.send(join_error)
         await ctx.send(f"✅ {ctx.author.mention} joined!")
 
     async def _raid(self, ctx, scope, user: dict, target_id: str | None) -> None:
@@ -401,66 +443,74 @@ class Crime(commands.Cog):
         if not crew_id:
             return await ctx.send("❌ You need a crew.")
         if not target_id:
-            return await ctx.send("Usage: `!heist raid <target_crew_id>`")
+            return await ctx.send("Usage: `/heist mode:raid arg:<target_crew_id>`")
 
+        raid_error = None
         async with self.bot.db.lock:
             world = await self.bot.db.get_world(scope.scope_id)
             crews = self._get_crews(world)
             attacker = crews.get(str(crew_id))
             defender = crews.get(str(target_id).strip())
             if not attacker or not defender:
-                return await ctx.send("❌ Invalid crew IDs.")
-            if str(crew_id) == str(target_id).strip():
-                return await ctx.send("❌ Cannot raid your own crew.")
-            remaining = self._crew_cooldown_left(attacker, "raid")
-            if remaining > 0:
-                return await ctx.send(f"⏳ Raid cooldown: **{self._fmt_time(remaining)}**")
-            defender_bank = max(0, int(defender.get("bank", 0)))
-            if defender_bank < RAID_MIN_TARGET_BANK:
-                return await ctx.send("❌ Target is too poor to raid.")
-
-            async def levels(crew: dict) -> list[int]:
-                result = []
-                for member_id in crew.get("members", []):
-                    try:
-                        profile = await self.bot.db.get_profile(scope.scope_id, int(member_id))
-                    except (TypeError, ValueError):
-                        continue
-                    result.append(max(1, int(profile.get("level", 1))))
-                return result
-
-            attacker_power = self._calc_power(await levels(attacker))
-            defender_power = self._calc_power(await levels(defender))
-            chance = max(0.12, min(0.85, 0.50 + (attacker_power - defender_power) * 0.06))
-            success = self._roll(chance)
-            attacker_bank = max(0, int(attacker.get("bank", 0)))
-            if success:
-                outcome = calculate_raid_outcome(
-                    defender_bank,
-                    attacker_bank,
-                    steal_rate=RAID_MAX_STEAL_PCT,
-                    steal_cap=RAID_MAX_STEAL_FLAT,
-                    attacker_keep_rate=0.85,
-                )
-                defender["bank"] = outcome.defender_balance
-                attacker["bank"] = outcome.attacker_balance
-                stolen = outcome.stolen
-                attacker_gain = outcome.attacker_gain
-                penalty = 0
+                raid_error = "❌ Invalid crew IDs."
+            elif str(crew_id) == str(target_id).strip():
+                raid_error = "❌ Cannot raid your own crew."
             else:
-                penalty = calculate_capped_loss(attacker_bank, min(12_000, int(attacker_bank * 0.06)))
-                attacker["bank"] = attacker_bank - penalty
-                stolen = 0
-                attacker_gain = 0
+                remaining = self._crew_cooldown_left(attacker, "raid")
+                if remaining > 0:
+                    raid_error = f"⏳ Raid cooldown: **{self._fmt_time(remaining)}**"
+                else:
+                    defender_bank = max(0, int(defender.get("bank", 0)))
+                    if defender_bank < RAID_MIN_TARGET_BANK:
+                        raid_error = "❌ Target is too poor to raid."
 
-            self._set_crew_cooldown(attacker, "raid")
-            stats = user.setdefault("stats", {})
-            stats["raids_run"] = max(0, int(stats.get("raids_run", 0))) + 1
-            if success:
-                stats["raids_won"] = max(0, int(stats.get("raids_won", 0))) + 1
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
-            self.bot.db.mark_world_dirty(scope.scope_id)
+            if raid_error is None:
+                async def levels(crew: dict) -> list[int]:
+                    result = []
+                    for member_id in crew.get("members", []):
+                        try:
+                            profile = await self.bot.db.get_profile(scope.scope_id, int(member_id))
+                        except (TypeError, ValueError):
+                            continue
+                        result.append(max(1, int(profile.get("level", 1))))
+                    return result
 
+                attacker_power = self._calc_power(await levels(attacker))
+                defender_power = self._calc_power(await levels(defender))
+                chance = max(0.12, min(0.85, 0.50 + (attacker_power - defender_power) * 0.06))
+                success = self._roll(chance)
+                attacker_bank = max(0, int(attacker.get("bank", 0)))
+                if success:
+                    outcome = calculate_raid_outcome(
+                        defender_bank,
+                        attacker_bank,
+                        steal_rate=RAID_MAX_STEAL_PCT,
+                        steal_cap=RAID_MAX_STEAL_FLAT,
+                        attacker_keep_rate=0.85,
+                    )
+                    defender["bank"] = outcome.defender_balance
+                    attacker["bank"] = outcome.attacker_balance
+                    stolen = outcome.stolen
+                    attacker_gain = outcome.attacker_gain
+                    penalty = 0
+                else:
+                    penalty = calculate_capped_loss(attacker_bank, min(12_000, int(attacker_bank * 0.06)))
+                    attacker["bank"] = attacker_bank - penalty
+                    stolen = 0
+                    attacker_gain = 0
+
+                self._set_crew_cooldown(attacker, "raid")
+                stats = user.setdefault("stats", {})
+                stats["raids_run"] = max(0, int(stats.get("raids_run", 0))) + 1
+                if success:
+                    stats["raids_won"] = max(0, int(stats.get("raids_won", 0))) + 1
+                add_progress(user, "raid", 1, user_id=ctx.author.id)
+                check_achievements(user)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                self.bot.db.mark_world_dirty(scope.scope_id)
+
+        if raid_error:
+            return await ctx.send(raid_error)
         if success:
             await ctx.send(embed=discord.Embed(
                 title="⚔️ Raid Success",
@@ -493,6 +543,7 @@ class Crime(commands.Cog):
         if await jail_guard(ctx, robber, "steal"):
             return
 
+        steal_error = None
         async with self.bot.db.lock:
             victim = await self.bot.db.get_profile(scope.scope_id, target.id)
             chance = 0.50
@@ -512,59 +563,76 @@ class Crime(commands.Cog):
                     amount = calculate_robbery_transfer(wallet, random.uniform(0.05, 0.20))
                 except ValueError:
                     ctx.command.reset_cooldown(ctx)
-                    return await ctx.send("That player is too poor to rob.")
-                victim["grams"] = wallet - amount
-                robber["dirty_cash"] = max(0, int(robber.get("dirty_cash", 0))) + amount
-                add_heat(robber, 15)
-                stats = robber.setdefault("stats", {})
-                stats["steals"] = max(0, int(stats.get("steals", 0))) + 1
-                success = True
-                fine = 0
-                self.bot.db.mark_profile_dirty(scope.scope_id, target.id)
+                    steal_error = "That player is too poor to rob."
+                else:
+                    victim["grams"] = wallet - amount
+                    robber["dirty_cash"] = max(0, int(robber.get("dirty_cash", 0))) + amount
+                    add_heat(robber, 15)
+                    stats = robber.setdefault("stats", {})
+                    stats["steals"] = max(0, int(stats.get("steals", 0))) + 1
+                    success = True
+                    fine = 0
+                    self.bot.db.mark_profile_dirty(scope.scope_id, target.id)
             else:
                 balance = max(0, int(robber.get("grams", 0)))
                 fine = calculate_capped_loss(balance, 1_000)
                 robber["grams"] = balance - fine
-                robber["jail_until"] = int(self._now() + 300)
+                jail_seconds = self._jail_duration_seconds(robber, 300)
+                robber["jail_until"] = int(self._now() + jail_seconds)
                 add_heat(robber, 25)
                 amount = 0
                 success = False
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+            if steal_error is None:
+                add_progress(robber, "steal", 1, user_id=ctx.author.id)
+                check_achievements(robber)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
+        if steal_error:
+            return await ctx.send(steal_error)
         if success:
             await ctx.send(f"🔫 **SUCCESS!** Stole **${amount:,}** in dirty cash.")
         else:
-            await ctx.send(f"🚓 **BUSTED!** Fined ${fine:,} and jailed for 5m.")
+            await ctx.send(
+                f"🚓 **BUSTED!** Fined ${fine:,} and jailed for {self._fmt_time(jail_seconds)}."
+            )
 
-    @commands.command(name="launder")
+    @commands.hybrid_command(name="launder")
     @commands.cooldown(1, 30, commands.BucketType.user)
     async def launder(self, ctx, amount: str = "all"):
         guild_id = require_guild_id(ctx)
         scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
         user = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
+        launder_error = None
+        outcome = None
         async with self.bot.db.lock:
             dirty = max(0, int(user.get("dirty_cash", 0) or 0))
             heat = max(0, int(user.get("heat", 0) or 0))
             if dirty <= 0:
                 ctx.command.reset_cooldown(ctx)
-                return await ctx.send("❌ You have no **Dirty Cash** to launder.")
-            if heat >= 90:
+                launder_error = "❌ You have no **Dirty Cash** to launder."
+            elif heat >= 90:
                 ctx.command.reset_cooldown(ctx)
-                return await ctx.send(f"🚓 **Too Hot!** Heat is **{heat}%**. Let it cool down first.")
+                launder_error = f"🚓 **Too Hot!** Heat is **{heat}%**. Let it cool down first."
+            else:
+                raw = (amount or "all").strip().lower()
+                try:
+                    requested = dirty if raw in ("all", "max", "*") else require_positive_amount(raw.replace(",", ""))
+                    outcome = calculate_launder_outcome(requested, dirty_balance=dirty, fee_rate=0.20)
+                except ValueError as error:
+                    ctx.command.reset_cooldown(ctx)
+                    launder_error = f"❌ {error}."
+                else:
+                    user["dirty_cash"] = dirty - outcome.dirty_spent
+                    user["grams"] = max(0, int(user.get("grams", 0))) + outcome.clean_received
+                    add_heat(user, 5)
+                    stats = user.setdefault("stats", {})
+                    stats["laundered"] = max(0, int(stats.get("laundered", 0))) + outcome.dirty_spent
+                    add_progress(user, "launder", 1, user_id=ctx.author.id)
+                    check_achievements(user)
+                    self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
-            raw = (amount or "all").strip().lower()
-            try:
-                requested = dirty if raw in ("all", "max", "*") else require_positive_amount(raw.replace(",", ""))
-                outcome = calculate_launder_outcome(requested, dirty_balance=dirty, fee_rate=0.20)
-            except ValueError as error:
-                ctx.command.reset_cooldown(ctx)
-                return await ctx.send(f"❌ {error}.")
-
-            user["dirty_cash"] = dirty - outcome.dirty_spent
-            user["grams"] = max(0, int(user.get("grams", 0))) + outcome.clean_received
-            add_heat(user, 5)
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
-
+        if launder_error:
+            return await ctx.send(launder_error)
         embed = discord.Embed(
             title="🧼 Money Laundered",
             description=f"You cleaned **${outcome.dirty_spent:,}** dirty cash.",
@@ -575,7 +643,7 @@ class Crime(commands.Cog):
         embed.add_field(name="🔥 Heat", value=f"+5 (Total: {int(user.get('heat', 0))}%)", inline=True)
         await ctx.send(embed=embed)
 
-    @commands.command(name="heat")
+    @commands.hybrid_command(name="heat")
     async def heat(self, ctx):
         guild_id = require_guild_id(ctx)
         scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
@@ -590,10 +658,10 @@ class Crime(commands.Cog):
         embed.add_field(name="Heat", value=f"{bar} ({heat_level}%)", inline=False)
         embed.add_field(name="Status", value=status, inline=True)
         embed.add_field(name="💼 Dirty Cash", value=f"${dirty_cash:,}", inline=True)
-        embed.set_footer(text="Use !launder to clean dirty cash. High heat increases crime risk.")
+        embed.set_footer(text="Use /launder to clean dirty cash. High heat increases crime risk.")
         await ctx.send(embed=embed)
 
-    @commands.command(name="heiststats", aliases=["hst"])
+    @commands.hybrid_command(name="heiststats", aliases=["hst"])
     async def heiststats(self, ctx, member: discord.Member = None):
         guild_id = require_guild_id(ctx)
         target = member or ctx.author
@@ -607,7 +675,7 @@ class Crime(commands.Cog):
         embed.add_field(name="Payouts", value=f"${stats.get('heist_profit', 0):,}", inline=False)
         await ctx.send(embed=embed)
 
-    @commands.command(name="topheists", aliases=["lbheists"])
+    @commands.hybrid_command(name="topheists", aliases=["lbheists"])
     async def topheists(self, ctx):
         guild_id = require_guild_id(ctx)
         scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
@@ -628,7 +696,7 @@ class Crime(commands.Cog):
             color=0xF1C40F,
         ))
 
-    @commands.command(name="heistset", aliases=["heistsetchannel"])
+    @commands.hybrid_command(name="heistset", aliases=["heistsetchannel"])
     @commands.has_permissions(manage_guild=True)
     async def heistset(self, ctx, mode: str = "add"):
         guild_id = require_guild_id(ctx)

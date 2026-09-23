@@ -7,7 +7,12 @@ def test_game_cycle_uses_canonical_economy_auction_settlement_once_per_scope():
     assert 'get_cog("Economy")' in source
     assert "await economy._settle_expired_auctions(scope_id, world)" in source
     assert source.count("_settle_expired_auctions") == 1
-    assert "open_world_processed = False" in source
+    game_once = source.split("async def _game_cycle_once", 1)[1].split(
+        "async def _run_game_cycle_for", 1
+    )[0]
+    assert game_once.count("_WorldGuildProxy(") == 1
+    assert game_once.count("await self._run_game_cycle_for(cycle_guilds)") == 1
+    assert "open_world_processed" not in game_once
     assert "OPEN_WORLD_SCOPE_ID" in source
 
 
@@ -20,7 +25,7 @@ def test_notification_flags_are_committed_only_after_delivery():
 
     assert send_position < plant_flag_position
     assert send_position < batch_flag_position
-    assert "except discord.DiscordException:\n                    continue" in source
+    assert "except discord.DiscordException:" in source
 
 
 def test_task_mutations_use_database_lock_and_exact_scope_dirty_tracking():

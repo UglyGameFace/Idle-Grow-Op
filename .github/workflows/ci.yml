@@ -29,10 +29,14 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install -q --upgrade pip
-          python -m pip install -q -r requirements.txt pytest
+          python -m pip install -q -r requirements.txt pytest ruff
 
       - name: Compile Python sources
         run: python -m compileall -q .
+
+      - name: Reject undefined runtime names
+        run: |
+          ruff check             main.py casino_contracts.py guild_config.py profile_signature_contracts.py world_mode_contracts.py utils.py persistence_bootstrap.py persistence_context.py persistence_scope.py persistence_store.py scoped_database.py supabase_scoped_backend.py             admin.py ai.py crime.py crime_integrity.py economy.py economy_integrity.py farming.py gambling.py lab.py notification_preferences.py onboarding.py             progression.py progression_core.py progression_data.py quick.py profile_signatures.py sesh.py setup.py social.py tasks.py world_modes.py             --select F401,F821,F822,F823,F841
 
       - name: Run tests
         id: pytest
@@ -92,7 +96,7 @@ jobs:
               async def list_guild_casino_leaderboard(self, guild_id, *, metric="casino_total_profit", limit=10):
                   return []
 
-              async def list_guild_notification_candidates(self, guild_id, *, limit=500):
+              async def list_notification_candidates(self, guild_ids):
                   return []
 
 

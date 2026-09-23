@@ -10,6 +10,7 @@ from economy_integrity import (
     validate_bid_amount,
 )
 from persistence_context import GuildContextRequired, require_guild_id
+from progression_core import add_progress, check_achievements
 from utils import (
     CONCENTRATE_TYPES,
     GROWTH_CYCLES,
@@ -92,15 +93,19 @@ class Economy(commands.Cog):
         sender = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
         if await jail_guard(ctx, sender, "trade"):
             return
+        transfer_error = None
         async with self.bot.db.lock:
             receiver = await self.bot.db.get_profile(scope.scope_id, target.id)
             sender_balance = max(0, int(sender.get("grams", 0)))
             if sender_balance < transfer_amount:
-                return await ctx.send("💸 **Insufficient funds.**")
-            sender["grams"] = sender_balance - transfer_amount
-            receiver["grams"] = max(0, int(receiver.get("grams", 0))) + transfer_amount
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
-            self.bot.db.mark_profile_dirty(scope.scope_id, target.id)
+                transfer_error = "💸 **Insufficient funds.**"
+            else:
+                sender["grams"] = sender_balance - transfer_amount
+                receiver["grams"] = max(0, int(receiver.get("grams", 0))) + transfer_amount
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                self.bot.db.mark_profile_dirty(scope.scope_id, target.id)
+        if transfer_error:
+            return await ctx.send(transfer_error)
         await ctx.send(f"💸 **Transferred:** ${transfer_amount:,} to {target.mention}.")
 
     @commands.hybrid_command(name="leaderboard", aliases=["lb", "top", "rich"])
@@ -113,9 +118,9 @@ class Economy(commands.Cog):
             return await ctx.send(str(exc))
         rows = await self.bot.db.list_guild_leaderboard(scope.scope_id, limit=10)
         lines = []
-        for index, row in enumerate(rows):
-            user_id = int(row["user_id"])
-            amount = max(0, int(row.get("balance", 0)))
+        for index, (user_id, amount) in enumerate(rows):
+            user_id = int(user_id)
+            amount = max(0, int(amount))
             member = ctx.guild.get_member(user_id)
             name = member.display_name if member else f"User {user_id}"
             rank = "🥇" if index == 0 else "🥈" if index == 1 else "🥉" if index == 2 else f"#{index + 1}"
@@ -188,21 +193,32 @@ class Economy(commands.Cog):
             return await ctx.send("❌ This item is currently unavailable.")
         if int(user.get("level", 1)) < int(item.get("level_req", 1)):
             return await ctx.send("🔒 Level locked.")
+        purchase_error = None
         async with self.bot.db.lock:
+            if (
+                item.get("type") in {"equipment", "tool", "defense"}
+                and inv_get(user, clean_name) > 0
+            ):
+                purchase_error = f"✅ You already own **{clean_name.title()}**."
             balance = max(0, int(user.get("grams", 0)))
-            if balance < cost:
-                return await ctx.send("💸 Too poor.")
+            if purchase_error is None and balance < cost:
+                purchase_error = "💸 Too poor."
             new_capacity = None
-            if item.get("type") == "pot_upgrade":
+            if purchase_error is None and item.get("type") == "pot_upgrade":
                 try:
                     new_capacity = pot_upgrade_capacity(user, clean_name, POT_UPGRADE_LIMITS)
                 except ValueError:
-                    return await ctx.send("🚫 You already own the maximum number of that pot upgrade.")
-            user["grams"] = balance - cost
-            inv_add(user, clean_name, 1)
-            if new_capacity is not None:
-                user["max_pots"] = new_capacity
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                    purchase_error = "🚫 You already own the maximum number of that pot upgrade."
+            if purchase_error is None:
+                user["grams"] = balance - cost
+                inv_add(user, clean_name, 1)
+                if new_capacity is not None:
+                    user["max_pots"] = new_capacity
+                add_progress(user, "buy", 1, user_id=ctx.author.id)
+                check_achievements(user)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+        if purchase_error:
+            return await ctx.send(purchase_error)
         await ctx.send(f"✅ Bought **{clean_name.title()}** for ${cost:,}.")
 
     @commands.hybrid_command(name="sell")
@@ -222,39 +238,49 @@ class Economy(commands.Cog):
             district_multiplier = max(1.0, float(district.get("multiplier", 1.10)))
         sold_log = []
         total_earnings = 0
+        sale_error = None
         async with self.bot.db.lock:
             stash = user.setdefault("flower_stash", {})
             if amount.lower() == "all":
                 sale_items = [(name, max(0, int(qty))) for name, qty in list(stash.items()) if int(qty) > 0]
                 if not sale_items:
-                    return await ctx.send("🎒 Your flower stash is empty.")
+                    sale_error = "🎒 Your flower stash is empty."
             else:
                 if not strain_name:
-                    return await ctx.send("❌ Usage: `!sell <amount> <strain>`")
-                try:
-                    quantity = require_positive_amount(amount)
-                except ValueError:
-                    return await ctx.send("❌ Amount must be a positive whole number.")
-                clean_name = strain_name.lower().strip()
-                if max(0, int(stash.get(clean_name, 0))) < quantity:
-                    return await ctx.send(f"❌ You don't have {quantity}g of {clean_name}.")
-                sale_items = [(clean_name, quantity)]
-            skill_multiplier = 1.0 + max(0, int(user.get("skills", {}).get("dealmaker", 0))) * 0.05
-            for name, quantity in sale_items:
-                base_value = max(0, int(GROWTH_CYCLES.get(name, {"base_value": 10}).get("base_value", 10)))
-                unit_price = max(
-                    0,
-                    int(base_value * market_multiplier * district_multiplier * skill_multiplier),
-                )
-                total_earnings += unit_price * quantity
-                stash[name] = max(0, int(stash.get(name, 0))) - quantity
-                if stash[name] <= 0:
-                    stash.pop(name, None)
-                sold_log.append(f"{quantity}g {name.title()}")
-            user["grams"] = max(0, int(user.get("grams", 0))) + total_earnings
-            stats = user.setdefault("stats", {})
-            stats["total_earned"] = max(0, int(stats.get("total_earned", 0))) + total_earnings
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                    sale_error = "❌ Usage: `/sell amount:<amount> strain_name:<strain>`"
+                    sale_items = []
+                else:
+                    try:
+                        quantity = require_positive_amount(amount)
+                    except ValueError:
+                        sale_error = "❌ Amount must be a positive whole number."
+                        sale_items = []
+                    else:
+                        clean_name = strain_name.lower().strip()
+                        if max(0, int(stash.get(clean_name, 0))) < quantity:
+                            sale_error = f"❌ You don\'t have {quantity}g of {clean_name}."
+                            sale_items = []
+                        else:
+                            sale_items = [(clean_name, quantity)]
+            if sale_error is None:
+                for name, quantity in sale_items:
+                    base_value = max(0, int(GROWTH_CYCLES.get(name, {"base_value": 10}).get("base_value", 10)))
+                    unit_price = max(
+                        0,
+                        int(base_value * market_multiplier * district_multiplier),
+                    )
+                    total_earnings += unit_price * quantity
+                    stash[name] = max(0, int(stash.get(name, 0))) - quantity
+                    if stash[name] <= 0:
+                        stash.pop(name, None)
+                    sold_log.append(f"{quantity}g {name.title()}")
+                user["grams"] = max(0, int(user.get("grams", 0))) + total_earnings
+                stats = user.setdefault("stats", {})
+                stats["total_earned"] = max(0, int(stats.get("total_earned", 0))) + total_earnings
+                check_achievements(user)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+        if sale_error:
+            return await ctx.send(sale_error)
         embed = discord.Embed(title="🤝 Market Sale", color=discord.Color.green())
         embed.add_field(name="Sold", value="\n".join(sold_log), inline=False)
         embed.add_field(
@@ -264,7 +290,7 @@ class Economy(commands.Cog):
         )
         await ctx.send(embed=embed)
 
-    @commands.command(name="sellconc")
+    @commands.hybrid_command(name="sellconc")
     async def sellconc(self, ctx, amount: str = "all", *, type_name: str = None):
         scope, user = await self._profile(ctx)
         if await jail_guard(ctx, user, "sell"):
@@ -281,38 +307,49 @@ class Economy(commands.Cog):
             district_multiplier = max(1.0, float(district.get("multiplier", 1.10)))
         sold_log = []
         total_earnings = 0
+        sale_error = None
         async with self.bot.db.lock:
             stash = user.setdefault("concentrates", {})
             if amount.lower() == "all":
                 sale_items = [(name, max(0, int(qty))) for name, qty in list(stash.items()) if int(qty) > 0]
                 if not sale_items:
-                    return await ctx.send("🍯 No concentrates to sell.")
+                    sale_error = "🍯 No concentrates to sell."
             else:
                 if not type_name:
-                    return await ctx.send("❌ Usage: `!sellconc <amount> <type>`")
-                try:
-                    quantity = require_positive_amount(amount)
-                except ValueError:
-                    return await ctx.send("❌ Amount must be a positive whole number.")
-                clean_name = type_name.lower().strip()
-                if max(0, int(stash.get(clean_name, 0))) < quantity:
-                    return await ctx.send("❌ Not enough.")
-                sale_items = [(clean_name, quantity)]
-            for concentrate_type, quantity in sale_items:
-                multiplier = max(0.0, float(CONCENTRATE_TYPES.get(concentrate_type, {}).get("value_mult", 2.0)))
-                unit_price = max(
-                    0,
-                    int(50 * multiplier * market_multiplier * district_multiplier),
-                )
-                total_earnings += unit_price * quantity
-                stash[concentrate_type] = max(0, int(stash.get(concentrate_type, 0))) - quantity
-                if stash[concentrate_type] <= 0:
-                    stash.pop(concentrate_type, None)
-                sold_log.append(f"{quantity}g {concentrate_type.title()}")
-            user["grams"] = max(0, int(user.get("grams", 0))) + total_earnings
-            stats = user.setdefault("stats", {})
-            stats["total_earned"] = max(0, int(stats.get("total_earned", 0))) + total_earnings
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                    sale_error = "❌ Usage: `/sellconc amount:<amount> type_name:<type>`"
+                    sale_items = []
+                else:
+                    try:
+                        quantity = require_positive_amount(amount)
+                    except ValueError:
+                        sale_error = "❌ Amount must be a positive whole number."
+                        sale_items = []
+                    else:
+                        clean_name = type_name.lower().strip()
+                        if max(0, int(stash.get(clean_name, 0))) < quantity:
+                            sale_error = "❌ Not enough."
+                            sale_items = []
+                        else:
+                            sale_items = [(clean_name, quantity)]
+            if sale_error is None:
+                for concentrate_type, quantity in sale_items:
+                    multiplier = max(0.0, float(CONCENTRATE_TYPES.get(concentrate_type, {}).get("value_mult", 2.0)))
+                    unit_price = max(
+                        0,
+                        int(50 * multiplier * market_multiplier * district_multiplier),
+                    )
+                    total_earnings += unit_price * quantity
+                    stash[concentrate_type] = max(0, int(stash.get(concentrate_type, 0))) - quantity
+                    if stash[concentrate_type] <= 0:
+                        stash.pop(concentrate_type, None)
+                    sold_log.append(f"{quantity}g {concentrate_type.title()}")
+                user["grams"] = max(0, int(user.get("grams", 0))) + total_earnings
+                stats = user.setdefault("stats", {})
+                stats["total_earned"] = max(0, int(stats.get("total_earned", 0))) + total_earnings
+                check_achievements(user)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+        if sale_error:
+            return await ctx.send(sale_error)
         await ctx.send(f"🍯 Sold **{', '.join(sold_log)}** for **${total_earnings:,}**.")
 
     async def _settle_expired_auctions(self, scope_id: int, world=None):
@@ -341,7 +378,7 @@ class Economy(commands.Cog):
             self.bot.db.mark_world_dirty(scope_id)
         return changed
 
-    @commands.group(invoke_without_command=True)
+    @commands.hybrid_group(invoke_without_command=True)
     async def auction(self, ctx):
         scope, world = await self._world(ctx)
         try:
@@ -364,7 +401,7 @@ class Economy(commands.Cog):
                 f"Buyout: {f'${buyout:,}' if buyout else 'N/A'}\nEnds in: {minutes}m {seconds}s"
             )
             embed.add_field(name=f"ID: {auction_id} | {auction['item_name']}", value=description, inline=True)
-        embed.set_footer(text="Use !bid <id> <amount> or !auction list <item> <price> <buyout>")
+        embed.set_footer(text="Use /bid auction_id:<id> amount:<amount> or /auction list item_name:<item> start_price:<price> buyout:<buyout>")
         await ctx.send(embed=embed)
 
     @auction.command(name="list")
@@ -380,28 +417,33 @@ class Economy(commands.Cog):
             return await ctx.send(str(exc))
         world = await self.bot.db.get_world(scope.scope_id)
         clean_item = item_name.lower().strip()
+        list_error = None
+        auction_id = None
         async with self.bot.db.lock:
             await self._settle_expired_auctions(scope.scope_id, world)
             if inv_get(user, clean_item) < 1 or not inv_take(user, clean_item, 1):
-                return await ctx.send(f"❌ You don't have **{clean_item}**.")
-            auctions = world.setdefault("auctions", {})
-            auction_id = str(int(world.get("auction_counter", 1000)) + 1)
-            world["auction_counter"] = int(auction_id)
-            auctions[auction_id] = {
-                "seller_id": ctx.author.id,
-                "seller_name": ctx.author.name,
-                "item_name": clean_item,
-                "start_price": valid_start,
-                "current_bid": valid_start,
-                "highest_bidder": None,
-                "buyout": valid_buyout,
-                "end_time": time.time() + 3600,
-            }
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
-            self.bot.db.mark_world_dirty(scope.scope_id)
+                list_error = f"❌ You don\'t have **{clean_item}**."
+            else:
+                auctions = world.setdefault("auctions", {})
+                auction_id = str(int(world.get("auction_counter", 1000)) + 1)
+                world["auction_counter"] = int(auction_id)
+                auctions[auction_id] = {
+                    "seller_id": ctx.author.id,
+                    "seller_name": ctx.author.name,
+                    "item_name": clean_item,
+                    "start_price": valid_start,
+                    "current_bid": valid_start,
+                    "highest_bidder": None,
+                    "buyout": valid_buyout,
+                    "end_time": time.time() + 3600,
+                }
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                self.bot.db.mark_world_dirty(scope.scope_id)
+        if list_error:
+            return await ctx.send(list_error)
         await ctx.send(f"🔨 **Listed!** {clean_item} for ${valid_start:,}. ID: `{auction_id}`")
 
-    @commands.command(name="bid")
+    @commands.hybrid_command(name="bid")
     async def bid(self, ctx, auction_id: str, amount: int):
         scope, user = await self._profile(ctx)
         try:
@@ -409,49 +451,68 @@ class Economy(commands.Cog):
         except WorldModeDenied as exc:
             return await ctx.send(str(exc))
         world = await self.bot.db.get_world(scope.scope_id)
+        bid_error = None
+        bought_out = False
+        valid_bid = 0
         async with self.bot.db.lock:
             await self._settle_expired_auctions(scope.scope_id, world)
             auctions = world.setdefault("auctions", {})
             auction = auctions.get(auction_id)
             if auction is None:
-                return await ctx.send("❌ Invalid or expired Auction ID.")
-            if int(auction["seller_id"]) == ctx.author.id:
-                return await ctx.send("❌ You can't bid on your own item.")
-            buyout = max(0, int(auction.get("buyout", 0)))
-            requested = buyout if buyout and amount >= buyout else amount
-            try:
-                valid_bid = validate_bid_amount(
-                    requested,
-                    current_bid=auction["current_bid"],
-                    end_time=auction["end_time"],
-                    now=time.time(),
-                )
-            except ValueError as exc:
-                return await ctx.send(f"❌ {exc}.")
-            previous_bidder_id = auction.get("highest_bidder")
-            current_bid = max(0, int(auction["current_bid"]))
-            bidder_balance = max(0, int(user.get("grams", 0)))
-            required_funds = valid_bid - current_bid if previous_bidder_id == ctx.author.id else valid_bid
-            if bidder_balance < required_funds:
-                return await ctx.send("💸 Insufficient funds.")
-            user["grams"] = bidder_balance - required_funds
-            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
-            if previous_bidder_id is not None and previous_bidder_id != ctx.author.id:
-                previous_id = int(previous_bidder_id)
-                previous_bidder = await self.bot.db.get_profile(scope.scope_id, previous_id)
-                previous_bidder["grams"] = max(0, int(previous_bidder.get("grams", 0))) + current_bid
-                self.bot.db.mark_profile_dirty(scope.scope_id, previous_id)
-            auction["current_bid"] = valid_bid
-            auction["highest_bidder"] = ctx.author.id
-            bought_out = bool(buyout and valid_bid >= buyout)
-            if bought_out:
-                inv_add(user, auction["item_name"], 1)
-                seller_id = int(auction["seller_id"])
-                seller = await self.bot.db.get_profile(scope.scope_id, seller_id)
-                seller["grams"] = max(0, int(seller.get("grams", 0))) + valid_bid
-                self.bot.db.mark_profile_dirty(scope.scope_id, seller_id)
-                del auctions[auction_id]
-            self.bot.db.mark_world_dirty(scope.scope_id)
+                bid_error = "❌ Invalid or expired Auction ID."
+            elif int(auction["seller_id"]) == ctx.author.id:
+                bid_error = "❌ You can\'t bid on your own item."
+            else:
+                buyout = max(0, int(auction.get("buyout", 0)))
+                requested = buyout if buyout and amount >= buyout else amount
+                previous_bidder_id = auction.get("highest_bidder")
+                try:
+                    valid_bid = validate_bid_amount(
+                        requested,
+                        current_bid=auction["current_bid"],
+                        end_time=auction["end_time"],
+                        now=time.time(),
+                        allow_equal=previous_bidder_id is None,
+                    )
+                except ValueError as exc:
+                    bid_error = f"❌ {exc}."
+
+            if bid_error is None:
+                current_bid = max(0, int(auction["current_bid"]))
+                bidder_balance = max(0, int(user.get("grams", 0)))
+                required_funds = valid_bid - current_bid if previous_bidder_id == ctx.author.id else valid_bid
+                if bidder_balance < required_funds:
+                    bid_error = "💸 Insufficient funds."
+
+            if bid_error is None:
+                previous_bidder = None
+                previous_id = None
+                if previous_bidder_id is not None and previous_bidder_id != ctx.author.id:
+                    previous_id = int(previous_bidder_id)
+                    previous_bidder = await self.bot.db.get_profile(scope.scope_id, previous_id)
+
+                bought_out = bool(buyout and valid_bid >= buyout)
+                seller = None
+                seller_id = None
+                if bought_out:
+                    seller_id = int(auction["seller_id"])
+                    seller = await self.bot.db.get_profile(scope.scope_id, seller_id)
+
+                user["grams"] = bidder_balance - required_funds
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                if previous_bidder is not None and previous_id is not None:
+                    previous_bidder["grams"] = max(0, int(previous_bidder.get("grams", 0))) + current_bid
+                    self.bot.db.mark_profile_dirty(scope.scope_id, previous_id)
+                auction["current_bid"] = valid_bid
+                auction["highest_bidder"] = ctx.author.id
+                if bought_out:
+                    inv_add(user, auction["item_name"], 1)
+                    seller["grams"] = max(0, int(seller.get("grams", 0))) + valid_bid
+                    self.bot.db.mark_profile_dirty(scope.scope_id, seller_id)
+                    del auctions[auction_id]
+                self.bot.db.mark_world_dirty(scope.scope_id)
+        if bid_error:
+            return await ctx.send(bid_error)
         if bought_out:
             await ctx.send(f"🔨 **BOOM!** You bought out the item for ${valid_bid:,}!")
         else:

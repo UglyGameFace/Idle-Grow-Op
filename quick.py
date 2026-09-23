@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands
 
 from persistence_context import GuildContextRequired, require_guild_id
+from progression_core import add_progress, check_achievements
 from world_modes import (
     effective_market_multiplier,
     effective_pot_capacity,
@@ -139,7 +140,7 @@ class Quick(commands.Cog):
         strain = str(strain or "").lower().strip()
         if strain not in GROWTH_CYCLES:
             return await ctx.send("❌ Unknown strain.")
-        _, _, world = await self._scope(ctx)
+        scope, _, world = await self._scope(ctx)
         data = GROWTH_CYCLES[strain]
         seed_cost = _seed_cost(f"{strain} seed")
         average_yield = sum(data["yield"]) / 2
@@ -161,51 +162,55 @@ class Quick(commands.Cog):
             return
         desired = max(1, min(_safe_int(count, QPLANT_MAX_PLANT_PER_CALL), QPLANT_MAX_PLANT_PER_CALL)) if count is not None else None
 
+        qplant_error = None
+        planted = []
         async with self.bot.db.lock:
             plants = profile.setdefault("plants", [])
             max_pots = effective_pot_capacity(profile, scope)
             free_slots = max(0, max_pots - len(plants))
             if free_slots <= 0:
-                return await ctx.send(f"🚫 **No Pots Available!** ({len(plants)}/{max_pots})")
-            desired = min(desired or free_slots, free_slots)
-            level = max(1, _safe_int(profile.get("level"), 1))
-            candidates = []
-            for strain, data in GROWTH_CYCLES.items():
-                if level < _safe_int(data.get("level_req"), 1):
-                    continue
-                seed = f"{strain} seed"
-                owned = max(0, _safe_int(inv_get(profile, seed)))
-                if not owned:
-                    continue
-                low, high = data.get("yield", (0, 0))
-                score = float(data.get("base_value", 0) or 0) * ((float(low) + float(high)) / 2)
-                candidates.append((score, strain, seed, owned))
-            if not candidates:
-                return await ctx.send("❌ You don't have any plantable seeds for your current level.")
-            candidates.sort(reverse=True)
-            planted = []
-            now = time.time()
-            for _, strain, seed, owned in candidates:
-                for _ in range(min(owned, desired - len(planted))):
-                    if not inv_take(profile, seed, 1):
-                        break
-                    plants.append(
-                        {
-                            "strain": strain,
-                            "planted_at": now,
-                            "last_watered": now,
-                            "water_count": 1,
-                            "quality": 1.0,
-                        }
-                    )
-                    planted.append(strain)
-                    if len(planted) >= desired:
-                        break
-                if len(planted) >= desired:
-                    break
-            if planted:
-                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                qplant_error = f"🚫 **No Pots Available!** ({len(plants)}/{max_pots})"
+            else:
+                desired = min(desired or free_slots, free_slots)
+                level = max(1, _safe_int(profile.get("level"), 1))
+                candidates = []
+                for strain, data in GROWTH_CYCLES.items():
+                    if level < _safe_int(data.get("level_req"), 1):
+                        continue
+                    seed = f"{strain} seed"
+                    owned = max(0, _safe_int(inv_get(profile, seed)))
+                    if not owned:
+                        continue
+                    low, high = data.get("yield", (0, 0))
+                    score = float(data.get("base_value", 0) or 0) * ((float(low) + float(high)) / 2)
+                    candidates.append((score, strain, seed, owned))
+                if not candidates:
+                    qplant_error = "❌ You don\'t have any plantable seeds for your current level."
+                else:
+                    candidates.sort(reverse=True)
+                    now = time.time()
+                    for _, strain, seed, owned in candidates:
+                        for _ in range(min(owned, desired - len(planted))):
+                            if not inv_take(profile, seed, 1):
+                                break
+                            plants.append(
+                                {
+                                    "strain": strain,
+                                    "planted_at": now,
+                                }
+                            )
+                            planted.append(strain)
+                            if len(planted) >= desired:
+                                break
+                        if len(planted) >= desired:
+                            break
+                    if planted:
+                        add_progress(profile, "plant", len(planted), user_id=ctx.author.id)
+                        check_achievements(profile)
+                        self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
 
+        if qplant_error:
+            return await ctx.send(qplant_error)
         if not planted:
             return await ctx.send("⚠️ Couldn't plant anything.")
         preview = ", ".join(name.title() for name in planted[:10])

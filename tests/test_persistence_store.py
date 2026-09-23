@@ -120,6 +120,54 @@ def test_failed_flush_keeps_records_dirty_for_retry():
     run(scenario())
 
 
+def test_mutation_during_flush_stays_dirty_until_newer_state_is_saved():
+    class BlockingBackend(MemoryBackend):
+        def __init__(self, records=None):
+            super().__init__(records)
+            self.save_started = asyncio.Event()
+            self.release_save = asyncio.Event()
+
+        async def save_many(self, records):
+            batch = {
+                key.cache_key: deepcopy(dict(value))
+                for key, value in records.items()
+            }
+            self.saved_batches.append(batch)
+            self.save_started.set()
+            await self.release_save.wait()
+            self.records.update(batch)
+
+    async def scenario():
+        key = guild_profile_key(100, 200)
+        backend = BlockingBackend({key: {"grams": 500}})
+        store = ScopedRecordStore(backend, defaults)
+        record = await store.get(key)
+
+        record["grams"] = 600
+        store.mark_dirty(key)
+
+        first_flush = asyncio.create_task(store.flush())
+        await backend.save_started.wait()
+
+        record["grams"] = 700
+        store.mark_dirty(key)
+        backend.release_save.set()
+
+        first_result = await first_flush
+
+        assert first_result.saved_keys == (key.cache_key,)
+        assert backend.records[key.cache_key] == {"grams": 600}
+        assert store.dirty_keys == {key.cache_key}
+
+        second_result = await store.flush()
+
+        assert second_result.saved_keys == (key.cache_key,)
+        assert backend.records[key.cache_key] == {"grams": 700}
+        assert not store.dirty_keys
+
+    run(scenario())
+
+
 def test_concurrent_first_reads_share_one_backend_load():
     async def scenario():
         key = guild_profile_key(100, 200)

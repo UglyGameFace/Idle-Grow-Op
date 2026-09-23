@@ -22,10 +22,12 @@ def test_tasks_build_active_local_and_shared_scopes_without_legacy_global_state(
     assert "await self.bot.db.save()" not in source
 
 
-def test_notifications_use_indexed_active_scope_candidates_and_commit_after_delivery():
+def test_notifications_batch_active_scope_candidates_and_commit_after_delivery():
     source = (ROOT / "tasks.py").read_text(encoding="utf-8")
 
-    assert "list_guild_notification_candidates(" in source
+    assert "list_notification_candidates(" in source
+    assert "tuple(guild_by_scope)" in source
+    assert "list_guild_notification_candidates(" not in source
     assert "resolve_player_scope" in source
     assert "scope.scope_id != guild_id" in source
     assert "scope.scope_id != guild.id" in source
@@ -37,17 +39,19 @@ def test_notifications_use_indexed_active_scope_candidates_and_commit_after_deli
     assert "self.bot.db.mark_profile_dirty(scope_id, user_id)" in source
 
 
-def test_supabase_indexes_only_profiles_with_notification_work():
-    migration = (ROOT / "migrations/001_guild_scoped_persistence.sql").read_text(
-        encoding="utf-8"
-    )
+def test_supabase_batches_only_profiles_with_pending_notification_work():
+    migration = (
+        ROOT / "migrations/004_batched_notification_candidates.sql"
+    ).read_text(encoding="utf-8")
     backend = (ROOT / "supabase_scoped_backend.py").read_text(encoding="utf-8")
 
-    assert "has_notification_work boolean generated always as" in migration
-    assert "guild_profiles_notification_work_idx" in migration
-    assert "where has_notification_work" in migration
-    assert '.eq("has_notification_work", True)' in backend
-    assert '.select("user_id")' in backend
+    assert "idle_grow_has_pending_notification_work" in migration
+    assert "guild_profiles_pending_notification_work_idx" in migration
+    assert "where has_pending_notification_work" in migration
+    assert "p_guild_ids bigint[]" in migration
+    assert "profile.guild_id = any" in migration
+    assert 'NOTIFICATION_BATCH_RPC = "idle_grow_list_notification_candidates"' in backend
+    assert "self.client.rpc(" in backend
 
 
 def test_global_presence_does_not_read_a_single_guild_world():

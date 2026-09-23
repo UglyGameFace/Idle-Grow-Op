@@ -74,15 +74,6 @@ def _ready_plant_count(profile: dict[str, Any], world: dict[str, Any], now: floa
     return ready
 
 
-def _water_due(profile: dict[str, Any], now: float) -> bool:
-    for plant in profile.get("plants", []) or []:
-        if not isinstance(plant, dict):
-            continue
-        last_watered = float(plant.get("last_watered", 0) or 0)
-        if now - last_watered > 300:
-            return True
-    return False
-
 
 def _completed_batch_count(profile: dict[str, Any], now: float) -> int:
     return sum(
@@ -142,14 +133,6 @@ def choose_onboarding_step(
 
     plants = [item for item in profile.get("plants", []) or [] if isinstance(item, dict)]
     if plants:
-        if _water_due(profile, current_time):
-            return OnboardingStep(
-                "water",
-                "💧",
-                "Water the plants that are ready for attention",
-                "/water",
-                "At least one growing plant can be watered. Use `/status` afterward to see progress and remaining time.",
-            )
         return OnboardingStep(
             "status",
             "⏳",
@@ -306,7 +289,7 @@ class Onboarding(commands.Cog):
         )
         embed.add_field(
             name="The money loop",
-            value="Buy a seed → plant → tend/check → harvest → sell → upgrade and repeat.",
+            value="Buy a seed → plant → check progress → harvest → sell → upgrade and repeat.",
             inline=False,
         )
         embed.add_field(
@@ -335,8 +318,8 @@ class Onboarding(commands.Cog):
             inline=False,
         )
         embed.add_field(
-            name="3. Watch and tend it",
-            value="`/status` shows the live timer. `/water` waters eligible plants. Weather and equipment can change growth speed.",
+            name="3. Watch it grow",
+            value="`/status` shows the live timer. Weather and equipment can change growth speed.",
             inline=False,
         )
         embed.add_field(
@@ -440,7 +423,7 @@ class Onboarding(commands.Cog):
         )
         embed.add_field(
             name="🌱 Core grow loop",
-            value="`/shop` • `/buy` • `/plant` • `/status` • `/water` • `/harvest` • `/sell`",
+            value="`/shop` • `/buy` • `/plant` • `/status` • `/harvest` • `/sell`",
             inline=False,
         )
         embed.add_field(
