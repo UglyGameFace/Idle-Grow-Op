@@ -13,7 +13,7 @@ This audit covers the complete Idle Grow repository and deployed behavior:
 - CI/tests, Discloud deployment assumptions, stale compatibility logic, temporary artifacts, duplicated ownership, and dead code
 
 ## Status
-IN PROGRESS
+SOURCE / CI AUDIT COMPLETE — DEPLOYMENT VALIDATION BLOCKED
 
 ## Phase 1 Complete: Command Surface and Runtime Baseline
 Validated on exact head cae20b52d942a6a21137005f53a5778ad03d2149 with CI run 690 successful.
@@ -35,19 +35,19 @@ Cleanup:
 - Command consolidation changed existing authoritative callbacks rather than creating parallel implementations.
 
 
-## Confirmed Findings
-- Current main head at audit start: af81d32378afdc46a6da9915b06985d8777d0f79.
-- No open pull requests existed at audit start.
-- Discord startup loads all configured extensions before bot.start() and uses IdleGrowBot.setup_hook() to globally sync application commands.
-- Background weather/market processing is owned by tasks.py and can remain healthy independently of user command execution, explaining the observed half-working bot behavior.
-- The previous slash-command incident was real: PR #28 repaired startup publication after Discord had retained a stale remote command set.
-- The command architecture is still mixed. Core gameplay contains hybrid/slash commands alongside prefix-only commands and prefix-only groups.
-- Confirmed prefix-only gameplay surfaces currently include heist, launder, conc, sellconc, bid, district, crew, and auction entry points/subcommands. These require intent/UX review rather than blind conversion.
-- Existing command uniqueness tests only prove duplicate names/aliases are absent; they do not prove every advertised or intended command is slash-accessible or executable.
-- Existing CI compiles sources, runs pytest, loads extensions, and grep-rejects selected legacy persistence tokens, but extension loading does not execute the full runtime command surface.
-- A concrete runtime defect already exists in quick.py: /calc discards the GameScope value and then references scope when computing the effective market multiplier.
-- The repository still contains explicit legacy migration infrastructure and world-mode compatibility behavior. These may be legitimate compatibility paths and must be traced before removal.
-- Large modules such as setup.py, profile_signatures.py, and sesh.py contain substantial behavior and asynchronous task ownership, making them high-priority conflict/race audit areas.
+## Final Audit Findings
+- The observed "weather works while everything else feels broken" behavior had multiple independent causes rather than one weather bug. Background cycles could continue while command publication, callback runtime, persistence, or global-lock contention failed elsewhere.
+- Public gameplay command ownership is consolidated on hybrid slash + prefix callbacks. Hidden owner/admin maintenance commands remain intentionally prefix-only.
+- The complete advertised public command surface is now checked recursively against the real loaded Discord command tree, including nested subcommands.
+- progression_core.py is the single live progression owner; obsolete progression helpers and impossible quest/event paths were removed.
+- Scoped persistence now protects concurrent dirty mutations and uses one atomic cross-record Supabase RPC contract.
+- Completed legacy migration tooling was removed only after repository history proved the one-time production migration succeeded. Runtime legacy world-mode compatibility remains intentionally retained for pre-world-mode guild data.
+- Shared guild, profile-signature, world-mode, and casino escrow persistence contracts have explicit dependency-free owners instead of duplicated literal schemas.
+- No public gameplay module retains player-facing !command guidance or the removed /water, /tasks, /appeal, /bail, or /sesh_setup paths.
+- Gameplay mutation paths no longer await Discord responses while holding the process-wide database mutation lock.
+- High-risk player-value flows now have callback-level failure-path coverage: transfers, theft, auctions, owner/admin mutations, crew exit/disband, and interactive Blackjack escrow.
+- Full branch comparison against the audit base is scoped to Idle Grow audit work only: the branch is ahead of the original base and not behind it.
+- Source and CI evidence do not prove the deployed Discloud revision or production Supabase schema. Live production resolution remains unverified until those external states are checked.
 
 ## Architecture / Execution Path
 1. discloud.config launches main.py under Python 3.11.
@@ -327,21 +327,32 @@ Cleanup:
 - Removed command names are protected from accidental reintroduction into the published command tree.
 
 ## Cleanup / Conflict Review
-Pending. Every affected subsystem will be checked after its behavioral audit for obsolete, duplicate, conflicting, partial, temporary, and superseded logic.
+COMPLETE for repository source and CI scope.
+
+Verified:
+- Full branch comparison against base af81d32378afdc46a6da9915b06985d8777d0f79 shows only audit-related production, migration, contract, test, and audit-document changes.
+- Completed one-time migration workflow/tooling is removed; runtime legacy world-mode compatibility is intentionally retained.
+- Obsolete persistence-context wrappers, dead progression/game constants, ownerless skill state, fake watering behavior, unsupported catalog entries, and nonfunctional special events are removed.
+- Temporary Sesh channel markers/cleanup paths are intentional live lifecycle behavior, not abandoned scaffolding.
+- Remaining bare pass statements are limited to intentional best-effort exception suppression or asyncio cancellation handling.
+- Ruff now rejects unused imports/locals and undefined runtime names across production modules.
+- No unrelated repository, generated artifact, secret file, local database, backup file, or conflict artifact was introduced by the audit.
 
 ## Blockers / Risks
-- GitHub source and CI are available, but live Discloud runtime logs/deployed file fingerprint are not yet attached to this conversation. Production deployment state must be validated before claiming the live incident resolved.
-- Existing tests contain many source-text contracts, so a green suite alone is not sufficient evidence of runtime correctness.
+- **DEPLOYMENT BLOCKER:** Production Supabase must apply `migrations/003_atomic_scoped_record_batch.sql` before this branch is deployed. Schema verification intentionally rejects production schema version 002.
+- **LIVE VALIDATION BLOCKER:** The connected tools do not currently expose the deployed Discloud file revision, startup logs, or live command-sync output. GitHub CI cannot prove the live incident is resolved.
+- ScopedRecordStore still caches every loaded mutable record for process lifetime. Naive LRU/TTL eviction is unsafe because callers retain live mutable references across awaits; this remains a scalability architecture item rather than a correctness patch.
+- Runtime legacy world-mode compatibility is intentionally retained until production data can prove no pre-world-mode guild records remain.
 
 ## Backlog Within This Master Audit
-- Resolve slash/hybrid versus prefix-only command ownership and advertised UX.
-- Fix /calc undefined scope through the authoritative quick-command path with runtime regression coverage.
-- Audit all commands for equivalent runtime-only failures.
-- Audit setup/profile-signature/sesh async lifecycle and duplicated ownership.
-- Determine whether legacy migration workflow/tooling is still required or is completed residue.
-- Determine whether legacy world-mode compatibility remains necessary for production data.
-- Expand CI from mostly structural contracts toward behavioral command/runtime coverage.
-- Validate the deployed Discloud revision and startup command-sync output.
+Repository/source audit work is complete. Remaining closure work is external deployment validation:
+- apply and verify production Supabase migration 003
+- deploy only the migration-compatible audited revision
+- verify Discloud starts cleanly against schema 003
+- verify global command sync publishes the exact local tree
+- exercise representative live commands from farming, economy, progression, crime, gambling, setup, notifications, Sesh, and profile signatures
+- capture the deployed revision/startup evidence in this task before marking the live incident resolved
+- treat mutable-record cache eviction/scalability as a separate follow-up architecture task after production correctness is verified
 
 ## Git State
 - Base: main @ af81d32378afdc46a6da9915b06985d8777d0f79
@@ -349,4 +360,4 @@ Pending. Every affected subsystem will be checked after its behavioral audit for
 - No open PR at audit start.
 
 ## Next Step
-Run the final cleanup and deployment-readiness pass: review the full audit-branch diff for accidental duplication or unrelated changes, close remaining dead-code/conflict findings, validate the exact final head, document migration/deployment blockers, and prepare the branch for review without claiming live production resolution until Supabase/Discloud state is verified.
+Do not deploy this branch against schema 002. Apply and verify `migrations/003_atomic_scoped_record_batch.sql` in production Supabase first. Then deploy the exact audited head to Discloud and validate startup schema verification, extension loading, global command sync, representative live commands, and background cycles before closing this master audit.
