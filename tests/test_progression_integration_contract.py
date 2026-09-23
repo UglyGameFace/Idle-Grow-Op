@@ -51,4 +51,6 @@ def test_xp_consumers_share_the_canonical_threshold_and_credit_helpers():
 def test_ai_does_not_recommend_removed_tasks_command():
     text = source("ai.py")
     assert "`/tasks`" not in text
-    assert "`/growquests`" in text
+    assert "`/game`" in text
+    assert "normal all-in-one" in text
+    assert "optional shortcuts" in text
