@@ -6,6 +6,7 @@ import pytest
 from persistence_scope import global_account_key, guild_profile_key, guild_world_key
 from supabase_scoped_backend import (
     ATOMIC_SAVE_RPC,
+    NOTIFICATION_BATCH_RPC,
     REQUIRED_SCHEMA_VERSION,
     SupabaseSchemaError,
     SupabaseScopedBackend,
@@ -60,7 +61,7 @@ class RpcQuery:
         if self.name in self.client.fail_rpcs:
             raise RuntimeError(f"missing rpc: {self.name}")
         self.client.rpc_calls.append((self.name, deepcopy(self.params)))
-        return Response(None)
+        return Response(deepcopy(self.client.rpc_results.get(self.name)))
 
 
 class FakeClient:
@@ -70,6 +71,7 @@ class FakeClient:
         self.selects = []
         self.upserts = []
         self.rpc_calls = []
+        self.rpc_results = {}
         self.fail_tables = set()
         self.fail_rpcs = set()
 
@@ -104,6 +106,32 @@ def test_schema_verification_requires_recorded_migration_and_all_tables():
         "guild_profiles",
         "guild_worlds",
     ]
+
+
+def test_schema_verification_checks_both_required_rpcs():
+    client = FakeClient()
+    install_schema_version(client)
+    backend = SupabaseScopedBackend(client)
+
+    run(backend.verify_schema())
+
+    assert [name for name, _params in client.rpc_calls] == [
+        ATOMIC_SAVE_RPC,
+        NOTIFICATION_BATCH_RPC,
+    ]
+
+
+def test_schema_verification_rejects_missing_notification_batch_rpc():
+    client = FakeClient()
+    install_schema_version(client)
+    client.fail_rpcs.add(NOTIFICATION_BATCH_RPC)
+    backend = SupabaseScopedBackend(client)
+
+    with pytest.raises(
+        SupabaseSchemaError,
+        match=NOTIFICATION_BATCH_RPC,
+    ):
+        run(backend.verify_schema())
 
 
 def test_schema_verification_rejects_missing_atomic_save_rpc():
@@ -199,4 +227,29 @@ def test_empty_save_does_not_touch_supabase():
     run(backend.save_many({}))
 
     assert client.upserts == []
+    assert client.rpc_calls == []
+
+
+def test_notification_candidates_use_one_batched_rpc_for_all_scopes():
+    client = FakeClient()
+    client.rpc_results[NOTIFICATION_BATCH_RPC] = [
+        {"guild_id": 100, "user_id": 7},
+        {"guild_id": 101, "user_id": 8},
+    ]
+    backend = SupabaseScopedBackend(client)
+
+    rows = run(backend.list_notification_candidates([101, 100, 101]))
+
+    assert rows == [(100, 7), (101, 8)]
+    assert client.rpc_calls == [
+        (NOTIFICATION_BATCH_RPC, {"p_guild_ids": [100, 101]})
+    ]
+    assert client.loads == []
+
+
+def test_empty_notification_scope_set_does_not_touch_supabase():
+    client = FakeClient()
+    backend = SupabaseScopedBackend(client)
+
+    assert run(backend.list_notification_candidates([])) == []
     assert client.rpc_calls == []
