@@ -2,7 +2,9 @@ from types import SimpleNamespace
 
 from game_hub import (
     GameHub,
+    CASINO_GAMES,
     GameHubView,
+    HubCasinoGameSelect,
     HubConcentrateSelect,
     HubStealTargetSelect,
     SAFE_HUB_COMMANDS,
@@ -207,3 +209,27 @@ def test_home_page_exposes_one_tap_next_move():
     view.rebuild(scope(), profile, {})
 
     assert _button(view, "Do Next Move").disabled is False
+
+
+
+def test_casino_page_uses_game_picker_and_requires_explicit_selection():
+    profile = {
+        "grams": 5_000,
+        "level": 1,
+        "xp": 0,
+        "plants": [],
+        "items": {},
+    }
+    view = GameHubView(SimpleNamespace(), 42, 123, page="casino")
+    view.rebuild(scope(), profile, {})
+
+    assert any(isinstance(item, HubCasinoGameSelect) for item in view.children)
+    assert _button(view, "Play Selected").disabled is True
+
+    view.selected_casino_game = CASINO_GAMES[0][0]
+    view.rebuild(scope(), profile, {})
+    assert _button(view, "Play Selected").disabled is False
+
+
+def test_casino_launcher_allowlist_covers_every_selectable_game():
+    assert {key for key, _label, _emoji in CASINO_GAMES} <= SAFE_HUB_COMMANDS
