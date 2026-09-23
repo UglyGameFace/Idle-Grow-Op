@@ -14,7 +14,7 @@ from onboarding import choose_onboarding_step
 from persistence_context import GuildContextRequired, require_guild_id
 from plant_lifecycle import plant_is_ready, plant_ready_at
 from progression_core import xp_needed_for_level
-from utils import GROWTH_CYCLES
+from utils import CONCENTRATE_TYPES, GROWTH_CYCLES
 from world_modes import resolve_game_scope
 
 
@@ -47,6 +47,7 @@ SAFE_HUB_COMMANDS = frozenset(
         "auction list",
         "bid",
         "heist",
+        "steal",
         "launder",
         "heat",
         "heiststats",
@@ -57,6 +58,12 @@ SAFE_HUB_COMMANDS = frozenset(
         "growlevel",
         "profile",
         "crew",
+        "crew create",
+        "crew join",
+        "crew leave",
+        "crew info",
+        "crew deposit",
+        "crew war",
         "district",
         "leaderboard",
         "casino",
@@ -139,6 +146,8 @@ class HubPageSelect(discord.ui.Select):
         view = self.view
         view.page = self.values[0]
         view.selected_seed = None
+        view.selected_concentrate = None
+        view.selected_steal_target = None
         await view.refresh(interaction)
 
 
@@ -333,6 +342,8 @@ class GameHubView(discord.ui.View):
         valid_pages = {key for key, _label, _emoji in HUB_PAGES}
         self.page = page if page in valid_pages else "home"
         self.selected_seed: str | None = None
+        self.selected_concentrate: str | None = None
+        self.selected_steal_target = None
         self.message = None
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
