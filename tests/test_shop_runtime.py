@@ -122,3 +122,27 @@ def test_shop_embed_exposes_live_wallet_level_and_selected_item():
     assert "Level:** 1" in embed.description
     assert "Schwag Seed" in embed.fields[0].name
     assert "Owned:** 2" in embed.fields[0].value
+
+
+
+def test_shop_timeout_disables_visible_controls_and_edits_message():
+    class Message:
+        def __init__(self):
+            self.edits = []
+
+        async def edit(self, **kwargs):
+            self.edits.append(kwargs)
+
+    async def scenario():
+        cog = Economy(SimpleNamespace(db=MemoryDatabase()))
+        view = ShopView(cog, 42, 123)
+        view.rebuild({"grams": 500, "level": 1, "items": {}})
+        message = Message()
+        view.message = message
+
+        await view.on_timeout()
+
+        assert all(child.disabled for child in view.children)
+        assert message.edits == [{"view": view}]
+
+    asyncio.run(scenario())
