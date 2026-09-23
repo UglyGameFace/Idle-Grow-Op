@@ -380,10 +380,10 @@ Completed:
 
 Validation:
 - Repeated PR CI checkpoints are green through the direct hub, casino, guidance, and timeout work.
-- Final exact-head validation is pending on the latest contract-cleanup commit.
+- Exact gameplay UX code/test head 5948e859f87f573f29ae0ad513d7316b64972e87 passed PR CI run 892.
 
 ## Current Follow-up Next Step
-Get exact PR #31 head green, update its final validation record, mark it ready, merge with expected-head protection, verify post-merge main CI, then live-validate the GitHub-connected Discloud deployment including /game, /shop, stable harvest behavior, command sync, and repaired profile XP.
+Validate this documentation-only checkpoint, mark PR #31 ready, merge with expected-head protection, verify post-merge main CI, then live-validate the GitHub-connected Discloud deployment including /game, /shop, stable harvest behavior, command sync, and repaired profile XP.
 
 ## Cleanup / Conflict Review
 COMPLETE for repository source and CI scope.
