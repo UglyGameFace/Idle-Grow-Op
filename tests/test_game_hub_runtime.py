@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 
 from game_hub import (
@@ -244,3 +245,33 @@ def test_keno_launcher_disambiguates_small_numeric_bets_from_picks():
     assert _keno_bet_token("1k") == "1k"
     assert _keno_bet_token("half") == "half"
     assert _keno_bet_token("25%") == "25%"
+
+
+
+def test_game_hub_timeout_disables_visible_controls_and_edits_message():
+    class Message:
+        def __init__(self):
+            self.edits = []
+
+        async def edit(self, **kwargs):
+            self.edits.append(kwargs)
+
+    async def scenario():
+        profile = {
+            "grams": 500,
+            "level": 1,
+            "xp": 0,
+            "plants": [],
+            "items": {},
+        }
+        view = GameHubView(SimpleNamespace(), 42, 123, page="home")
+        view.rebuild(scope(), profile, {})
+        message = Message()
+        view.message = message
+
+        await view.on_timeout()
+
+        assert all(item.disabled for item in view.children)
+        assert message.edits == [{"view": view}]
+
+    asyncio.run(scenario())
