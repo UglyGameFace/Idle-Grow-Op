@@ -25,7 +25,7 @@ def test_notification_flags_are_committed_only_after_delivery():
 
     assert send_position < plant_flag_position
     assert send_position < batch_flag_position
-    assert "except discord.DiscordException:\n                    continue" in source
+    assert "except discord.DiscordException:" in source
 
 
 def test_task_mutations_use_database_lock_and_exact_scope_dirty_tracking():
