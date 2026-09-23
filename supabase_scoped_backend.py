@@ -10,8 +10,9 @@ from persistence_scope import (
 )
 
 
-REQUIRED_SCHEMA_VERSION = "003_atomic_scoped_record_batch"
+REQUIRED_SCHEMA_VERSION = "004_batched_notification_candidates"
 ATOMIC_SAVE_RPC = "idle_grow_save_scoped_records"
+NOTIFICATION_BATCH_RPC = "idle_grow_list_notification_candidates"
 CASINO_PROFIT_METRICS = {
     "casino_total_profit",
     "coinflip_profit",
@@ -76,12 +77,17 @@ class SupabaseScopedBackend:
                     f"Required Supabase table or column is unavailable: {table_name}"
                 ) from exc
 
-        try:
-            self.client.rpc(ATOMIC_SAVE_RPC, self._empty_save_payload()).execute()
-        except Exception as exc:
-            raise SupabaseSchemaError(
-                f"Required Supabase RPC is unavailable: {ATOMIC_SAVE_RPC}"
-            ) from exc
+        required_rpcs = (
+            (ATOMIC_SAVE_RPC, self._empty_save_payload()),
+            (NOTIFICATION_BATCH_RPC, {"p_guild_ids": []}),
+        )
+        for rpc_name, payload in required_rpcs:
+            try:
+                self.client.rpc(rpc_name, payload).execute()
+            except Exception as exc:
+                raise SupabaseSchemaError(
+                    f"Required Supabase RPC is unavailable: {rpc_name}"
+                ) from exc
 
     async def load(self, key: RecordKey) -> Mapping[str, Any] | None:
         return await asyncio.to_thread(self._load_sync, key)
@@ -172,36 +178,35 @@ class SupabaseScopedBackend:
             rows.append((int(row["user_id"]), max(0, value) if clamp_nonnegative else value))
         return rows
 
-    async def list_guild_notification_candidates(
+    async def list_notification_candidates(
         self,
-        guild_id: Any,
-        *,
-        limit: int = 500,
-    ) -> list[int]:
-        guild_number = self._positive_int(guild_id, "guild_id")
-        if limit <= 0 or limit > 1000:
-            raise ValueError("limit must be between 1 and 1000")
+        guild_ids: list[Any] | tuple[Any, ...] | set[Any],
+    ) -> list[tuple[int, int]]:
+        normalized = sorted(
+            {
+                self._positive_int(guild_id, "guild_id")
+                for guild_id in guild_ids
+            }
+        )
+        if not normalized:
+            return []
         return await asyncio.to_thread(
-            self._list_guild_notification_candidates_sync,
-            guild_number,
-            int(limit),
+            self._list_notification_candidates_sync,
+            normalized,
         )
 
-    def _list_guild_notification_candidates_sync(
+    def _list_notification_candidates_sync(
         self,
-        guild_id: int,
-        limit: int,
-    ) -> list[int]:
-        response = (
-            self.client.table("guild_profiles")
-            .select("user_id")
-            .eq("guild_id", guild_id)
-            .eq("has_notification_work", True)
-            .order("user_id")
-            .limit(limit)
-            .execute()
-        )
-        return [int(row["user_id"]) for row in (response.data or [])]
+        guild_ids: list[int],
+    ) -> list[tuple[int, int]]:
+        response = self.client.rpc(
+            NOTIFICATION_BATCH_RPC,
+            {"p_guild_ids": guild_ids},
+        ).execute()
+        return [
+            (int(row["guild_id"]), int(row["user_id"]))
+            for row in (response.data or [])
+        ]
 
     async def save_many(self, records: Mapping[RecordKey, Mapping[str, Any]]) -> None:
         if not records:
