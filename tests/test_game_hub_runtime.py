@@ -1,13 +1,17 @@
 from types import SimpleNamespace
 
 from game_hub import GameHub, SAFE_HUB_COMMANDS
+from world_modes import GameScope, MODE_SERVER, POLICY_SERVER
 
 
 def scope():
-    return SimpleNamespace(
-        emoji="🏙️",
-        label="Current Server World",
-        multiplayer=True,
+    return GameScope(
+        guild_id=123,
+        user_id=42,
+        policy=POLICY_SERVER,
+        mode=MODE_SERVER,
+        scope_id=123,
+        selection_explicit=True,
     )
 
 
