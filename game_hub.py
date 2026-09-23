@@ -1219,7 +1219,7 @@ class GameHub(commands.Cog):
             )
             embed.add_field(
                 name="How it works",
-                value="Open Process Menu to see recipes and requirements. Collect Ready claims every completed batch.",
+                value="Choose a concentrate below, tap Start Batch, enter the amount, and collect it here when finished.",
                 inline=False,
             )
         elif page == "crime":
@@ -1237,7 +1237,7 @@ class GameHub(commands.Cog):
             )
             embed.add_field(
                 name="Jobs",
-                value="Choose a solo plan directly. Launder opens a private amount form. Crew/raid actions remain protected by their multiplayer rules.",
+                value="Choose a solo plan directly. In multiplayer saves, pick a player above and tap Rob Selected. Launder opens a private amount form.",
                 inline=False,
             )
         elif page == "progress":
@@ -1269,6 +1269,15 @@ class GameHub(commands.Cog):
                 name="Multiplayer",
                 value="Enabled" if scope.multiplayer else "Unavailable in this save",
                 inline=True,
+            )
+            embed.add_field(
+                name="Controls",
+                value=(
+                    "Manage your crew, district, profile, and leaderboard directly below."
+                    if scope.multiplayer
+                    else "This save is private. Open World Mode below if you want multiplayer systems."
+                ),
+                inline=False,
             )
         elif page == "casino":
             stats = profile.get("stats")
