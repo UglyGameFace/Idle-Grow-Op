@@ -1840,8 +1840,8 @@ class Setup(commands.Cog):
         embed.add_field(
             name="Player Launch",
             value=(
-                "Share `/start` for each player's tailored next move and `/help` for the "
-                "compact command guide. Neither command changes server settings."
+                "Share **`/game`** as the normal player entry point. `/start` remains "
+                "the guided first-run path. Neither command changes server settings."
             ),
             inline=False,
         )

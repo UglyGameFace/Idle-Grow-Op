@@ -8,7 +8,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import GROWTH_CYCLES, SHOP_ITEMS, get_plant_grow_time, inv_get
+from plant_lifecycle import plant_is_ready
+from utils import GROWTH_CYCLES, SHOP_ITEMS, inv_get
 from world_modes import GameScope, POLICY_CHOICE, normalize_world_mode_config, resolve_game_scope
 
 
@@ -63,15 +64,12 @@ def _owned_plantable_seed(profile: dict[str, Any]) -> str | None:
 
 
 def _ready_plant_count(profile: dict[str, Any], world: dict[str, Any], now: float) -> int:
-    ready = 0
-    for plant in profile.get("plants", []) or []:
-        if not isinstance(plant, dict):
-            continue
-        raw_planted_at = plant.get("planted_at")
-        planted_at = now if raw_planted_at is None else float(raw_planted_at)
-        if now - planted_at >= get_plant_grow_time(profile, world, plant):
-            ready += 1
-    return ready
+    return sum(
+        1
+        for plant in profile.get("plants", []) or []
+        if isinstance(plant, dict)
+        and plant_is_ready(profile, world, plant, now=now)
+    )
 
 
 
@@ -206,6 +204,21 @@ class OnboardingView(discord.ui.View):
     async def _edit(self, interaction: discord.Interaction, embed: discord.Embed) -> None:
         await interaction.response.edit_message(embed=embed, view=self)
 
+    @discord.ui.button(label="Play Game", emoji="🎮", style=discord.ButtonStyle.success, row=1)
+    async def play_game(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        hub = self.cog.bot.get_cog("GameHub")
+        if hub is None or not hasattr(hub, "send_hub_interaction"):
+            await interaction.response.send_message(
+                "⚠️ The game menu is temporarily unavailable.",
+                ephemeral=True,
+            )
+            return
+        await hub.send_hub_interaction(interaction)
+
     @discord.ui.button(label="Next Step", emoji="🧭", style=discord.ButtonStyle.success, row=0)
     async def next_step(
         self,
@@ -284,17 +297,21 @@ class Onboarding(commands.Cog):
         )
         embed.add_field(
             name=step.title,
-            value=f"Run **`{step.command}`**\n{step.reason}",
+            value=(
+                f"Tap **🎮 Play Game** below and use the highlighted section.\n"
+                f"{step.reason}\n"
+                f"Command shortcut: **`{step.command}`**"
+            ),
             inline=False,
         )
         embed.add_field(
             name="The money loop",
-            value="Buy a seed → plant → check progress → harvest → sell → upgrade and repeat.",
+            value="Open **🎮 Play Game** → Grow/Shop → plant → harvest → sell → upgrade and repeat.",
             inline=False,
         )
         embed.add_field(
             name="Easy bonuses",
-            value="Use `/growdaily` and `/growquests`. Use `/notifications` to control ready-work DMs for this save.",
+            value="Use **Progress** for rewards/quests and **Settings** for private ready-work alerts.",
             inline=False,
         )
         embed.set_footer(text="This guide only reads your save. It never spends, grants, moves, or resets anything.")
@@ -309,22 +326,22 @@ class Onboarding(commands.Cog):
         )
         embed.add_field(
             name="1. Buy a Level 1 seed",
-            value=f"`/buy item_name:{STARTER_SEED}` — costs ${STARTER_SEED_COST:,}.",
+            value=f"Open **Play Game → Shop** and buy **{STARTER_SEED.title()}** for ${STARTER_SEED_COST:,}.",
             inline=False,
         )
         embed.add_field(
             name="2. Plant it",
-            value=f"`/plant strain_name:{STARTER_STRAIN}`",
+            value="Open **Grow**, choose the seed dropdown, then tap **Plant Selected**.",
             inline=False,
         )
         embed.add_field(
             name="3. Watch it grow",
-            value="`/status` shows the live timer. Weather and equipment can change growth speed.",
+            value="The **Grow** page shows each fixed ready time. Weather and equipment are snapshotted when the plant is created.",
             inline=False,
         )
         embed.add_field(
             name="4. Harvest, then sell",
-            value="`/harvest` moves ready flower into your stash. `/sell amount:all` converts that flower into cash at the current market value.",
+            value="Tap **Harvest Ready**, then open **Inventory & Sales** and tap **Sell All Flower**.",
             inline=False,
         )
         embed.set_footer(text="Schwag has a five-minute base grow time before weather and other modifiers.")
@@ -338,22 +355,22 @@ class Onboarding(commands.Cog):
         )
         embed.add_field(
             name="Daily progress",
-            value="`/growdaily` claims cash and XP. `/growquests` shows daily objectives.",
+            value="Use **Play Game → Progress** for daily rewards, quests, achievements, and XP.",
             inline=False,
         )
         embed.add_field(
             name="Track the operation",
-            value="`/profile`, `/inventory`, `/balance`, `/growlevel`, `/ready`, and `/cooldowns`.",
+            value="The game panel summarizes your active save, wallet, grow room, stash, XP, social state, and settings.",
             inline=False,
         )
         embed.add_field(
             name="Lab expansion",
-            value="After you have flower and the required level/tools, use `/process` and `/collect`. It is not required for your first grow.",
+            value="Use **Play Game → Lab** for processing requirements, active batches, and collection.",
             inline=False,
         )
         embed.add_field(
             name="Private alerts",
-            value="`/notifications` controls plant-ready and lab-ready DMs for the active save.",
+            value="Use **Play Game → Settings → Notifications** for plant-ready and lab-ready DMs.",
             inline=False,
         )
         return embed
@@ -407,8 +424,8 @@ class Onboarding(commands.Cog):
             inline=False,
         )
         embed.add_field(
-            name="Player launch commands",
-            value="Share `/start` for a tailored next move and `/help` for the compact command map.",
+            name="Player launch",
+            value="Share **`/game`** as the normal way to play. `/start` remains the guided first-run path.",
             inline=False,
         )
         embed.set_footer(text="Setup never requires copied Discord IDs or environment edits.")
@@ -418,32 +435,32 @@ class Onboarding(commands.Cog):
     def build_help_embed() -> discord.Embed:
         embed = discord.Embed(
             title="🌿 Idle Grow Help",
-            description="Use `/start` for a next step based on your real active save.",
+            description="Use **🎮 Play Game** below or `/game` for the all-in-one player menu. Slash commands remain optional shortcuts.",
             color=discord.Color.green(),
         )
         embed.add_field(
             name="🌱 Core grow loop",
-            value="`/shop` • `/buy` • `/plant` • `/status` • `/harvest` • `/sell`",
+            value="**Game → Grow / Shop / Inventory** handles buying, planting, timers, harvesting, and selling.",
             inline=False,
         )
         embed.add_field(
             name="💰 Wallet and inventory",
-            value="`/balance` • `/inventory` • `/profile` • `/quick` • `/ready` • `/cooldowns`",
+            value="**Game → Home / Inventory** shows your wallet, stash, active save, and operation state.",
             inline=False,
         )
         embed.add_field(
             name="📈 Progression",
-            value="`/growdaily` • `/growquests` • `/growlevel` • `/growachievements` • `/notifications`",
+            value="**Game → Progress** handles daily rewards, quests, level/XP, and achievements.",
             inline=False,
         )
         embed.add_field(
             name="⚗️ Lab and expansion",
-            value="`/process` • `/collect` • `/lab` — requires flower, levels, and sometimes equipment.",
+            value="**Game → Lab** shows processing, collection, and equipment needs.",
             inline=False,
         )
         embed.add_field(
             name="🌍 Modes and multiplayer",
-            value="`/world-mode` explains the active save. Transfers, shared leaderboards, auctions, crews, raids, and territory require a multiplayer mode.",
+            value="**Game → Social / Settings** covers crews, territory, leaderboards, world mode, and private profile controls.",
             inline=False,
         )
         embed.add_field(

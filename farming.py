@@ -6,12 +6,17 @@ from discord.ext import commands
 
 from economy_integrity import calculate_harvest_outcome
 from persistence_context import require_guild_id
+from plant_lifecycle import (
+    plant_duration_seconds,
+    plant_is_ready,
+    plant_ready_at,
+    stamp_plant_ready_at,
+)
 from progression_core import add_progress, check_achievements, credit_xp
 from world_modes import effective_pot_capacity, resolve_game_scope
 from utils import (
     GROWTH_CYCLES,
     discord_relative_time,
-    get_plant_grow_time,
     inv_get,
     inv_take,
     jail_guard,
@@ -32,7 +37,10 @@ class Farming(commands.Cog):
             return
 
         if not strain_name:
-            return await ctx.send("🌱 **Usage:** `/plant strain_name:<strain>` (example: `/plant strain_name:schwag`)")
+            return await ctx.send(
+                "🌱 Open **`/game` → Grow** to choose an owned seed and plant it, "
+                "or use the shortcut `/plant strain_name:<strain>`."
+            )
 
         clean_name = strain_name.lower().replace(" seed", "").strip()
         seed_item_name = f"{clean_name} seed"
@@ -52,7 +60,7 @@ class Farming(commands.Cog):
             elif inv_get(user, seed_item_name) < 1:
                 plant_error = (
                     f"❌ You don\'t have any **{clean_name.title()} Seeds**!\n"
-                    f"Use `/shop`, then `/buy item_name:{seed_item_name}`."
+                    "Open **`/game` → Grow → Seed Shop** to buy one without typing item names."
                 )
             else:
                 max_pots = effective_pot_capacity(user, scope)
@@ -66,10 +74,13 @@ class Farming(commands.Cog):
                     plant_error = "❌ That seed is no longer available. Try again."
                 else:
                     planted_at = time.time()
-                    new_plant = {
-                        "strain": clean_name,
-                        "planted_at": planted_at,
-                    }
+                    new_plant = {"strain": clean_name}
+                    ready_at = stamp_plant_ready_at(
+                        user,
+                        world,
+                        new_plant,
+                        planted_at=planted_at,
+                    )
                     current_plants.append(new_plant)
                     add_progress(user, "plant", 1, user_id=ctx.author.id)
                     check_achievements(user)
@@ -77,9 +88,10 @@ class Farming(commands.Cog):
 
         if plant_error:
             return await ctx.send(plant_error)
-        grow_time = get_plant_grow_time(user, world, new_plant)
-        ready_at = int(planted_at + grow_time)
-        await ctx.send(f"🌱 **Planted:** {clean_name.title()}\n⏳ **Ready:** {discord_relative_time(ready_at)}")
+        await ctx.send(
+            f"🌱 **Planted:** {clean_name.title()}\n"
+            f"⏳ **Ready:** {discord_relative_time(ready_at)}"
+        )
 
     @commands.hybrid_command(name="harvest", aliases=["h"])
     async def harvest(self, ctx):
@@ -110,7 +122,7 @@ class Farming(commands.Cog):
                     plants,
                     now=time.time(),
                     strain_configs=GROWTH_CYCLES,
-                    grow_time_for_plant=lambda plant: get_plant_grow_time(user, world, plant),
+                    grow_time_for_plant=lambda plant: plant_duration_seconds(user, world, plant),
                     yield_multiplier=multiplier,
                     randint=random.randint,
                 )
@@ -168,7 +180,7 @@ class Farming(commands.Cog):
         if not plants:
             embed = discord.Embed(
                 title="🌱 Your Garden",
-                description="Empty. Use `/start` for your next step or `/plant` after buying a seed.",
+                description="Empty. Open **`/game` → Grow** to buy, choose, and plant a seed.",
                 color=0x2F3136,
             )
             return await ctx.send(embed=embed)
@@ -181,25 +193,29 @@ class Farming(commands.Cog):
 
         for index, plant in enumerate(plants, start=1):
             strain = plant["strain"]
-            grow_time = get_plant_grow_time(user, world, plant)
-            elapsed = now - float(plant["planted_at"])
-            percent = min(100, max(0, int((elapsed / grow_time) * 100)))
+            planted_at = float(plant.get("planted_at", 0) or 0)
+            ready_at = plant_ready_at(user, world, plant)
+            duration = max(1.0, ready_at - planted_at)
+            elapsed = max(0.0, now - planted_at)
+            percent = min(100, max(0, int((elapsed / duration) * 100)))
             filled = int(percent / 10)
             bar = "🟩" * filled + "⬛" * (10 - filled)
 
-            if percent >= 100:
+            if plant_is_ready(user, world, plant, now=now):
                 status_text = "✅ **READY**"
                 ready_count += 1
             else:
-                remaining_seconds = max(0, grow_time - elapsed)
-                minutes, _seconds = divmod(remaining_seconds, 60)
-                status_text = f"**{percent}%** ({int(minutes)}m left)"
+                remaining_seconds = max(0, int(ready_at - now))
+                minutes, seconds = divmod(remaining_seconds, 60)
+                status_text = f"**{percent}%** ({int(minutes)}m {int(seconds)}s left)"
 
             lines.append(f"**{index}. {strain.title()}**\n{bar} {status_text}")
 
         embed.description = "\n\n".join(lines)
         if ready_count > 0:
-            embed.set_footer(text=f"{ready_count} plants ready! Run /harvest")
+            embed.set_footer(
+                text=f"{ready_count} plants ready! Use Game → Grow → Harvest Ready or /harvest."
+            )
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="strains", aliases=["seeds"])

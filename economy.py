@@ -21,6 +21,7 @@ from utils import (
     inv_get,
     inv_take,
     jail_guard,
+    jail_left_seconds,
 )
 from world_modes import (
     WorldModeDenied,
@@ -29,6 +30,213 @@ from world_modes import (
     require_same_multiplayer_scope,
     resolve_game_scope,
 )
+
+
+def _shop_section(item: dict) -> str:
+    item_type = str(item.get("type", "misc"))
+    if "seed" in item_type:
+        return "seeds"
+    if any(token in item_type for token in ("equipment", "pot", "tool")):
+        return "equipment"
+    return "misc"
+
+
+class ShopCategorySelect(discord.ui.Select):
+    def __init__(self, view: "ShopView") -> None:
+        options = [
+            discord.SelectOption(label="All Items", value="all", emoji="🛒"),
+            discord.SelectOption(label="Seeds", value="seeds", emoji="🌱"),
+            discord.SelectOption(label="Equipment", value="equipment", emoji="💡"),
+            discord.SelectOption(label="Misc", value="misc", emoji="🔧"),
+        ]
+        for option in options:
+            option.default = option.value == view.category
+        super().__init__(
+            placeholder="Choose a shop category…",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view = self.view
+        view.category = self.values[0]
+        view.selected_item = None
+        await view.refresh(interaction)
+
+
+class ShopItemSelect(discord.ui.Select):
+    def __init__(self, view: "ShopView", profile: dict) -> None:
+        items = [
+            (name, item)
+            for name, item in SHOP_ITEMS.items()
+            if view.category == "all" or _shop_section(item) == view.category
+        ]
+        level = max(1, int(profile.get("level", 1) or 1))
+        options = []
+        for name, item in items[:25]:
+            cost = _shop_price(item)
+            required = max(1, int(item.get("level_req", 1) or 1))
+            owned = inv_get(profile, name)
+            status = "Owned" if owned and item.get("type") in {"equipment", "tool", "defense"} else f"Lv {required}"
+            if level < required:
+                status = f"Locked • Lv {required}"
+            options.append(
+                discord.SelectOption(
+                    label=name.title()[:100],
+                    value=name,
+                    description=f"${cost:,} • {status}"[:100],
+                    default=name == view.selected_item,
+                )
+            )
+        if not options:
+            options = [
+                discord.SelectOption(
+                    label="No items in this category",
+                    value="__none__",
+                    description="Choose another category.",
+                )
+            ]
+        super().__init__(
+            placeholder="Choose an item to inspect or buy…",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view = self.view
+        value = self.values[0]
+        view.selected_item = None if value == "__none__" else value
+        await view.refresh(interaction)
+
+
+class ShopView(discord.ui.View):
+    def __init__(
+        self,
+        cog: "Economy",
+        owner_id: int,
+        guild_id: int,
+        *,
+        category: str = "all",
+        timeout: float = 300,
+    ) -> None:
+        super().__init__(timeout=timeout)
+        self.cog = cog
+        self.owner_id = int(owner_id)
+        self.guild_id = int(guild_id)
+        self.category = category if category in {"all", "seeds", "equipment", "misc"} else "all"
+        self.selected_item: str | None = None
+        self.message = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                "❌ This shop belongs to another player.",
+                ephemeral=True,
+            )
+            return False
+        if interaction.guild_id != self.guild_id:
+            await interaction.response.send_message(
+                "❌ This shop belongs to another server.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    def rebuild(self, profile: dict) -> None:
+        self.clear_items()
+        self.add_item(ShopCategorySelect(self))
+        self.add_item(ShopItemSelect(self, profile))
+
+        buy = discord.ui.Button(
+            label="Buy Selected",
+            emoji="💳",
+            style=discord.ButtonStyle.success,
+            row=2,
+            disabled=self.selected_item is None,
+        )
+        buy.callback = self.buy_selected
+        self.add_item(buy)
+
+        refresh = discord.ui.Button(
+            label="Refresh",
+            emoji="🔄",
+            style=discord.ButtonStyle.secondary,
+            row=2,
+        )
+        refresh.callback = self.refresh_button
+        self.add_item(refresh)
+
+        close = discord.ui.Button(
+            label="Close",
+            emoji="✖️",
+            style=discord.ButtonStyle.danger,
+            row=2,
+        )
+        close.callback = self.close_button
+        self.add_item(close)
+
+    async def state(self):
+        return await self.cog._profile_for(self.guild_id, self.owner_id)
+
+    async def refresh(
+        self,
+        interaction: discord.Interaction,
+        *,
+        notice: str | None = None,
+    ) -> None:
+        scope, profile = await self.state()
+        self.rebuild(profile)
+        embed = self.cog.build_shop_embed(
+            scope,
+            profile,
+            category=self.category,
+            selected_item=self.selected_item,
+            notice=notice,
+        )
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def buy_selected(self, interaction: discord.Interaction) -> None:
+        if not self.selected_item:
+            return await interaction.response.send_message(
+                "Choose an item first.",
+                ephemeral=True,
+            )
+        scope, profile = await self.state()
+        if jail_left_seconds(profile) > 0:
+            return await interaction.response.send_message(
+                "🚔 You cannot shop while jailed.",
+                ephemeral=True,
+            )
+        _success, message = await self.cog._purchase_item(
+            scope,
+            profile,
+            self.owner_id,
+            self.selected_item,
+        )
+        await self.refresh(interaction, notice=message)
+
+    async def refresh_button(self, interaction: discord.Interaction) -> None:
+        await self.refresh(interaction)
+
+    async def close_button(self, interaction: discord.Interaction) -> None:
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(view=self)
+        self.stop()
+
+    async def on_timeout(self) -> None:
+        for child in self.children:
+            child.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
+        self.stop()
 
 
 class Economy(commands.Cog):
@@ -45,12 +253,15 @@ class Economy(commands.Cog):
             return False
         return True
 
+    async def _profile_for(self, guild_id: int, user_id: int):
+        scope = await resolve_game_scope(self.bot.db, int(guild_id), int(user_id))
+        profile = await self.bot.db.get_profile(scope.scope_id, int(user_id))
+        return scope, profile
+
     async def _profile(self, ctx, user_id=None):
         guild_id = require_guild_id(ctx)
         resolved_user_id = ctx.author.id if user_id is None else int(user_id)
-        scope = await resolve_game_scope(self.bot.db, guild_id, resolved_user_id)
-        profile = await self.bot.db.get_profile(scope.scope_id, resolved_user_id)
-        return scope, profile
+        return await self._profile_for(guild_id, resolved_user_id)
 
     async def _world(self, ctx, user_id=None):
         guild_id = require_guild_id(ctx)
@@ -158,41 +369,99 @@ class Economy(commands.Cog):
         embed.add_field(name="⚗️ Concentrates", value=concentrate_desc, inline=True)
         await ctx.send(embed=embed)
 
-    @commands.hybrid_command(name="shop", aliases=["store"])
-    async def shop(self, ctx, category: str = "all"):
-        category = str(category or "all").lower().strip()
-        embed = discord.Embed(title="🛒 Shop", color=discord.Color.gold())
-        content = {"seeds": "", "equipment": "", "misc": ""}
-        for name, item in SHOP_ITEMS.items():
-            item_type = item.get("type", "misc")
-            if "seed" in item_type:
-                section = "seeds"
-            elif any(token in item_type for token in ("equipment", "pot", "tool")):
-                section = "equipment"
-            else:
-                section = "misc"
-            if category not in {"all", section}:
-                continue
-            content[section] += f"• **{name.title()}** — ${_shop_price(item):,}\n"
-        for section, title in (("seeds", "🌱 Seeds"), ("equipment", "💡 Equipment"), ("misc", "🔧 Misc")):
-            if content[section]:
-                embed.add_field(name=title, value=content[section], inline=False)
-        await ctx.send(embed=embed)
+    def build_shop_embed(
+        self,
+        scope,
+        profile: dict,
+        *,
+        category: str = "all",
+        selected_item: str | None = None,
+        notice: str | None = None,
+    ) -> discord.Embed:
+        wallet = max(0, int(profile.get("grams", 0) or 0))
+        level = max(1, int(profile.get("level", 1) or 1))
+        title = {
+            "all": "🛒 Idle Grow Shop",
+            "seeds": "🌱 Seed Shop",
+            "equipment": "💡 Equipment Shop",
+            "misc": "🔧 Misc Shop",
+        }.get(category, "🛒 Idle Grow Shop")
+        embed = discord.Embed(title=title, color=discord.Color.gold())
+        embed.description = (
+            f"**Save:** {scope.emoji} {scope.label}\n"
+            f"💵 **Wallet:** ${wallet:,}  •  ⭐ **Level:** {level}\n"
+            "Use the menus below to browse and buy. No command memorization required."
+        )
+        if notice:
+            embed.add_field(name="Latest Action", value=notice[:1024], inline=False)
 
-    @commands.hybrid_command(name="buy")
-    async def buy(self, ctx, *, item_name: str):
-        scope, user = await self._profile(ctx)
-        if await jail_guard(ctx, user, "buy"):
-            return
-        clean_name = item_name.lower().strip()
+        if selected_item and selected_item in SHOP_ITEMS:
+            item = SHOP_ITEMS[selected_item]
+            cost = _shop_price(item)
+            required = max(1, int(item.get("level_req", 1) or 1))
+            owned = max(0, int(inv_get(profile, selected_item)))
+            state = "✅ Available"
+            if level < required:
+                state = f"🔒 Requires Level {required}"
+            elif wallet < cost:
+                state = f"💸 Need ${cost - wallet:,} more"
+            elif item.get("type") in {"equipment", "tool", "defense"} and owned:
+                state = "✅ Already owned"
+            details = [
+                f"💰 **Price:** ${cost:,}",
+                f"⭐ **Required Level:** {required}",
+                f"🎒 **Owned:** {owned}",
+                f"**Status:** {state}",
+            ]
+            description = str(item.get("description", "") or "").strip()
+            if description:
+                details.append(f"ℹ️ {description}")
+            embed.add_field(
+                name=f"Selected • {selected_item.title()}",
+                value="\n".join(details),
+                inline=False,
+            )
+        else:
+            visible = [
+                (name, item)
+                for name, item in SHOP_ITEMS.items()
+                if category == "all" or _shop_section(item) == category
+            ]
+            affordable = sum(1 for _name, item in visible if _shop_price(item) <= wallet)
+            unlocked = sum(
+                1
+                for _name, item in visible
+                if level >= max(1, int(item.get("level_req", 1) or 1))
+            )
+            embed.add_field(
+                name="Browse",
+                value=(
+                    f"**{len(visible)} items** in this view • "
+                    f"**{unlocked} unlocked** • **{affordable} affordable**\n"
+                    "Select an item below for price, ownership, level requirement, and description."
+                ),
+                inline=False,
+            )
+        embed.set_footer(text="Shop panel expires after 5 minutes.")
+        return embed
+
+    async def _purchase_item(
+        self,
+        scope,
+        user: dict,
+        user_id: int,
+        item_name: str,
+    ) -> tuple[bool, str]:
+        clean_name = str(item_name or "").lower().strip()
         item = SHOP_ITEMS.get(clean_name)
         if item is None:
-            return await ctx.send("❌ Item not found.")
+            return False, "❌ Item not found."
         cost = _shop_price(item)
         if cost < 0:
-            return await ctx.send("❌ This item is currently unavailable.")
-        if int(user.get("level", 1)) < int(item.get("level_req", 1)):
-            return await ctx.send("🔒 Level locked.")
+            return False, "❌ This item is currently unavailable."
+        if int(user.get("level", 1) or 1) < int(item.get("level_req", 1) or 1):
+            return False, f"🔒 **{clean_name.title()}** is level locked."
+
         purchase_error = None
         async with self.bot.db.lock:
             if (
@@ -200,26 +469,63 @@ class Economy(commands.Cog):
                 and inv_get(user, clean_name) > 0
             ):
                 purchase_error = f"✅ You already own **{clean_name.title()}**."
-            balance = max(0, int(user.get("grams", 0)))
+            balance = max(0, int(user.get("grams", 0) or 0))
             if purchase_error is None and balance < cost:
-                purchase_error = "💸 Too poor."
+                purchase_error = f"💸 You need **${cost - balance:,}** more."
             new_capacity = None
             if purchase_error is None and item.get("type") == "pot_upgrade":
                 try:
                     new_capacity = pot_upgrade_capacity(user, clean_name, POT_UPGRADE_LIMITS)
                 except ValueError:
-                    purchase_error = "🚫 You already own the maximum number of that pot upgrade."
+                    purchase_error = (
+                        "🚫 You already own the maximum number of that pot upgrade."
+                    )
             if purchase_error is None:
                 user["grams"] = balance - cost
                 inv_add(user, clean_name, 1)
                 if new_capacity is not None:
                     user["max_pots"] = new_capacity
-                add_progress(user, "buy", 1, user_id=ctx.author.id)
+                add_progress(user, "buy", 1, user_id=int(user_id))
                 check_achievements(user)
-                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                self.bot.db.mark_profile_dirty(scope.scope_id, int(user_id))
+
         if purchase_error:
-            return await ctx.send(purchase_error)
-        await ctx.send(f"✅ Bought **{clean_name.title()}** for ${cost:,}.")
+            return False, purchase_error
+        return True, f"✅ Bought **{clean_name.title()}** for **${cost:,}**."
+
+    @commands.hybrid_command(name="shop", aliases=["store"])
+    async def shop(self, ctx, category: str = "all"):
+        guild_id = require_guild_id(ctx)
+        scope, profile = await self._profile(ctx)
+        normalized = str(category or "all").lower().strip()
+        if normalized not in {"all", "seeds", "equipment", "misc"}:
+            normalized = "all"
+        view = ShopView(
+            self,
+            ctx.author.id,
+            guild_id,
+            category=normalized,
+        )
+        view.rebuild(profile)
+        embed = self.build_shop_embed(scope, profile, category=normalized)
+        view.message = await ctx.send(
+            embed=embed,
+            view=view,
+            ephemeral=ctx.interaction is not None,
+        )
+
+    @commands.hybrid_command(name="buy")
+    async def buy(self, ctx, *, item_name: str):
+        scope, user = await self._profile(ctx)
+        if await jail_guard(ctx, user, "buy"):
+            return
+        _success, message = await self._purchase_item(
+            scope,
+            user,
+            ctx.author.id,
+            item_name,
+        )
+        await ctx.send(message)
 
     @commands.hybrid_command(name="sell")
     async def sell(self, ctx, amount: str = "all", *, strain_name: str = None):

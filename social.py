@@ -115,14 +115,9 @@ class Social(commands.Cog):
         except WorldModeDenied as exc:
             return await ctx.send(str(exc))
         await ctx.send(
-            "ℹ️ **Crew Commands:**\n"
-            "`/crew create name:<name>`\n"
-            "`/crew join crew_id:<id>`\n"
-            "`/crew leave`\n"
-            "`/crew info`\n"
-            "`/crew deposit amount:<amount>`\n"
-            "`/crew war` (Turf War)\n"
-            "`/district` (Check control)"
+            "👥 Open **`/game` → Social** to create, join, inspect, fund, leave, "
+            "or fight with your crew from buttons and private forms.\n"
+            "Slash subcommands remain available as optional shortcuts."
         )
 
     @crew.command(name="create")

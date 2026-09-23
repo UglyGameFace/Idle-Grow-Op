@@ -38,11 +38,15 @@ def xp_needed_for_level(level: Any) -> int:
     return int(100 * (resolved ** 1.5))
 
 
-def credit_xp(profile: dict, amount: Any) -> list[int]:
-    """Credit non-negative XP and apply every level-up crossed by the balance."""
-    gained = max(0, _integer(amount))
+def reconcile_level_xp(profile: dict) -> list[int]:
+    """Normalize stored level/XP and apply every already-earned level-up.
+
+    Legacy profiles may contain XP above the current level threshold from older
+    progression implementations. This helper is intentionally deterministic and
+    idempotent so persistence can repair that state once when a profile is loaded.
+    """
     level = max(1, _integer(profile.get("level"), 1))
-    xp = max(0, _integer(profile.get("xp"))) + gained
+    xp = max(0, _integer(profile.get("xp")))
     reached: list[int] = []
 
     while xp >= xp_needed_for_level(level):
@@ -53,6 +57,13 @@ def credit_xp(profile: dict, amount: Any) -> list[int]:
     profile["level"] = level
     profile["xp"] = xp
     return reached
+
+
+def credit_xp(profile: dict, amount: Any) -> list[int]:
+    """Credit non-negative XP and apply every level-up crossed by the balance."""
+    gained = max(0, _integer(amount))
+    profile["xp"] = max(0, _integer(profile.get("xp"))) + gained
+    return reconcile_level_xp(profile)
 
 
 def ensure_progression(profile: dict) -> None:
