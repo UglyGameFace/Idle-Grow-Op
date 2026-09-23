@@ -140,6 +140,49 @@ def default_record(key: RecordKey) -> MutableMapping[str, Any]:
     raise ValueError(f"unsupported record kind: {key.kind}")
 
 
+def profile_has_pending_notification_work(
+    profile: MutableMapping[str, Any],
+) -> bool:
+    settings = profile.get("settings")
+    if not isinstance(settings, dict):
+        settings = {}
+
+    notifications_enabled = settings.get("notifications", True)
+    if not isinstance(notifications_enabled, bool):
+        notifications_enabled = True
+    if not notifications_enabled:
+        return False
+
+    categories = settings.get("notification_categories")
+    if not isinstance(categories, dict):
+        categories = {}
+
+    plant_enabled = categories.get("plant_ready", notifications_enabled)
+    if not isinstance(plant_enabled, bool):
+        plant_enabled = notifications_enabled
+    lab_enabled = categories.get("lab_ready", notifications_enabled)
+    if not isinstance(lab_enabled, bool):
+        lab_enabled = notifications_enabled
+
+    if plant_enabled:
+        plants = profile.get("plants")
+        if isinstance(plants, list) and any(
+            isinstance(plant, dict) and plant.get("notified") is not True
+            for plant in plants
+        ):
+            return True
+
+    if lab_enabled:
+        queue = profile.get("processing_queue")
+        if isinstance(queue, list) and any(
+            isinstance(batch, dict) and batch.get("notified") is not True
+            for batch in queue
+        ):
+            return True
+
+    return False
+
+
 class ScopedDatabaseManager:
     """Explicit guild-scoped database access with dirty-record persistence."""
 
@@ -152,6 +195,9 @@ class ScopedDatabaseManager:
         self.flush_interval = float(flush_interval)
         self._flush_task: asyncio.Task | None = None
         self._closed = False
+        self._notification_candidates: set[tuple[int, int]] = set()
+        self._notification_primed_scopes: set[int] = set()
+        self._notification_prime_lock = asyncio.Lock()
 
     async def get_account(self, user_id: Any) -> MutableMapping[str, Any]:
         return await self.store.get(global_account_key(user_id))
@@ -164,6 +210,7 @@ class ScopedDatabaseManager:
             now=time.time(),
         ):
             self.store.mark_dirty(key)
+        self._sync_notification_candidate(key, profile)
         return profile
 
     async def get_world(self, guild_id: Any) -> MutableMapping[str, Any]:
@@ -211,12 +258,39 @@ class ScopedDatabaseManager:
         self,
         guild_ids: list[Any] | tuple[Any, ...] | set[Any],
     ) -> list[tuple[int, int]]:
-        query = getattr(self.backend, "list_notification_candidates", None)
-        if query is None:
-            raise RuntimeError(
-                "database backend does not support list_notification_candidates"
-            )
-        return await query(guild_ids)
+        active_scopes = {
+            int(guild_world_key(guild_id).guild_id)
+            for guild_id in guild_ids
+        }
+        if not active_scopes:
+            return []
+
+        async with self._notification_prime_lock:
+            unprimed = active_scopes - self._notification_primed_scopes
+            if unprimed:
+                query = getattr(self.backend, "list_notification_candidates", None)
+                if query is None:
+                    raise RuntimeError(
+                        "database backend does not support list_notification_candidates"
+                    )
+                rows = await query(sorted(unprimed))
+                for scope_id, user_id in rows:
+                    pair = (int(scope_id), int(user_id))
+                    if pair[0] not in unprimed:
+                        continue
+                    key = guild_profile_key(pair[0], pair[1])
+                    cached = self.store.peek_cached(key)
+                    if cached is None:
+                        self._notification_candidates.add(pair)
+                    else:
+                        self._sync_notification_candidate(key, cached)
+                self._notification_primed_scopes.update(unprimed)
+
+        return sorted(
+            pair
+            for pair in self._notification_candidates
+            if pair[0] in active_scopes
+        )
 
     async def _run_backend_query(
         self,
@@ -233,8 +307,26 @@ class ScopedDatabaseManager:
     def mark_account_dirty(self, user_id: Any) -> None:
         self.store.mark_dirty(global_account_key(user_id))
 
+    def _sync_notification_candidate(
+        self,
+        key: RecordKey,
+        profile: MutableMapping[str, Any],
+    ) -> None:
+        if key.guild_id is None or key.user_id is None:
+            raise ValueError("notification candidate requires a profile key")
+        pair = (int(key.guild_id), int(key.user_id))
+        if profile_has_pending_notification_work(profile):
+            self._notification_candidates.add(pair)
+        else:
+            self._notification_candidates.discard(pair)
+
     def mark_profile_dirty(self, guild_id: Any, user_id: Any) -> None:
-        self.store.mark_dirty(guild_profile_key(guild_id, user_id))
+        key = guild_profile_key(guild_id, user_id)
+        self.store.mark_dirty(key)
+        profile = self.store.peek_cached(key)
+        if profile is None:
+            raise RuntimeError("dirty profile missing from cache")
+        self._sync_notification_candidate(key, profile)
 
     def mark_world_dirty(self, guild_id: Any) -> None:
         self.store.mark_dirty(guild_world_key(guild_id))
