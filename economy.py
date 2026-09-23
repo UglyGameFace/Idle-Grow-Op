@@ -129,6 +129,7 @@ class ShopView(discord.ui.View):
         self.guild_id = int(guild_id)
         self.category = category if category in {"all", "seeds", "equipment", "misc"} else "all"
         self.selected_item: str | None = None
+        self.message = None
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.owner_id:
@@ -228,6 +229,13 @@ class ShopView(discord.ui.View):
         self.stop()
 
     async def on_timeout(self) -> None:
+        for child in self.children:
+            child.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
         self.stop()
 
 
@@ -500,7 +508,7 @@ class Economy(commands.Cog):
         )
         view.rebuild(profile)
         embed = self.build_shop_embed(scope, profile, category=normalized)
-        await ctx.send(
+        view.message = await ctx.send(
             embed=embed,
             view=view,
             ephemeral=ctx.interaction is not None,
