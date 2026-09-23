@@ -4,13 +4,18 @@ from copy import deepcopy
 import pytest
 
 from persistence_scope import RecordKey
-from scoped_database import ScopedDatabaseManager
+from scoped_database import (
+    ScopedDatabaseManager,
+    profile_has_pending_notification_work,
+)
 
 
 class MemoryBackend:
     def __init__(self):
         self.records = {}
         self.saved_batches = []
+        self.notification_rows = []
+        self.notification_calls = []
 
     async def load(self, key: RecordKey):
         value = self.records.get(key.cache_key)
@@ -20,6 +25,12 @@ class MemoryBackend:
         batch = {key.cache_key: deepcopy(dict(value)) for key, value in records.items()}
         self.saved_batches.append(batch)
         self.records.update(batch)
+
+
+    async def list_notification_candidates(self, guild_ids):
+        normalized = tuple(sorted(int(value) for value in guild_ids))
+        self.notification_calls.append(normalized)
+        return list(self.notification_rows)
 
 
 def run(coro):
@@ -94,3 +105,75 @@ def test_close_flushes_dirty_records():
         assert backend.records["profile:100:200"]["grams"] == 777
 
     run(scenario())
+
+
+def test_notification_candidates_prime_once_then_use_memory_only():
+    async def scenario():
+        backend = MemoryBackend()
+        backend.notification_rows = [(100, 200)]
+        database = ScopedDatabaseManager(backend)
+
+        first = await database.list_notification_candidates([100])
+        second = await database.list_notification_candidates([100])
+
+        assert first == [(100, 200)]
+        assert second == [(100, 200)]
+        assert backend.notification_calls == [(100,)]
+
+    run(scenario())
+
+
+def test_profile_mutations_update_notification_candidates_without_backend_reread():
+    async def scenario():
+        backend = MemoryBackend()
+        database = ScopedDatabaseManager(backend)
+
+        assert await database.list_notification_candidates([100]) == []
+        profile = await database.get_profile(100, 200)
+
+        profile["plants"] = [{"strain": "schwag", "notified": False}]
+        database.mark_profile_dirty(100, 200)
+        assert await database.list_notification_candidates([100]) == [(100, 200)]
+
+        profile["plants"][0]["notified"] = True
+        database.mark_profile_dirty(100, 200)
+        assert await database.list_notification_candidates([100]) == []
+
+        assert backend.notification_calls == [(100,)]
+
+    run(scenario())
+
+
+def test_cached_profile_state_wins_over_stale_prime_rows():
+    async def scenario():
+        backend = MemoryBackend()
+        backend.notification_rows = [(100, 200)]
+        database = ScopedDatabaseManager(backend)
+        profile = await database.get_profile(100, 200)
+        assert profile["plants"] == []
+
+        assert await database.list_notification_candidates([100]) == []
+        assert backend.notification_calls == [(100,)]
+
+    run(scenario())
+
+
+def test_pending_notification_predicate_respects_private_preferences():
+    profile = {
+        "settings": {
+            "notifications": True,
+            "notification_categories": {
+                "plant_ready": False,
+                "lab_ready": True,
+            },
+        },
+        "plants": [{"notified": False}],
+        "processing_queue": [],
+    }
+    assert profile_has_pending_notification_work(profile) is False
+
+    profile["processing_queue"] = [{"notified": False}]
+    assert profile_has_pending_notification_work(profile) is True
+
+    profile["settings"]["notifications"] = False
+    assert profile_has_pending_notification_work(profile) is False
