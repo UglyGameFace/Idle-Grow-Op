@@ -349,6 +349,42 @@ Completed:
 Deployment requirement:
 - Production Supabase must apply migrations/004_batched_notification_candidates.sql after migration 003 and before deploying this exact audited head.
 
+## Phase 11 Follow-up: Gameplay UX Overhaul and Harvest Consistency
+
+Production baseline:
+- Master audit PR #30 is merged to main at 52aef9cff0662946d0a6b2327a670e48c6034093.
+- Production Supabase migrations 003 and 004 were applied successfully.
+- Live Discloud startup verified schema 004, all audited extensions, global command sync, and guild-scoped Supabase.
+
+Root causes addressed in PR #31:
+- Plant readiness was recalculated against current weather, allowing a crop to become ready and later appear unready after weather changed.
+- /shop was a static catalog and required players to remember /buy item names.
+- Player-facing help surfaces still treated dozens of slash commands as the primary game interface.
+- Legacy stored progression could contain XP above the current level threshold, producing impossible displays such as 9,802/8,944 XP.
+
+Completed:
+- Added plant_lifecycle.py as the canonical owner of fixed plant ready_at timing.
+- New plants snapshot weather/equipment growth modifiers once at planting; all readiness consumers share the same helper.
+- Legacy plants use a deterministic weather-independent fallback so readiness never moves backward.
+- Converted /shop into an interactive category/item/purchase panel using the same Economy purchase path as /buy.
+- Added game_hub.py and /game (/menu, /play) as the private all-in-one player command center.
+- Added Home, Grow, Inventory, Market, Lab, Crime, Progress, Social, Casino, and Settings pages.
+- Added one-tap recommended next move without silent spending.
+- Added direct seed planting, harvesting, selling, lab processing, lab collection, auctions, bidding, listing, heists, robbery target selection, laundering, crew lifecycle actions, progression controls, notification/settings panels, and adaptive casino game launch.
+- Hub actions invoke existing commands through an explicit safe allowlist with their existing checks, cooldowns, persistence, and error reporting.
+- Added state-aware disabled controls so unavailable actions are not presented as live buttons.
+- Added timeout cleanup so expired Shop and Game panels visibly disable their controls.
+- Reworked onboarding, setup, farming, lab, crew, and AI guidance to lead with /game while retaining slash commands as optional shortcuts.
+- Added canonical reconcile_level_xp() and first-load persistence repair for legacy XP overflow without dirtifying unrelated partial records.
+- Added regression coverage for stable readiness, shop purchases, game-hub state, direct controls, casino selection, Keno wager disambiguation, and legacy XP repair.
+
+Validation:
+- Repeated PR CI checkpoints are green through the direct hub, casino, guidance, and timeout work.
+- Final exact-head validation is pending on the latest contract-cleanup commit.
+
+## Current Follow-up Next Step
+Get exact PR #31 head green, update its final validation record, mark it ready, merge with expected-head protection, verify post-merge main CI, then live-validate the GitHub-connected Discloud deployment including /game, /shop, stable harvest behavior, command sync, and repaired profile XP.
+
 ## Cleanup / Conflict Review
 COMPLETE for repository source and CI scope.
 
@@ -383,4 +419,4 @@ Repository/source audit work is complete. Remaining closure work is external dep
 - No open PR at audit start.
 
 ## Next Step
-Apply and verify `migrations/004_batched_notification_candidates.sql` in production Supabase. Then deploy the exact audited head and validate startup schema verification, extension loading, global command sync, representative live commands, background cycles, and post-deploy Supabase egress trend before closing this master audit.
+Complete the PR #31 exact-head validation and merge/live-validation sequence described in Phase 11 above.
