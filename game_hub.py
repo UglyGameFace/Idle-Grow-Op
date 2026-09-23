@@ -20,7 +20,9 @@ HUB_PAGES = (
     ("home", "Home", "🏠"),
     ("grow", "Grow", "🌱"),
     ("inventory", "Inventory", "🎒"),
+    ("market", "Market", "🔨"),
     ("lab", "Lab", "⚗️"),
+    ("crime", "Crime", "🕶️"),
     ("progress", "Progress", "📈"),
     ("social", "Social", "👥"),
     ("casino", "Casino", "🎰"),
@@ -37,6 +39,14 @@ SAFE_HUB_COMMANDS = frozenset(
         "process",
         "collect",
         "lab",
+        "auction",
+        "auction list",
+        "bid",
+        "heist",
+        "launder",
+        "heat",
+        "heiststats",
+        "topheists",
         "growdaily",
         "growquests",
         "growachievements",
@@ -170,6 +180,110 @@ class HubSeedSelect(discord.ui.Select):
         await self.view.refresh(interaction)
 
 
+class HubBidModal(discord.ui.Modal):
+    def __init__(self, view: "GameHubView") -> None:
+        super().__init__(title="Place Auction Bid")
+        self.hub_view = view
+        self.auction_id = discord.ui.TextInput(
+            label="Auction ID",
+            placeholder="Example: 1007",
+            max_length=24,
+        )
+        self.amount = discord.ui.TextInput(
+            label="Bid amount",
+            placeholder="Example: 2500",
+            max_length=20,
+        )
+        self.add_item(self.auction_id)
+        self.add_item(self.amount)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        try:
+            amount = int(str(self.amount.value).replace(",", "").replace("$", ""))
+        except ValueError:
+            return await interaction.response.send_message(
+                "❌ Bid amount must be a whole number.",
+                ephemeral=True,
+            )
+        if amount <= 0:
+            return await interaction.response.send_message(
+                "❌ Bid amount must be positive.",
+                ephemeral=True,
+            )
+        await self.hub_view.run_command(
+            interaction,
+            "bid",
+            auction_id=str(self.auction_id.value).strip(),
+            amount=amount,
+        )
+
+
+class HubAuctionListModal(discord.ui.Modal):
+    def __init__(self, view: "GameHubView") -> None:
+        super().__init__(title="List Item on Auction")
+        self.hub_view = view
+        self.item_name = discord.ui.TextInput(
+            label="Inventory item",
+            placeholder="Example: pager",
+            max_length=80,
+        )
+        self.start_price = discord.ui.TextInput(
+            label="Starting price",
+            placeholder="Example: 1000",
+            max_length=20,
+        )
+        self.buyout = discord.ui.TextInput(
+            label="Buyout price (optional)",
+            placeholder="0 for no buyout",
+            required=False,
+            default="0",
+            max_length=20,
+        )
+        self.add_item(self.item_name)
+        self.add_item(self.start_price)
+        self.add_item(self.buyout)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        try:
+            start_price = int(
+                str(self.start_price.value).replace(",", "").replace("$", "")
+            )
+            buyout_raw = str(self.buyout.value or "0").replace(",", "").replace("$", "")
+            buyout = int(buyout_raw or "0")
+        except ValueError:
+            return await interaction.response.send_message(
+                "❌ Prices must be whole numbers.",
+                ephemeral=True,
+            )
+        await self.hub_view.run_command(
+            interaction,
+            "auction list",
+            item_name=str(self.item_name.value).strip(),
+            start_price=start_price,
+            buyout=buyout,
+        )
+
+
+class HubLaunderModal(discord.ui.Modal):
+    def __init__(self, view: "GameHubView") -> None:
+        super().__init__(title="Launder Dirty Cash")
+        self.hub_view = view
+        self.amount = discord.ui.TextInput(
+            label="Amount",
+            placeholder="all or a whole number",
+            default="all",
+            max_length=20,
+        )
+        self.add_item(self.amount)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.hub_view.run_command(
+            interaction,
+            "launder",
+            amount=str(self.amount.value).strip(),
+        )
+
+
 class HubActionButton(discord.ui.Button):
     def __init__(
         self,
@@ -211,6 +325,7 @@ class GameHubView(discord.ui.View):
         valid_pages = {key for key, _label, _emoji in HUB_PAGES}
         self.page = page if page in valid_pages else "home"
         self.selected_seed: str | None = None
+        self.message = None
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.owner_id or interaction.guild_id != self.guild_id:
@@ -270,11 +385,24 @@ class GameHubView(discord.ui.View):
             self.add_action("sell_all", "Sell All Flower", "💵", row=row, style=discord.ButtonStyle.success)
             self.add_action("collect", "Collect Lab", "📦", row=row)
             self.add_action("shop", "Shop", "🛒", row=row)
+        elif self.page == "market":
+            self.add_action("auction", "Browse Auctions", "🔨", row=row)
+            self.add_action("bid_modal", "Place Bid", "💰", row=row, style=discord.ButtonStyle.primary)
+            self.add_action("list_modal", "List Item", "📤", row=row)
+            self.add_action("leaderboard", "Leaderboard", "🏆", row=row)
         elif self.page == "lab":
             self.add_action("lab", "Lab Status", "🧪", row=row)
             self.add_action("process", "Process Menu", "⚗️", row=row)
             self.add_action("collect", "Collect Ready", "📦", row=row)
             self.add_action("shop", "Equipment Shop", "🛒", row=row)
+        elif self.page == "crime":
+            self.add_action("heist_stealth", "Stealth Heist", "🥷", row=row, style=discord.ButtonStyle.success)
+            self.add_action("heist_loud", "Loud Heist", "💥", row=row, style=discord.ButtonStyle.danger)
+            self.add_action("heist_con", "Con Job", "🎭", row=row)
+            self.add_action("launder_modal", "Launder Cash", "🧼", row=row)
+            self.add_action("heat", "Heat", "🔥", row=row)
+            self.add_action("heiststats", "Heist Stats", "📊", row=2)
+            self.add_action("topheists", "Top Heists", "🏆", row=2)
         elif self.page == "progress":
             self.add_action("daily", "Daily Reward", "☀️", row=row, style=discord.ButtonStyle.success)
             self.add_action("quests", "Quests", "📜", row=row)
@@ -320,8 +448,9 @@ class GameHubView(discord.ui.View):
     async def refresh_original(self, interaction: discord.Interaction) -> None:
         scope, profile, world = await self.state()
         self.rebuild(scope, profile, world)
-        if interaction.message is not None:
-            await interaction.message.edit(
+        message = interaction.message or self.message
+        if message is not None:
+            await message.edit(
                 embed=self.cog.build_embed(
                     scope,
                     profile,
@@ -402,6 +531,18 @@ class GameHubView(discord.ui.View):
             return
         if action == "shop":
             return await self.open_shop(interaction)
+        if action == "bid_modal":
+            return await interaction.response.send_modal(HubBidModal(self))
+        if action == "list_modal":
+            return await interaction.response.send_modal(HubAuctionListModal(self))
+        if action == "launder_modal":
+            return await interaction.response.send_modal(HubLaunderModal(self))
+        if action == "heist_stealth":
+            return await self.run_command(interaction, "heist", mode="solo", arg="stealth")
+        if action == "heist_loud":
+            return await self.run_command(interaction, "heist", mode="solo", arg="loud")
+        if action == "heist_con":
+            return await self.run_command(interaction, "heist", mode="solo", arg="con")
         if action == "notifications":
             return await self.open_notifications(interaction)
         if action == "plant":
@@ -426,6 +567,10 @@ class GameHubView(discord.ui.View):
             "collect": "collect",
             "lab": "lab",
             "process": "process",
+            "auction": "auction",
+            "heat": "heat",
+            "heiststats": "heiststats",
+            "topheists": "topheists",
             "daily": "growdaily",
             "quests": "growquests",
             "achievements": "growachievements",
@@ -502,7 +647,9 @@ class GameHub(commands.Cog):
                 "home": "🌿 Idle Grow Command Center",
                 "grow": "🌱 Grow Room",
                 "inventory": "🎒 Inventory & Sales",
+                "market": "🔨 Market & Auctions",
                 "lab": "⚗️ Concentrate Lab",
+                "crime": "🕶️ Crime",
                 "progress": "📈 Progression",
                 "social": "👥 Social & World",
                 "casino": "🎰 Casino",
@@ -560,6 +707,27 @@ class GameHub(commands.Cog):
                 value="Inspect inventory, sell all flower, collect finished lab work, or open the shop.",
                 inline=False,
             )
+        elif page == "market":
+            auctions = world.get("auctions")
+            auctions = auctions if isinstance(auctions, dict) else {}
+            lines = []
+            for auction_id, auction in list(auctions.items())[:5]:
+                if not isinstance(auction, dict):
+                    continue
+                lines.append(
+                    f"**{auction_id}** • {str(auction.get('item_name', 'item')).title()} • "
+                    f"{_cash(auction.get('current_bid', 0))}"
+                )
+            embed.add_field(
+                name="Auction House",
+                value="\n".join(lines) or "No active auctions.",
+                inline=False,
+            )
+            embed.add_field(
+                name="Controls",
+                value="Browse full listings, place a bid, or list an inventory item without typing command arguments.",
+                inline=False,
+            )
         elif page == "lab":
             queue = [
                 item
@@ -583,6 +751,24 @@ class GameHub(commands.Cog):
             embed.add_field(
                 name="How it works",
                 value="Open Process Menu to see recipes and requirements. Collect Ready claims every completed batch.",
+                inline=False,
+            )
+        elif page == "crime":
+            stats = profile.get("stats")
+            stats = stats if isinstance(stats, dict) else {}
+            embed.add_field(name="Heat", value=f"**{_positive_int(profile.get('heat'))}%**", inline=True)
+            embed.add_field(name="Dirty Cash", value=_cash(dirty_cash), inline=True)
+            embed.add_field(
+                name="Record",
+                value=(
+                    f"Heists won: **{_positive_int(stats.get('heists_won'))}**\n"
+                    f"Robberies: **{_positive_int(stats.get('steals'))}**"
+                ),
+                inline=True,
+            )
+            embed.add_field(
+                name="Jobs",
+                value="Choose a solo plan directly. Launder opens a private amount form. Crew/raid actions remain protected by their multiplayer rules.",
                 inline=False,
             )
         elif page == "progress":
@@ -694,6 +880,7 @@ class GameHub(commands.Cog):
             view=view,
             ephemeral=True,
         )
+        view.message = await interaction.original_response()
 
     @commands.hybrid_command(name="game", aliases=["menu", "play"])
     async def game(self, ctx):
@@ -702,11 +889,12 @@ class GameHub(commands.Cog):
         scope, profile, world = await self.state(guild_id, ctx.author.id)
         view = GameHubView(self, ctx.author.id, guild_id)
         view.rebuild(scope, profile, world)
-        await ctx.send(
+        message = await ctx.send(
             embed=self.build_embed(scope, profile, world),
             view=view,
             ephemeral=ctx.interaction is not None,
         )
+        view.message = message
 
 
 async def setup(bot):
