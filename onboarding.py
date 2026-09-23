@@ -8,7 +8,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import GROWTH_CYCLES, SHOP_ITEMS, get_plant_grow_time, inv_get
+from plant_lifecycle import plant_is_ready
+from utils import GROWTH_CYCLES, SHOP_ITEMS, inv_get
 from world_modes import GameScope, POLICY_CHOICE, normalize_world_mode_config, resolve_game_scope
 
 
@@ -63,15 +64,12 @@ def _owned_plantable_seed(profile: dict[str, Any]) -> str | None:
 
 
 def _ready_plant_count(profile: dict[str, Any], world: dict[str, Any], now: float) -> int:
-    ready = 0
-    for plant in profile.get("plants", []) or []:
-        if not isinstance(plant, dict):
-            continue
-        raw_planted_at = plant.get("planted_at")
-        planted_at = now if raw_planted_at is None else float(raw_planted_at)
-        if now - planted_at >= get_plant_grow_time(profile, world, plant):
-            ready += 1
-    return ready
+    return sum(
+        1
+        for plant in profile.get("plants", []) or []
+        if isinstance(plant, dict)
+        and plant_is_ready(profile, world, plant, now=now)
+    )
 
 
 
