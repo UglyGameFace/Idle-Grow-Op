@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import time
+from types import SimpleNamespace
 from typing import Any
 
 import discord
@@ -15,6 +17,8 @@ from progression_core import xp_needed_for_level
 from utils import GROWTH_CYCLES
 from world_modes import resolve_game_scope
 
+
+logger = logging.getLogger(__name__)
 
 HUB_PAGES = (
     ("home", "Home", "🏠"),
@@ -96,6 +100,10 @@ class HubInteractionContext:
         self.guild = interaction.guild
         self.channel = interaction.channel
         self.command = command
+        self.message = interaction.message or SimpleNamespace(
+            created_at=interaction.created_at,
+            edited_at=None,
+        )
 
     async def send(self, content: str | None = None, **kwargs):
         kwargs["ephemeral"] = True
@@ -517,7 +525,45 @@ class GameHubView(discord.ui.View):
 
         await interaction.response.defer(ephemeral=True, thinking=True)
         ctx = HubInteractionContext(self.cog.bot, interaction, command)
-        await command.callback(command.cog, ctx, **kwargs)
+        try:
+            if not await command.can_run(ctx):
+                raise commands.CheckFailure("command check failed")
+            command._prepare_cooldowns(ctx)
+            await command.callback(command.cog, ctx, **kwargs)
+        except commands.CommandOnCooldown as exc:
+            await interaction.followup.send(
+                f"⏳ Try again in **{exc.retry_after:.1f}s**.",
+                ephemeral=True,
+            )
+            return
+        except commands.CheckFailure:
+            await interaction.followup.send(
+                "❌ You cannot use that action here.",
+                ephemeral=True,
+            )
+            return
+        except Exception as exc:
+            logger.exception(
+                "Game hub action failed command=%s guild=%s user=%s",
+                command_name,
+                interaction.guild_id,
+                interaction.user.id,
+            )
+            reporter = getattr(self.cog.bot, "report_command_error", None)
+            if callable(reporter):
+                await reporter(
+                    guild_id=interaction.guild_id,
+                    title="Game hub action failure",
+                    description=(
+                        f"command={command_name} user={interaction.user.id} "
+                        f"error={type(exc).__name__}: {exc}"
+                    ),
+                )
+            await interaction.followup.send(
+                "❌ Something went wrong running that action. The error was recorded.",
+                ephemeral=True,
+            )
+            return
         await self.refresh_original(interaction)
 
     async def handle_action(self, interaction: discord.Interaction, action: str) -> None:
