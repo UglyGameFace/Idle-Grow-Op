@@ -579,7 +579,7 @@ class GameHubView(discord.ui.View):
                 disabled=ready_count <= 0,
             )
             self.add_action("status", "Garden", "🪴", row=2)
-            self.add_action("shop", "Shop", "🛒", row=2)
+            self.add_action("shop_seeds", "Seed Shop", "🛒", row=2)
         elif self.page == "inventory":
             self.add_action("inventory", "Inventory", "🎒", row=1)
             self.add_action(
@@ -647,7 +647,7 @@ class GameHubView(discord.ui.View):
                 row=2,
                 disabled=completed_batches <= 0,
             )
-            self.add_action("shop", "Equipment Shop", "🛒", row=2)
+            self.add_action("shop_equipment", "Equipment Shop", "🛒", row=2)
         elif self.page == "crime":
             self.add_item(
                 HubStealTargetSelect(
@@ -805,7 +805,12 @@ class GameHubView(discord.ui.View):
                 view=self,
             )
 
-    async def open_shop(self, interaction: discord.Interaction) -> None:
+    async def open_shop(
+        self,
+        interaction: discord.Interaction,
+        *,
+        category: str = "all",
+    ) -> None:
         economy = self.cog.bot.get_cog("Economy")
         if economy is None:
             return await interaction.response.send_message(
@@ -813,10 +818,19 @@ class GameHubView(discord.ui.View):
                 ephemeral=True,
             )
         scope, profile = await economy._profile_for(self.guild_id, self.owner_id)
-        view = ShopView(economy, self.owner_id, self.guild_id)
+        view = ShopView(
+            economy,
+            self.owner_id,
+            self.guild_id,
+            category=category,
+        )
         view.rebuild(profile)
         await interaction.response.send_message(
-            embed=economy.build_shop_embed(scope, profile),
+            embed=economy.build_shop_embed(
+                scope,
+                profile,
+                category=category,
+            ),
             view=view,
             ephemeral=True,
         )
@@ -902,6 +916,44 @@ class GameHubView(discord.ui.View):
             return
         await self.refresh_original(interaction)
 
+    async def perform_next_move(self, interaction: discord.Interaction) -> None:
+        scope, profile, world = await self.state()
+        step = choose_onboarding_step(scope, profile, world, now=time.time())
+
+        if step.key == "world_mode":
+            return await self.run_command(interaction, "world-mode")
+        if step.key == "sell":
+            return await self.run_command(
+                interaction,
+                "sell",
+                amount="all",
+                strain_name=None,
+            )
+        if step.key == "harvest":
+            return await self.run_command(interaction, "harvest")
+        if step.key == "collect":
+            return await self.run_command(interaction, "collect")
+        if step.key == "status":
+            self.page = "grow"
+            return await self.refresh(interaction)
+        if step.key == "plant":
+            marker = "strain_name:"
+            if marker in step.command:
+                self.selected_seed = step.command.split(marker, 1)[1].strip()
+                return await self.run_command(
+                    interaction,
+                    "plant",
+                    strain_name=self.selected_seed,
+                )
+            self.page = "grow"
+            return await self.refresh(interaction)
+        if step.key == "buy_seed":
+            return await self.open_shop(interaction, category="seeds")
+        if step.key == "daily":
+            return await self.run_command(interaction, "growdaily")
+
+        return await self.run_command(interaction, "help")
+
     async def handle_action(self, interaction: discord.Interaction, action: str) -> None:
         if action == "refresh":
             return await self.refresh(interaction)
@@ -913,6 +965,38 @@ class GameHubView(discord.ui.View):
             return
         if action == "shop":
             return await self.open_shop(interaction)
+        if action == "shop_seeds":
+            return await self.open_shop(interaction, category="seeds")
+        if action == "shop_equipment":
+            return await self.open_shop(interaction, category="equipment")
+        if action == "next_move":
+            return await self.perform_next_move(interaction)
+        if action == "process_modal":
+            if not self.selected_concentrate:
+                return await interaction.response.send_message(
+                    "⚗️ Choose a concentrate first.",
+                    ephemeral=True,
+                )
+            return await interaction.response.send_modal(
+                HubProcessModal(self, self.selected_concentrate)
+            )
+        if action == "crew_create_modal":
+            return await interaction.response.send_modal(HubCrewCreateModal(self))
+        if action == "crew_join_modal":
+            return await interaction.response.send_modal(HubCrewJoinModal(self))
+        if action == "crew_deposit_modal":
+            return await interaction.response.send_modal(HubCrewDepositModal(self))
+        if action == "steal_selected":
+            if self.selected_steal_target is None:
+                return await interaction.response.send_message(
+                    "🔫 Choose a player first.",
+                    ephemeral=True,
+                )
+            return await self.run_command(
+                interaction,
+                "steal",
+                target=self.selected_steal_target,
+            )
         if action == "bid_modal":
             return await interaction.response.send_modal(HubBidModal(self))
         if action == "list_modal":
@@ -959,6 +1043,9 @@ class GameHubView(discord.ui.View):
             "level": "growlevel",
             "profile": "profile",
             "crew": "crew",
+            "crew_info": "crew info",
+            "crew_leave": "crew leave",
+            "crew_war": "crew war",
             "district": "district",
             "leaderboard": "leaderboard",
             "casino": "casino",
