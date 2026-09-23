@@ -66,7 +66,10 @@ class SupabaseScopedBackend:
         casino_columns = ",".join(sorted(CASINO_PROFIT_METRICS))
         required_columns = {
             "global_accounts": "data",
-            "guild_profiles": f"data,balance,heist_wins,has_notification_work,{casino_columns}",
+            "guild_profiles": (
+                f"data,balance,heist_wins,has_notification_work,"
+                f"has_pending_notification_work,{casino_columns}"
+            ),
             "guild_worlds": "data",
         }
         for table_name, columns in required_columns.items():
