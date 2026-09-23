@@ -533,75 +533,247 @@ class GameHubView(discord.ui.View):
         )
 
     def rebuild(self, scope, profile: dict, world: dict) -> None:
-        del scope, world
         self.clear_items()
         self.add_item(HubPageSelect(self))
-        row = 1
+
+        now = time.time()
+        plants = [
+            plant
+            for plant in profile.get("plants", []) or []
+            if isinstance(plant, dict)
+        ]
+        ready_count = sum(
+            1
+            for plant in plants
+            if plant_is_ready(profile, world, plant, now=now)
+        )
+        flower = _sum_mapping(profile.get("flower_stash"))
+        queue = [
+            item
+            for item in profile.get("processing_queue", []) or []
+            if isinstance(item, dict)
+        ]
+        completed_batches = sum(
+            1
+            for item in queue
+            if now >= float(item.get("finish_time", now + 1))
+        )
+        crew_id = profile.get("crew_id")
 
         if self.page == "grow":
             self.add_item(HubSeedSelect(self, profile))
-            row = 2
             self.add_action(
                 "plant",
                 "Plant Selected",
                 "🌱",
-                row=row,
+                row=2,
                 style=discord.ButtonStyle.success,
                 disabled=self.selected_seed is None,
             )
-            self.add_action("harvest", "Harvest Ready", "✂️", row=row, style=discord.ButtonStyle.success)
-            self.add_action("status", "Garden", "🪴", row=row)
-            self.add_action("shop", "Shop", "🛒", row=row)
+            self.add_action(
+                "harvest",
+                "Harvest Ready",
+                "✂️",
+                row=2,
+                style=discord.ButtonStyle.success,
+                disabled=ready_count <= 0,
+            )
+            self.add_action("status", "Garden", "🪴", row=2)
+            self.add_action("shop", "Shop", "🛒", row=2)
         elif self.page == "inventory":
-            self.add_action("inventory", "Inventory", "🎒", row=row)
-            self.add_action("sell_all", "Sell All Flower", "💵", row=row, style=discord.ButtonStyle.success)
-            self.add_action("collect", "Collect Lab", "📦", row=row)
-            self.add_action("shop", "Shop", "🛒", row=row)
+            self.add_action("inventory", "Inventory", "🎒", row=1)
+            self.add_action(
+                "sell_all",
+                "Sell All Flower",
+                "💵",
+                row=1,
+                style=discord.ButtonStyle.success,
+                disabled=flower <= 0,
+            )
+            self.add_action(
+                "collect",
+                "Collect Lab",
+                "📦",
+                row=1,
+                disabled=completed_batches <= 0,
+            )
+            self.add_action("shop", "Shop", "🛒", row=1)
         elif self.page == "market":
-            self.add_action("auction", "Browse Auctions", "🔨", row=row)
-            self.add_action("bid_modal", "Place Bid", "💰", row=row, style=discord.ButtonStyle.primary)
-            self.add_action("list_modal", "List Item", "📤", row=row)
-            self.add_action("leaderboard", "Leaderboard", "🏆", row=row)
+            disabled = not scope.multiplayer
+            self.add_action(
+                "auction",
+                "Browse Auctions",
+                "🔨",
+                row=1,
+                disabled=disabled,
+            )
+            self.add_action(
+                "bid_modal",
+                "Place Bid",
+                "💰",
+                row=1,
+                style=discord.ButtonStyle.primary,
+                disabled=disabled,
+            )
+            self.add_action(
+                "list_modal",
+                "List Item",
+                "📤",
+                row=1,
+                disabled=disabled,
+            )
+            self.add_action(
+                "leaderboard",
+                "Leaderboard",
+                "🏆",
+                row=1,
+                disabled=disabled,
+            )
         elif self.page == "lab":
-            self.add_action("lab", "Lab Status", "🧪", row=row)
-            self.add_action("process", "Process Menu", "⚗️", row=row)
-            self.add_action("collect", "Collect Ready", "📦", row=row)
-            self.add_action("shop", "Equipment Shop", "🛒", row=row)
+            self.add_item(HubConcentrateSelect(self, profile))
+            self.add_action(
+                "process_modal",
+                "Start Batch",
+                "⚗️",
+                row=2,
+                style=discord.ButtonStyle.success,
+                disabled=self.selected_concentrate is None,
+            )
+            self.add_action("lab", "Lab Status", "🧪", row=2)
+            self.add_action(
+                "collect",
+                "Collect Ready",
+                "📦",
+                row=2,
+                disabled=completed_batches <= 0,
+            )
+            self.add_action("shop", "Equipment Shop", "🛒", row=2)
         elif self.page == "crime":
-            self.add_action("heist_stealth", "Stealth Heist", "🥷", row=row, style=discord.ButtonStyle.success)
-            self.add_action("heist_loud", "Loud Heist", "💥", row=row, style=discord.ButtonStyle.danger)
-            self.add_action("heist_con", "Con Job", "🎭", row=row)
-            self.add_action("launder_modal", "Launder Cash", "🧼", row=row)
-            self.add_action("heat", "Heat", "🔥", row=row)
-            self.add_action("heiststats", "Heist Stats", "📊", row=2)
-            self.add_action("topheists", "Top Heists", "🏆", row=2)
+            self.add_item(
+                HubStealTargetSelect(
+                    self,
+                    disabled=not scope.multiplayer,
+                )
+            )
+            self.add_action(
+                "heist_stealth",
+                "Stealth Heist",
+                "🥷",
+                row=2,
+                style=discord.ButtonStyle.success,
+            )
+            self.add_action(
+                "heist_loud",
+                "Loud Heist",
+                "💥",
+                row=2,
+                style=discord.ButtonStyle.danger,
+            )
+            self.add_action("heist_con", "Con Job", "🎭", row=2)
+            self.add_action(
+                "steal_selected",
+                "Rob Selected",
+                "🔫",
+                row=2,
+                disabled=(
+                    not scope.multiplayer
+                    or self.selected_steal_target is None
+                ),
+            )
+            self.add_action("launder_modal", "Launder Cash", "🧼", row=2)
+            self.add_action("heat", "Heat", "🔥", row=3)
+            self.add_action("heiststats", "Heist Stats", "📊", row=3)
+            self.add_action("topheists", "Top Heists", "🏆", row=3)
         elif self.page == "progress":
-            self.add_action("daily", "Daily Reward", "☀️", row=row, style=discord.ButtonStyle.success)
-            self.add_action("quests", "Quests", "📜", row=row)
-            self.add_action("achievements", "Achievements", "🏆", row=row)
-            self.add_action("level", "Level & XP", "📈", row=row)
+            self.add_action(
+                "daily",
+                "Daily Reward",
+                "☀️",
+                row=1,
+                style=discord.ButtonStyle.success,
+            )
+            self.add_action("quests", "Quests", "📜", row=1)
+            self.add_action("achievements", "Achievements", "🏆", row=1)
+            self.add_action("level", "Level & XP", "📈", row=1)
         elif self.page == "social":
-            self.add_action("profile", "Profile", "👤", row=row)
-            self.add_action("crew", "Crew", "👥", row=row)
-            self.add_action("district", "District", "🏙️", row=row)
-            self.add_action("leaderboard", "Leaderboard", "🏆", row=row)
+            if not scope.multiplayer:
+                self.add_action("profile", "Profile", "👤", row=1)
+                self.add_action("world-mode", "World Mode", "🌍", row=1)
+            elif crew_id:
+                self.add_action("crew_info", "Crew Info", "👥", row=1)
+                self.add_action("crew_deposit_modal", "Deposit", "🏦", row=1)
+                self.add_action(
+                    "crew_leave",
+                    "Leave Crew",
+                    "🚪",
+                    row=1,
+                    style=discord.ButtonStyle.danger,
+                )
+                self.add_action("crew_war", "Turf War", "⚔️", row=1)
+                self.add_action("district", "District", "🏙️", row=1)
+                self.add_action("profile", "Profile", "👤", row=2)
+                self.add_action("leaderboard", "Leaderboard", "🏆", row=2)
+            else:
+                self.add_action(
+                    "crew_create_modal",
+                    "Create Crew",
+                    "➕",
+                    row=1,
+                    style=discord.ButtonStyle.success,
+                )
+                self.add_action("crew_join_modal", "Join Crew", "👥", row=1)
+                self.add_action("profile", "Profile", "👤", row=1)
+                self.add_action("leaderboard", "Leaderboard", "🏆", row=1)
+                self.add_action("district", "District", "🏙️", row=1)
         elif self.page == "casino":
-            self.add_action("casino", "Casino Menu", "🎰", row=row)
-            self.add_action("casinolb", "Casino Rankings", "🏆", row=row)
+            self.add_action("casino", "Casino Profile", "🎰", row=1)
+            self.add_action("casinolb", "Casino Rankings", "🏆", row=1)
         elif self.page == "settings":
-            self.add_action("notifications", "Notifications", "📟", row=row)
-            self.add_action("world-mode", "World Mode", "🌍", row=row)
-            self.add_action("profile-settings", "Profile & Privacy", "🪪", row=row)
-            self.add_action("help", "Help", "❓", row=row)
+            self.add_action("notifications", "Notifications", "📟", row=1)
+            self.add_action("world-mode", "World Mode", "🌍", row=1)
+            self.add_action("profile-settings", "Profile & Privacy", "🪪", row=1)
+            self.add_action("help", "Help", "❓", row=1)
         else:
-            self.add_action("shop", "Shop", "🛒", row=row, style=discord.ButtonStyle.primary)
-            self.add_action("harvest", "Harvest", "✂️", row=row, style=discord.ButtonStyle.success)
-            self.add_action("daily", "Daily", "☀️", row=row, style=discord.ButtonStyle.success)
-            self.add_action("profile", "Profile", "👤", row=row)
-            self.add_action("inventory", "Inventory", "🎒", row=row)
+            self.add_action(
+                "next_move",
+                "Do Next Move",
+                "🧭",
+                row=1,
+                style=discord.ButtonStyle.success,
+            )
+            self.add_action(
+                "shop",
+                "Shop",
+                "🛒",
+                row=2,
+                style=discord.ButtonStyle.primary,
+            )
+            self.add_action(
+                "harvest",
+                "Harvest",
+                "✂️",
+                row=2,
+                style=discord.ButtonStyle.success,
+                disabled=ready_count <= 0,
+            )
+            self.add_action(
+                "daily",
+                "Daily",
+                "☀️",
+                row=2,
+                style=discord.ButtonStyle.success,
+            )
+            self.add_action("profile", "Profile", "👤", row=2)
+            self.add_action("inventory", "Inventory", "🎒", row=2)
 
         self.add_action("refresh", "Refresh", "🔄", row=4)
-        self.add_action("close", "Close", "✖️", row=4, style=discord.ButtonStyle.danger)
+        self.add_action(
+            "close",
+            "Close",
+            "✖️",
+            row=4,
+            style=discord.ButtonStyle.danger,
+        )
 
     async def refresh(self, interaction: discord.Interaction) -> None:
         scope, profile, world = await self.state()
