@@ -1529,8 +1529,11 @@ class GameHub(commands.Cog):
                 inline=True,
             )
             embed.add_field(
-                name="Safety",
-                value="The command center never places a wager automatically. Open the Casino Menu and choose a game yourself.",
+                name="Play",
+                value=(
+                    "Choose a game below, tap **Play Selected**, then enter the wager and "
+                    "game-specific choice in the private form. No wager is placed until you submit it."
+                ),
                 inline=False,
             )
         elif page == "settings":
