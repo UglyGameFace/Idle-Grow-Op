@@ -948,8 +948,17 @@ class GameHubView(discord.ui.View):
                 self.add_action("leaderboard", "Leaderboard", "🏆", row=1)
                 self.add_action("district", "District", "🏙️", row=1)
         elif self.page == "casino":
-            self.add_action("casino", "Casino Profile", "🎰", row=1)
-            self.add_action("casinolb", "Casino Rankings", "🏆", row=1)
+            self.add_item(HubCasinoGameSelect(self))
+            self.add_action(
+                "casino_play",
+                "Play Selected",
+                "🎲",
+                row=2,
+                style=discord.ButtonStyle.success,
+                disabled=self.selected_casino_game is None,
+            )
+            self.add_action("casino", "Casino Profile", "🎰", row=2)
+            self.add_action("casinolb", "Casino Rankings", "🏆", row=2)
         elif self.page == "settings":
             self.add_action("notifications", "Notifications", "📟", row=1)
             self.add_action("world-mode", "World Mode", "🌍", row=1)
@@ -1193,6 +1202,15 @@ class GameHubView(discord.ui.View):
             return await self.open_shop(interaction, category="equipment")
         if action == "next_move":
             return await self.perform_next_move(interaction)
+        if action == "casino_play":
+            if not self.selected_casino_game:
+                return await interaction.response.send_message(
+                    "🎰 Choose a casino game first.",
+                    ephemeral=True,
+                )
+            return await interaction.response.send_modal(
+                HubCasinoBetModal(self, self.selected_casino_game)
+            )
         if action == "process_modal":
             if not self.selected_concentrate:
                 return await interaction.response.send_message(
