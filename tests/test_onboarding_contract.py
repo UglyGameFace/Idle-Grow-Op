@@ -36,9 +36,10 @@ def test_start_guide_uses_the_real_starter_economy_and_active_save():
     assert "resolve_game_scope" in ONBOARDING
     assert "scope.emoji" in ONBOARDING
     assert "scope.label" in ONBOARDING
-    assert "/buy item_name:{STARTER_SEED}" in ONBOARDING
-    assert "/plant strain_name:{STARTER_STRAIN}" in ONBOARDING
-    assert "/sell amount:all" in ONBOARDING
+    assert "Play Game → Shop" in ONBOARDING
+    assert "Plant Selected" in ONBOARDING
+    assert "Sell All Flower" in ONBOARDING
+    assert "fixed ready time" in ONBOARDING
 
 
 def test_help_is_compact_and_labels_mode_dependent_systems():
@@ -47,13 +48,14 @@ def test_help_is_compact_and_labels_mode_dependent_systems():
     assert "Progression" in ONBOARDING
     assert "Lab and expansion" in ONBOARDING
     assert "Modes and multiplayer" in ONBOARDING
-    assert "require a multiplayer mode" in ONBOARDING
+    assert "Social / Settings" in ONBOARDING
     assert "`/setup`" in ONBOARDING
+    assert "`/game`" in ONBOARDING
 
 
 def test_high_traffic_starter_messages_use_real_slash_guidance():
     assert "Try `/help` for usage." in MAIN
-    assert 'name="/help • /start • Growing 🌿"' in MAIN
+    assert 'name="/game • Growing 🌿"' in MAIN
     assert "`!plant" not in FARMING
     assert "`!shop" not in FARMING
     assert "`!strains" not in FARMING
@@ -63,11 +65,11 @@ def test_high_traffic_starter_messages_use_real_slash_guidance():
     assert "Use !collect" not in LAB
     assert "Use `!process`" not in LAB
     assert "`!q`" not in QUICK
-    assert '"/help • /start • Build your empire"' in TASKS
+    assert '"/game • Build your empire"' in TASKS
 
 
 def test_existing_setup_points_managers_to_the_new_player_launch_commands():
     assert 'name="Player Launch"' in SETUP
+    assert "`/game`" in SETUP
     assert "`/start`" in SETUP
-    assert "`/help`" in SETUP
     assert 'name="Coming next"' not in SETUP
