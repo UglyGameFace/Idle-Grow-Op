@@ -13,10 +13,11 @@ def test_notification_batch_migration_matches_backend_contract():
     assert REQUIRED_SCHEMA_VERSION == "004_batched_notification_candidates"
     assert NOTIFICATION_BATCH_RPC == "idle_grow_list_notification_candidates"
     assert "idle_grow_has_pending_notification_work" in source
-    assert "coalesce(plant ->> 'notified', 'false') <> 'true'" in source
-    assert "coalesce(batch ->> 'notified', 'false') <> 'true'" in source
-    assert "drop index if exists public.guild_profiles_notification_work_idx" in source
-    assert "where has_notification_work" in source
+    assert "notification_categories,plant_ready" in source
+    assert "notification_categories,lab_ready" in source
+    assert "has_pending_notification_work boolean generated always as" in source
+    assert "guild_profiles_pending_notification_work_idx" in source
+    assert "where has_pending_notification_work" in source
     assert "p_guild_ids bigint[]" in source
     assert "profile.guild_id = any" in source
     assert f"function public.{NOTIFICATION_BATCH_RPC}(" in source
