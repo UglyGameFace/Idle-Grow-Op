@@ -15,6 +15,7 @@ import discord
 from discord.ext import commands
 
 from persistence_context import GuildContextRequired, require_guild_id
+from plant_lifecycle import plant_is_ready
 from profile_signature_contracts import (
     ALL_PROFILE_FIELDS,
     DEFAULT_SERVER_ALLOWED_FIELDS,
@@ -30,7 +31,6 @@ from profile_signature_contracts import (
     SIGNATURE_STATE_KEY,
 )
 from progression_core import xp_needed_for_level
-from utils import get_plant_grow_time
 from world_modes import MODE_LABELS, resolve_game_scope
 
 
@@ -385,17 +385,12 @@ def _grow_summary(profile: dict[str, Any], world: dict[str, Any]) -> str:
     if not isinstance(plants, list) or not plants:
         return "No active plants"
     now = time.time()
-    ready = 0
-    for plant in plants:
-        if not isinstance(plant, dict):
-            continue
-        planted_at = float(plant.get("planted_at", 0) or 0)
-        try:
-            grow_time = float(get_plant_grow_time(profile, world, plant))
-        except Exception:
-            grow_time = 0
-        if grow_time > 0 and now >= planted_at + grow_time:
-            ready += 1
+    ready = sum(
+        1
+        for plant in plants
+        if isinstance(plant, dict)
+        and plant_is_ready(profile, world, plant, now=now)
+    )
     growing = max(0, len(plants) - ready)
     pieces = []
     if ready:
