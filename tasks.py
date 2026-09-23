@@ -517,10 +517,10 @@ class Tasks(commands.Cog):
                 if index >= len(plants):
                     continue
                 plant = plants[index]
-                grow_time = get_plant_grow_time(profile, world, plant)
                 if (
-                    not plant.get("notified")
-                    and now - float(plant.get("planted_at", now)) >= grow_time
+                    isinstance(plant, dict)
+                    and not plant.get("notified")
+                    and plant_is_ready(profile, world, plant, now=now)
                 ):
                     plant["notified"] = True
                     changed = True
