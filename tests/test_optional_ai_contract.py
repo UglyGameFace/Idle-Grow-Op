@@ -45,9 +45,10 @@ def test_ai_identity_and_game_guidance_are_current():
     assert 'Idle Grow Op' in AI_SOURCE
     assert 'Stoney Baloney' not in AI_SOURCE
     assert '!plant' not in AI_SOURCE
-    assert '`/plant`' in AI_SOURCE
-    assert '`/harvest`' in AI_SOURCE
-    assert '`/shop`' in AI_SOURCE
+    assert '`/game`' in AI_SOURCE
+    assert 'normal all-in-one' in AI_SOURCE
+    assert 'Game section/button' in AI_SOURCE
+    assert 'optional shortcuts' in AI_SOURCE
     compact = " ".join(AI_SOURCE.split())
     assert 'or create images' in compact
 
