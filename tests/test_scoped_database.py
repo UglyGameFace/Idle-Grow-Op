@@ -107,6 +107,37 @@ def test_close_flushes_dirty_records():
     run(scenario())
 
 
+def test_profile_first_load_repairs_and_persists_legacy_xp_overflow():
+    async def scenario():
+        backend = MemoryBackend()
+        backend.records["profile:100:200"] = {
+            "level": 20,
+            "xp": 9_802,
+            "grams": 500,
+        }
+        database = ScopedDatabaseManager(backend)
+
+        profile = await database.get_profile(100, 200)
+
+        assert profile["level"] == 21
+        assert profile["xp"] == 858
+        assert "profile:100:200" in database.store.dirty_keys
+
+        await database.flush()
+
+        assert backend.records["profile:100:200"]["level"] == 21
+        assert backend.records["profile:100:200"]["xp"] == 858
+
+        backend.saved_batches.clear()
+        again = await database.get_profile(100, 200)
+        await database.flush()
+
+        assert again is profile
+        assert backend.saved_batches == []
+
+    run(scenario())
+
+
 def test_notification_candidates_prime_once_then_use_memory_only():
     async def scenario():
         backend = MemoryBackend()
