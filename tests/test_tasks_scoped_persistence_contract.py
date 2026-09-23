@@ -46,8 +46,8 @@ def test_supabase_batches_only_profiles_with_pending_notification_work():
     backend = (ROOT / "supabase_scoped_backend.py").read_text(encoding="utf-8")
 
     assert "idle_grow_has_pending_notification_work" in migration
-    assert "guild_profiles_notification_work_idx" in migration
-    assert "where has_notification_work" in migration
+    assert "guild_profiles_pending_notification_work_idx" in migration
+    assert "where has_pending_notification_work" in migration
     assert "p_guild_ids bigint[]" in migration
     assert "profile.guild_id = any" in migration
     assert 'NOTIFICATION_BATCH_RPC = "idle_grow_list_notification_candidates"' in backend
