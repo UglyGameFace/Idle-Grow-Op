@@ -480,6 +480,201 @@ class HubStealTargetSelect(discord.ui.UserSelect):
         await self.view.refresh(interaction)
 
 
+class HubCasinoGameSelect(discord.ui.Select):
+    def __init__(self, view: "GameHubView") -> None:
+        super().__init__(
+            placeholder="Choose a casino game…",
+            min_values=1,
+            max_values=1,
+            row=1,
+            options=[
+                discord.SelectOption(
+                    label=label,
+                    value=key,
+                    emoji=emoji,
+                    default=view.selected_casino_game == key,
+                )
+                for key, label, emoji in CASINO_GAMES
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        self.view.selected_casino_game = self.values[0]
+        await self.view.refresh(interaction)
+
+
+class HubCasinoBetModal(discord.ui.Modal):
+    def __init__(self, view: "GameHubView", game: str) -> None:
+        game_labels = {key: label for key, label, _emoji in CASINO_GAMES}
+        super().__init__(title=f"Play {game_labels.get(game, game.title())}")
+        self.hub_view = view
+        self.game = game
+        self.bet = discord.ui.TextInput(
+            label="Bet",
+            placeholder="100, 1k, half, all, or 25%",
+            default="200" if game == "blackjack" else "100",
+            max_length=20,
+        )
+        self.add_item(self.bet)
+        self.choice = None
+        self.extra = None
+
+        choices = {
+            "coinflip": ("Heads or tails", "heads"),
+            "hilo": ("High, low, or 7", "high"),
+            "rps": ("Rock, paper, or scissors", "rock"),
+            "cups": ("Cup 1, 2, or 3", "1"),
+            "roulette": ("Bet target", "red"),
+            "crash": ("Cashout multiplier", "2.0"),
+            "dice": ("Over or under", "over"),
+            "keno": ("Picks 1-40 (up to 3)", "7"),
+        }
+        if game in choices:
+            label, default = choices[game]
+            self.choice = discord.ui.TextInput(
+                label=label,
+                default=default,
+                max_length=50,
+            )
+            self.add_item(self.choice)
+        if game == "dice":
+            self.extra = discord.ui.TextInput(
+                label="Target number (2-98)",
+                default="50",
+                max_length=3,
+            )
+            self.add_item(self.extra)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        bet = str(self.bet.value).strip() or "100"
+        choice = str(self.choice.value).strip() if self.choice is not None else ""
+
+        if self.game == "slots":
+            return await self.hub_view.run_command(
+                interaction,
+                "slots",
+                amount=bet,
+            )
+        if self.game == "coinflip":
+            return await self.hub_view.run_command(
+                interaction,
+                "coinflip",
+                arg1=choice or "heads",
+                arg2=bet,
+            )
+        if self.game == "blackjack":
+            return await self.hub_view.run_command(
+                interaction,
+                "blackjack",
+                bet=bet,
+            )
+        if self.game == "roulette":
+            return await self.hub_view.run_command(
+                interaction,
+                "roulette",
+                arg1=choice or "red",
+                arg2=bet,
+            )
+        if self.game == "hilo":
+            return await self.hub_view.run_command(
+                interaction,
+                "hilo",
+                arg1=choice or "high",
+                arg2=bet,
+            )
+        if self.game == "rps":
+            return await self.hub_view.run_command(
+                interaction,
+                "rps",
+                arg1=choice or "rock",
+                arg2=bet,
+            )
+        if self.game == "cups":
+            return await self.hub_view.run_command(
+                interaction,
+                "cups",
+                arg1=choice or "1",
+                arg2=bet,
+            )
+        if self.game == "wheel":
+            return await self.hub_view.run_command(
+                interaction,
+                "wheel",
+                bet=bet,
+            )
+        if self.game == "crash":
+            try:
+                cashout = float(choice or "2.0")
+            except ValueError:
+                return await interaction.response.send_message(
+                    "❌ Cashout multiplier must be a number.",
+                    ephemeral=True,
+                )
+            return await self.hub_view.run_command(
+                interaction,
+                "crash",
+                bet=bet,
+                cashout=cashout,
+            )
+        if self.game == "dice":
+            try:
+                target = int(str(self.extra.value).strip()) if self.extra is not None else 50
+            except ValueError:
+                return await interaction.response.send_message(
+                    "❌ Dice target must be a whole number.",
+                    ephemeral=True,
+                )
+            return await self.hub_view.run_command(
+                interaction,
+                "dice",
+                bet=bet,
+                guess=choice or "over",
+                target=target,
+            )
+        if self.game == "keno":
+            raw_picks = (
+                choice.replace(",", " ")
+                .replace("/", " ")
+                .split()
+            )
+            picks = []
+            for raw in raw_picks:
+                try:
+                    pick = int(raw)
+                except ValueError:
+                    return await interaction.response.send_message(
+                        "❌ Keno picks must be whole numbers from 1 to 40.",
+                        ephemeral=True,
+                    )
+                if pick < 1 or pick > 40:
+                    return await interaction.response.send_message(
+                        "❌ Keno picks must be between 1 and 40.",
+                        ephemeral=True,
+                    )
+                if pick not in picks:
+                    picks.append(pick)
+            picks = picks[:3]
+            if not picks:
+                return await interaction.response.send_message(
+                    "❌ Choose at least one Keno number.",
+                    ephemeral=True,
+                )
+            values = [str(value) for value in picks]
+            return await self.hub_view.run_command(
+                interaction,
+                "keno",
+                arg1=values[0] if len(values) > 0 else None,
+                arg2=values[1] if len(values) > 1 else None,
+                arg3=values[2] if len(values) > 2 else None,
+                arg4=bet,
+            )
+
+        await interaction.response.send_message(
+            "⚠️ That casino game is not available from the panel.",
+            ephemeral=True,
+        )
+
+
 class HubActionButton(discord.ui.Button):
     def __init__(
         self,
