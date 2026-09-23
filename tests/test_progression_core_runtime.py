@@ -2,6 +2,17 @@ import progression_core as progression
 from progression_data import DAILY_QUEST_TEMPLATES
 
 
+def test_legacy_xp_overflow_reconciles_into_real_level_progress():
+    profile = {"level": 20, "xp": 9_802}
+
+    reached = progression.reconcile_level_xp(profile)
+
+    assert reached == [21]
+    assert profile == {"level": 21, "xp": 858}
+    assert progression.reconcile_level_xp(profile) == []
+    assert profile == {"level": 21, "xp": 858}
+
+
 def test_credit_xp_applies_every_crossed_level_with_one_canonical_formula():
     profile = {"level": 1, "xp": 90}
 
