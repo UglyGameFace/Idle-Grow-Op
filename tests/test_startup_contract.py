@@ -10,6 +10,7 @@ EXPECTED_EXTENSIONS = {
     "economy",
     "farming",
     "gambling",
+    "game_hub",
     "lab",
     "notification_preferences",
     "onboarding",
