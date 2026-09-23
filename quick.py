@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands
 
 from persistence_context import GuildContextRequired, require_guild_id
+from plant_lifecycle import plant_is_ready, stamp_plant_ready_at
 from progression_core import add_progress, check_achievements
 from world_modes import (
     effective_market_multiplier,
@@ -14,7 +15,6 @@ from utils import (
     GROWTH_CYCLES,
     SHOP_ITEMS,
     _shop_price,
-    get_plant_grow_time,
     inv_get,
     inv_take,
     jail_guard,
@@ -34,11 +34,6 @@ def _safe_int(value, default=0):
 def _seed_cost(seed_key: str) -> int:
     item = SHOP_ITEMS.get(seed_key)
     return int(_shop_price(item) or 0) if item else 0
-
-
-def _plant_is_ready(profile: dict, world: dict, plant: dict, now: float) -> bool:
-    planted_at = float(plant.get("planted_at", now) or now)
-    return now - planted_at >= get_plant_grow_time(profile, world, plant)
 
 
 class Quick(commands.Cog):
@@ -83,7 +78,7 @@ class Quick(commands.Cog):
         _, profile, world = await self._scope(ctx)
         plants = profile.get("plants", []) or []
         now = time.time()
-        ready = sum(1 for plant in plants if _plant_is_ready(profile, world, plant, now))
+        ready = sum(1 for plant in plants if plant_is_ready(profile, world, plant, now=now))
         heat = max(0, _safe_int(profile.get("heat")))
         jail_time = max(0, _safe_int(jail_left_seconds(profile)))
         status = "🟢"
@@ -129,7 +124,7 @@ class Quick(commands.Cog):
         ready_plants = [
             f"🌿 **{str(plant.get('strain', 'unknown')).title()}**"
             for plant in profile.get("plants", []) or []
-            if _plant_is_ready(profile, world, plant, now)
+            if plant_is_ready(profile, world, plant, now=now)
         ]
         if not ready_plants:
             return await ctx.send("⏳ No plants ready.")
@@ -157,7 +152,7 @@ class Quick(commands.Cog):
 
     @commands.hybrid_command(name="qplant", aliases=["qp", "quickplant"])
     async def qplant(self, ctx, count: int = None):
-        scope, profile, _ = await self._scope(ctx)
+        scope, profile, world = await self._scope(ctx)
         if await jail_guard(ctx, profile, "plant"):
             return
         desired = max(1, min(_safe_int(count, QPLANT_MAX_PLANT_PER_CALL), QPLANT_MAX_PLANT_PER_CALL)) if count is not None else None
@@ -193,12 +188,14 @@ class Quick(commands.Cog):
                         for _ in range(min(owned, desired - len(planted))):
                             if not inv_take(profile, seed, 1):
                                 break
-                            plants.append(
-                                {
-                                    "strain": strain,
-                                    "planted_at": now,
-                                }
+                            plant = {"strain": strain}
+                            stamp_plant_ready_at(
+                                profile,
+                                world,
+                                plant,
+                                planted_at=now,
                             )
+                            plants.append(plant)
                             planted.append(strain)
                             if len(planted) >= desired:
                                 break
