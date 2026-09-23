@@ -13,6 +13,7 @@ from persistence_scope import (
     guild_world_key,
 )
 from persistence_store import FlushResult, ScopedRecordStore
+from progression_core import reconcile_level_xp
 from world_mode_contracts import (
     PLAYER_MODE_SELECTION_KEY,
     WORLD_MODE_CONFIG_KEY,
@@ -204,7 +205,15 @@ class ScopedDatabaseManager:
 
     async def get_profile(self, guild_id: Any, user_id: Any) -> MutableMapping[str, Any]:
         key = guild_profile_key(guild_id, user_id)
+        was_cached = self.store.is_cached(key)
         profile = await self.store.get(key)
+
+        if not was_cached:
+            before_progression = (profile.get("level"), profile.get("xp"))
+            reconcile_level_xp(profile)
+            if (profile.get("level"), profile.get("xp")) != before_progression:
+                self.store.mark_dirty(key)
+
         if not self.lock.locked() and reconcile_expired_casino_escrow(
             profile,
             now=time.time(),
