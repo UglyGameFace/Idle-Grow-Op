@@ -96,7 +96,7 @@ jobs:
               async def list_guild_casino_leaderboard(self, guild_id, *, metric="casino_total_profit", limit=10):
                   return []
 
-              async def list_guild_notification_candidates(self, guild_id, *, limit=500):
+              async def list_notification_candidates(self, guild_ids):
                   return []
 
 
