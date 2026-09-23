@@ -30,6 +30,7 @@ CONSOLIDATED_GAMEPLAY_COMMANDS = {
 
 ADVERTISED_PUBLIC_COMMAND_PATHS = {
     "help",
+    "game",
     "start",
     "setup",
     "chat",
