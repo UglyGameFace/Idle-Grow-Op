@@ -275,7 +275,7 @@ async def on_ready():
     logger.info("Database: verified guild-scoped Supabase")
     logger.info("Loaded extensions: %s", ", ".join(sorted(bot.extensions)))
     logger.info("=" * 40)
-    await bot.change_presence(activity=discord.Game(name="/help • /start • Growing 🌿"))
+    await bot.change_presence(activity=discord.Game(name="/game • Growing 🌿"))
 
 
 async def load_extensions() -> None:
