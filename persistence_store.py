@@ -54,6 +54,12 @@ class ScopedRecordStore:
     def is_cached(self, key: RecordKey) -> bool:
         return key.cache_key in self._cache
 
+    def peek_cached(
+        self,
+        key: RecordKey,
+    ) -> MutableMapping[str, Any] | None:
+        return self._cache.get(key.cache_key)
+
     async def get(self, key: RecordKey) -> MutableMapping[str, Any]:
         cache_key = key.cache_key
         cached = self._cache.get(cache_key)
