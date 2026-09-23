@@ -33,6 +33,20 @@ HUB_PAGES = (
     ("settings", "Settings", "⚙️"),
 )
 
+CASINO_GAMES = (
+    ("slots", "Slots", "🎰"),
+    ("coinflip", "Coinflip", "🪙"),
+    ("blackjack", "Blackjack", "🃏"),
+    ("roulette", "Roulette", "🎡"),
+    ("dice", "Dice", "🎲"),
+    ("hilo", "HiLo", "📈"),
+    ("rps", "Rock Paper Scissors", "✊"),
+    ("cups", "Cups", "🥤"),
+    ("crash", "Crash", "🚀"),
+    ("wheel", "Wheel", "🎯"),
+    ("keno", "Keno", "🔢"),
+)
+
 SAFE_HUB_COMMANDS = frozenset(
     {
         "harvest",
@@ -68,6 +82,17 @@ SAFE_HUB_COMMANDS = frozenset(
         "leaderboard",
         "casino",
         "casinolb",
+        "coinflip",
+        "slots",
+        "dice",
+        "hilo",
+        "rps",
+        "cups",
+        "keno",
+        "crash",
+        "wheel",
+        "blackjack",
+        "roulette",
         "world-mode",
         "profile-settings",
         "help",
@@ -148,6 +173,7 @@ class HubPageSelect(discord.ui.Select):
         view.selected_seed = None
         view.selected_concentrate = None
         view.selected_steal_target = None
+        view.selected_casino_game = None
         await view.refresh(interaction)
 
 
@@ -497,6 +523,7 @@ class GameHubView(discord.ui.View):
         self.selected_seed: str | None = None
         self.selected_concentrate: str | None = None
         self.selected_steal_target = None
+        self.selected_casino_game: str | None = None
         self.message = None
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
