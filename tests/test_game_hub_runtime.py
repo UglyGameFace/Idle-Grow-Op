@@ -1,6 +1,13 @@
 from types import SimpleNamespace
 
-from game_hub import GameHub, SAFE_HUB_COMMANDS
+from game_hub import (
+    GameHub,
+    GameHubView,
+    HubConcentrateSelect,
+    HubStealTargetSelect,
+    SAFE_HUB_COMMANDS,
+)
+from utils import CONCENTRATE_TYPES
 from world_modes import GameScope, MODE_SERVER, POLICY_SERVER
 
 
@@ -79,3 +86,124 @@ def test_home_page_recommends_real_next_move_without_requiring_command_memory(mo
     assert "Recommended Next Move" in embed.fields[0].name
     assert "Play from this panel" in embed.fields[-1].name
     assert "memorize" in embed.fields[-1].value
+
+
+
+def _button(view, label):
+    return next(
+        item
+        for item in view.children
+        if getattr(item, "label", None) == label
+    )
+
+
+def test_hub_allowlist_includes_only_needed_direct_nested_player_actions():
+    assert "steal" in SAFE_HUB_COMMANDS
+    assert {
+        "crew create",
+        "crew join",
+        "crew leave",
+        "crew info",
+        "crew deposit",
+        "crew war",
+    } <= SAFE_HUB_COMMANDS
+
+
+def test_grow_inventory_and_lab_buttons_disable_when_action_has_no_work(monkeypatch):
+    monkeypatch.setattr("game_hub.time.time", lambda: 1_000.0)
+    profile = {
+        "grams": 500,
+        "level": 1,
+        "xp": 0,
+        "plants": [],
+        "items": {},
+        "flower_stash": {},
+        "processing_queue": [],
+    }
+
+    grow = GameHubView(SimpleNamespace(), 42, 123, page="grow")
+    grow.rebuild(scope(), profile, {})
+    assert _button(grow, "Harvest Ready").disabled is True
+
+    inventory = GameHubView(SimpleNamespace(), 42, 123, page="inventory")
+    inventory.rebuild(scope(), profile, {})
+    assert _button(inventory, "Sell All Flower").disabled is True
+    assert _button(inventory, "Collect Lab").disabled is True
+
+    lab = GameHubView(SimpleNamespace(), 42, 123, page="lab")
+    lab.rebuild(scope(), profile, {})
+    assert any(isinstance(item, HubConcentrateSelect) for item in lab.children)
+    assert _button(lab, "Start Batch").disabled is True
+
+    profile["plants"] = [
+        {"strain": "schwag", "planted_at": 0.0, "ready_at": 500.0}
+    ]
+    profile["flower_stash"] = {"schwag": 10}
+    profile["processing_queue"] = [{"finish_time": 900.0, "amount": 1, "type": "hash"}]
+    grow.rebuild(scope(), profile, {})
+    inventory.rebuild(scope(), profile, {})
+    assert _button(grow, "Harvest Ready").disabled is False
+    assert _button(inventory, "Sell All Flower").disabled is False
+    assert _button(inventory, "Collect Lab").disabled is False
+
+    lab.selected_concentrate = next(iter(CONCENTRATE_TYPES))
+    lab.rebuild(scope(), profile, {})
+    assert _button(lab, "Start Batch").disabled is False
+    assert _button(lab, "Collect Ready").disabled is False
+
+
+def test_social_page_changes_from_join_flow_to_member_controls():
+    profile = {
+        "grams": 100_000,
+        "level": 1,
+        "xp": 0,
+        "plants": [],
+        "items": {},
+    }
+    view = GameHubView(SimpleNamespace(), 42, 123, page="social")
+    view.rebuild(scope(), profile, {})
+
+    labels = {getattr(item, "label", None) for item in view.children}
+    assert "Create Crew" in labels
+    assert "Join Crew" in labels
+    assert "Crew Info" not in labels
+
+    profile["crew_id"] = "12345"
+    view.rebuild(scope(), profile, {})
+    labels = {getattr(item, "label", None) for item in view.children}
+    assert {"Crew Info", "Deposit", "Leave Crew", "Turf War"} <= labels
+    assert "Create Crew" not in labels
+
+
+def test_crime_page_uses_user_picker_and_only_enables_robbery_after_selection():
+    profile = {
+        "grams": 500,
+        "dirty_cash": 0,
+        "level": 1,
+        "xp": 0,
+        "plants": [],
+        "items": {},
+    }
+    view = GameHubView(SimpleNamespace(), 42, 123, page="crime")
+    view.rebuild(scope(), profile, {})
+
+    assert any(isinstance(item, HubStealTargetSelect) for item in view.children)
+    assert _button(view, "Rob Selected").disabled is True
+
+    view.selected_steal_target = SimpleNamespace(id=77)
+    view.rebuild(scope(), profile, {})
+    assert _button(view, "Rob Selected").disabled is False
+
+
+def test_home_page_exposes_one_tap_next_move():
+    profile = {
+        "grams": 500,
+        "level": 1,
+        "xp": 0,
+        "plants": [],
+        "items": {},
+    }
+    view = GameHubView(SimpleNamespace(), 42, 123, page="home")
+    view.rebuild(scope(), profile, {})
+
+    assert _button(view, "Do Next Move").disabled is False
