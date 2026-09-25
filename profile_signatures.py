@@ -1321,14 +1321,23 @@ class ProfileSignatures(commands.Cog):
         except GuildContextRequired as exc:
             await ctx.send(f"❌ {exc}.")
             return
-        if ctx.interaction is None:
+        interaction = getattr(ctx, "interaction", None)
+        if interaction is None:
             await ctx.send(
                 "🔒 Profile settings are private. Use `/profile-settings` in the server."
             )
             return
-        await ctx.defer(ephemeral=True)
+
+        defer = getattr(ctx, "defer", None)
+        owns_application_response = callable(defer)
+        if owns_application_response and not interaction.response.is_done():
+            await defer(ephemeral=True)
+
         embed, view = await self.build_settings_panel(guild_id, ctx.author.id)
-        await ctx.interaction.edit_original_response(embed=embed, view=view)
+        if owns_application_response:
+            await interaction.edit_original_response(embed=embed, view=view)
+            return
+        await ctx.send(embed=embed, view=view, ephemeral=True)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
