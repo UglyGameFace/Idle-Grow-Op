@@ -299,9 +299,15 @@ class ShopView(discord.ui.View):
         await self.refresh(interaction)
 
     async def close_button(self, interaction: discord.Interaction) -> None:
-        for child in self.children:
-            child.disabled = True
-        await interaction.response.edit_message(view=self)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        try:
+            if self.message is not None:
+                await self.message.delete()
+            else:
+                await interaction.delete_original_response()
+        except discord.NotFound:
+            pass
         self.stop()
 
     async def on_timeout(self) -> None:
