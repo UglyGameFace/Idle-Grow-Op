@@ -202,7 +202,11 @@ class OnboardingView(discord.ui.View):
                 pass
 
     async def _edit(self, interaction: discord.Interaction, embed: discord.Embed) -> None:
-        await interaction.response.edit_message(embed=embed, view=self)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        edited = await interaction.edit_original_response(embed=embed, view=self)
+        if edited is not None:
+            self.message = edited
 
     @discord.ui.button(label="Play Game", emoji="🎮", style=discord.ButtonStyle.success, row=1)
     async def play_game(
@@ -225,6 +229,8 @@ class OnboardingView(discord.ui.View):
         interaction: discord.Interaction,
         _button: discord.ui.Button,
     ) -> None:
+        if not interaction.response.is_done():
+            await interaction.response.defer()
         await self._edit(
             interaction,
             await self.cog.build_start_embed(self.guild_id, self.owner_id),
@@ -252,6 +258,8 @@ class OnboardingView(discord.ui.View):
         interaction: discord.Interaction,
         _button: discord.ui.Button,
     ) -> None:
+        if not interaction.response.is_done():
+            await interaction.response.defer()
         await self._edit(
             interaction,
             await self.cog.build_world_modes_embed(self.guild_id, self.owner_id),
@@ -476,12 +484,22 @@ class Onboarding(commands.Cog):
             await ctx.send("❌ Idle Grow guides can only be opened inside a server.")
             return
         view = OnboardingView(self, ctx.author.id, guild_id)
-        message = await ctx.send(
+        interaction = getattr(ctx, "interaction", None)
+        defer = getattr(ctx, "defer", None)
+        owns_application_response = interaction is not None and callable(defer)
+        if owns_application_response:
+            if not interaction.response.is_done():
+                await defer(ephemeral=True)
+            view.message = await interaction.edit_original_response(
+                embed=embed,
+                view=view,
+            )
+            return
+        view.message = await ctx.send(
             embed=embed,
             view=view,
-            ephemeral=ctx.interaction is not None,
+            ephemeral=interaction is not None,
         )
-        view.message = message
 
     @commands.hybrid_command(
         name="start",
@@ -491,6 +509,10 @@ class Onboarding(commands.Cog):
     @app_commands.guild_only()
     @commands.guild_only()
     async def start(self, ctx: commands.Context) -> None:
+        interaction = getattr(ctx, "interaction", None)
+        defer = getattr(ctx, "defer", None)
+        if interaction is not None and callable(defer) and not interaction.response.is_done():
+            await defer(ephemeral=True)
         await self._send_guide(
             ctx,
             await self.build_start_embed(ctx.guild.id, ctx.author.id),
