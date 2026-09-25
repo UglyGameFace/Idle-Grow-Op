@@ -13,7 +13,7 @@ This audit covers the complete Idle Grow repository and deployed behavior:
 - CI/tests, Discloud deployment assumptions, stale compatibility logic, temporary artifacts, duplicated ownership, and dead code
 
 ## Status
-PHASE 11 LIVE VALIDATION PENDING — SLASH-LAUNCH REGRESSION FIXED IN PR #34
+P0 LIVE OUTAGE — BOT-WIDE SLASH INTERACTIONS NOT ACKNOWLEDGING
 
 ## Phase 1 Complete: Command Surface and Runtime Baseline
 Validated on exact head cae20b52d942a6a21137005f53a5778ad03d2149 with CI run 690 successful.
@@ -388,6 +388,24 @@ Validation:
 - Repeated PR CI checkpoints are green through the direct hub, casino, guidance, and timeout work.
 - Exact gameplay UX code/test head 5948e859f87f573f29ae0ad513d7316b64972e87 passed PR CI run 892.
 
+## P0 Live Finding: Gateway Availability Coupled to Command Sync
+
+Observed:
+- Live Discord slash commands across the bot remain on **Sending command…**, not only `/game`.
+- This changes the incident from a Game Hub callback issue to a bot-wide interaction/runtime outage.
+
+Execution path:
+- `main()` loads extensions and calls `bot.start(TOKEN)`.
+- discord.py performs login, then awaits `setup_hook()`, and only after `setup_hook()` returns does it open the Discord gateway connection.
+- Idle Grow's `setup_hook()` previously awaited `sync_global_commands(self.tree)`.
+- Therefore any command-sync stall/failure could prevent the gateway from ever connecting while previously published slash commands remained visible in Discord.
+
+Required behavior:
+- Global command publication must remain one owned startup task, but it must not be allowed to hold the gateway connection hostage.
+- Sync failures must be logged and visible while the bot remains online using the previously published command surface.
+- The existing bounded sync validation remains authoritative; this is not a second sync implementation.
+- After deployment, verify the bot reaches `on_ready` and that a simple slash command acknowledges normally before resuming the narrower `/game` latency check.
+
 ## Phase 11 Validation Finding: Slash Launch Aliases
 
 Root cause:
@@ -443,4 +461,4 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - PR #32 merged the post-merge task-state correction; subsequent documentation-only commits do not change the validated PR #31 gameplay revision.
 
 ## Next Step
-Finish and validate the /menu and /play slash-publication fix, deploy it, then resume the remaining live Discord/Discloud validation checklist for PR #31. Do not start another project or unrelated Idle Grow redesign before this Phase 11 closure task is either completed or explicitly force-switched.
+Fix and validate the bot-wide startup/gateway interaction outage first. After the bot is confirmed to acknowledge ordinary slash commands again, resume the narrower /game response-latency and remaining Phase 11 live-validation checks. Do not start another project or unrelated Idle Grow redesign before this Phase 11 closure task is either completed or explicitly force-switched.
