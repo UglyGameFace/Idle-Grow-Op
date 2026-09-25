@@ -13,7 +13,7 @@ This audit covers the complete Idle Grow repository and deployed behavior:
 - CI/tests, Discloud deployment assumptions, stale compatibility logic, temporary artifacts, duplicated ownership, and dead code
 
 ## Status
-PHASE 11 LIVE VALIDATION — GAME HUB COMPONENT ACK CONTRACT IN PROGRESS
+PHASE 11 LIVE VALIDATION — PLAYER UI RESPONSE CONTRACT + REAL CLOSE IN PROGRESS
 
 ## Phase 1 Complete: Command Surface and Runtime Baseline
 Validated on exact head cae20b52d942a6a21137005f53a5778ad03d2149 with CI run 690 successful.
@@ -388,6 +388,27 @@ Validation:
 - Repeated PR CI checkpoints are green through the direct hub, casino, guidance, and timeout work.
 - Exact gameplay UX code/test head 5948e859f87f573f29ae0ad513d7316b64972e87 passed PR CI run 892.
 
+## Phase 11 Live Finding: Intermittent Player UI Timeouts + Fake Close
+
+Observed:
+- Live player interactions sometimes report that the bot did not respond in time, then work when pressed again after state/cache has warmed.
+- Game Hub and Shop Close buttons visibly disabled every control but left the private panel in place.
+
+Root causes:
+- Several player-facing surfaces still performed persistence/config work before their first Discord interaction acknowledgement, including notification toggles, player world-mode selection, onboarding state buttons, and profile/privacy saves.
+- Direct slash launches for /notifications, /world-mode, /start, and /profile-settings also had cold-state work before acknowledgement.
+- Hub and Shop Close implemented "disable controls + edit message + stop view", which is timeout behavior, not close behavior.
+
+Required contract:
+- Slow player interactions acknowledge first, then perform persistence/API work, then edit the acknowledged response.
+- Existing Hub-adapter invocation remains compatible and must not double-defer.
+- Close acknowledges immediately, deletes the owned private interaction message, and stops the view.
+- Timeouts may still disable expired controls; explicit Close must remove the panel.
+
+Implementation branch:
+- `fix/phase11-player-ui-response-contract`
+- Adds a cross-panel runtime regression suite covering delete-on-close and acknowledgement-before-state/mutation ordering.
+
 ## Phase 11 Follow-up: Hub Component Controls Must Share One Ack Contract
 
 Audit finding:
@@ -560,4 +581,4 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - PR #32 merged the post-merge task-state correction; subsequent documentation-only commits do not change the validated PR #31 gameplay revision.
 
 ## Next Step
-Validate and deploy the shared Game Hub component acknowledgement contract, then continue representative Grow, Market, Lab, Crime, Social/Crew, Casino, and Settings live checks.
+Validate and deploy the player UI response contract and real Close behavior, then resume representative Grow, Market, Lab, Crime, Social/Crew, Casino, and Settings live checks from fresh panels.
