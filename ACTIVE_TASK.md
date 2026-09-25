@@ -13,7 +13,7 @@ This audit covers the complete Idle Grow repository and deployed behavior:
 - CI/tests, Discloud deployment assumptions, stale compatibility logic, temporary artifacts, duplicated ownership, and dead code
 
 ## Status
-PHASE 11 VALIDATION FOUND SLASH-LAUNCH REGRESSION — FIX IN PROGRESS
+PHASE 11 LIVE VALIDATION PENDING — SLASH-LAUNCH REGRESSION FIXED IN PR #34
 
 ## Phase 1 Complete: Command Surface and Runtime Baseline
 Validated on exact head cae20b52d942a6a21137005f53a5778ad03d2149 with CI run 690 successful.
@@ -395,10 +395,16 @@ Root cause:
 - In discord.py, a HybridCommand constructs one application command using the wrapped command's single `name`; `aliases` belong to the text-command command map and do not create additional slash commands.
 - The loaded application-command tree regression only advertised `game`, so CI could pass while the task record incorrectly claimed `/menu` and `/play` existed.
 
-Required fix:
-- Register `game`, `menu`, and `play` as distinct hybrid commands that delegate to one shared hub-send implementation.
-- Add `menu` and `play` to the real loaded application-command tree contract so this cannot regress silently.
-- Preserve the single authoritative Game Hub implementation; do not duplicate gameplay or persistence behavior.
+Implemented in PR #34:
+- Registers `game`, `menu`, and `play` as distinct hybrid commands that delegate to one shared hub-send implementation.
+- Adds `menu` and `play` to the real loaded application-command tree contract so this cannot regress silently.
+- Adds a runtime regression proving all three command callbacks delegate to the same hub path.
+- Preserves the single authoritative Game Hub implementation; no gameplay or persistence behavior is duplicated.
+
+Closure criteria for this finding:
+- PR #34 exact-head CI must pass before merge.
+- The merged revision must deploy successfully through Discloud.
+- The live Discord command surface must show `/game`, `/menu`, and `/play`.
 
 ## Current Follow-up Next Step
 PR #31 is already merged to main at `4e9a100335e933efed3a570f058b7bc000632059`. Its exact source head `270c7e9a03173f550293368bdfdb268bcbe27e73` passed CI, and GitHub reports `discloud/commit` success for the merge commit. Continue with live Discord validation only: confirm the deployed bot publishes /game, /menu, /play, and /shop; exercise the interactive panels; verify a planted crop remains ready across a weather change; verify one legacy XP-overflow profile reconciles and persists correctly; and exercise representative direct hub actions before closing Phase 11.
