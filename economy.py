@@ -73,11 +73,13 @@ class ShopQuantitySelect(discord.ui.Select):
         item = SHOP_ITEMS.get(selected or "")
         item_type = str((item or {}).get("type", ""))
         repeatable = item_type == "seed"
+        cost = max(0, _shop_price(item or {}))
+        wallet = max(0, int(profile.get("grams", 0) or 0))
         options = [
             discord.SelectOption(
                 label="1",
                 value="1",
-                description="Buy one",
+                description=(f"${cost:,} total" if cost else "Buy one"),
                 default=view.purchase_quantity == "1",
             )
         ]
@@ -87,18 +89,20 @@ class ShopQuantitySelect(discord.ui.Select):
                     discord.SelectOption(
                         label=f"{amount}",
                         value=str(amount),
-                        description=f"Buy {amount} at once",
+                        description=f"${cost * amount:,} total",
                         default=view.purchase_quantity == str(amount),
                     )
                 )
-            options.append(
-                discord.SelectOption(
-                    label="Max Affordable",
-                    value="max",
-                    description="Buy as many as your wallet can afford",
-                    default=view.purchase_quantity == "max",
+            max_affordable = wallet // cost if cost > 0 else 0
+            if max_affordable > 0:
+                options.append(
+                    discord.SelectOption(
+                        label=f"Max Affordable • {max_affordable}"[:100],
+                        value="max",
+                        description=f"Spend ${cost * max_affordable:,}"[:100],
+                        default=view.purchase_quantity == "max",
+                    )
                 )
-            )
         super().__init__(
             placeholder=(
                 "Choose purchase quantity…"
@@ -480,14 +484,28 @@ class Economy(commands.Cog):
                 state = f"💸 Need ${cost - wallet:,} more"
             elif item.get("type") in {"equipment", "tool", "defense"} and owned:
                 state = "✅ Already owned"
-            quantity_label = (
-                "Max Affordable"
-                if selected_quantity == "max"
-                else f"x{max(1, int(selected_quantity or 1))}"
-            )
+            if item.get("type") == "seed":
+                if selected_quantity == "max":
+                    resolved_quantity = wallet // cost if cost > 0 else 1
+                    quantity_label = f"Max Affordable (x{resolved_quantity})"
+                else:
+                    try:
+                        resolved_quantity = max(1, int(selected_quantity or 1))
+                    except (TypeError, ValueError):
+                        resolved_quantity = 1
+                    quantity_label = f"x{resolved_quantity}"
+            else:
+                resolved_quantity = 1
+                quantity_label = "x1"
+
+            total_cost = cost * max(1, resolved_quantity)
+            if state == "✅ Available" and wallet < total_cost:
+                state = f"💸 Need ${total_cost - wallet:,} more"
+
             details = [
                 f"💰 **Price:** ${cost:,} each",
                 f"🧺 **Purchase Quantity:** {quantity_label}",
+                f"🧾 **Total:** ${total_cost:,}",
                 f"⭐ **Required Level:** {required}",
                 f"🎒 **Owned:** {owned}",
                 f"**Status:** {state}",
