@@ -39,6 +39,49 @@ def test_hub_allowlist_excludes_privileged_or_destructive_admin_surfaces():
     assert "setmoney" not in SAFE_HUB_COMMANDS
 
 
+def test_refresh_original_prefers_owned_interaction_message_for_ephemeral_hub():
+    class OwnedInteractionMessage:
+        def __init__(self):
+            self.edits = []
+
+        async def edit(self, **kwargs):
+            self.edits.append(kwargs)
+            return self
+
+    class ComponentMessage:
+        async def edit(self, **_kwargs):
+            raise AssertionError(
+                "component interaction.message must not be used to edit the ephemeral Hub"
+            )
+
+    async def scenario():
+        profile = {
+            "grams": 500,
+            "level": 1,
+            "xp": 0,
+            "plants": [],
+            "items": {},
+            "flower_stash": {},
+            "concentrates": {},
+        }
+        cog = SimpleNamespace(
+            state=AsyncMock(return_value=(scope(), profile, {})),
+            build_embed=lambda *_args, **_kwargs: "embed",
+        )
+        view = GameHubView(cog, 42, 123)
+        owned = OwnedInteractionMessage()
+        view.message = owned
+        interaction = SimpleNamespace(message=ComponentMessage())
+
+        await view.refresh_original(interaction)
+
+        cog.state.assert_awaited_once_with(123, 42)
+        assert owned.edits == [{"embed": "embed", "view": view}]
+        assert view.message is owned
+
+    asyncio.run(scenario())
+
+
 def test_component_hub_action_uses_context_checks_not_hybrid_baton():
     class ProbeCog(commands.Cog):
         def __init__(self):
