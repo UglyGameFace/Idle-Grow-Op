@@ -1242,9 +1242,15 @@ class GameHubView(discord.ui.View):
         if action == "refresh":
             return await self.refresh(interaction)
         if action == "close":
-            for item in self.children:
-                item.disabled = True
-            await interaction.response.edit_message(view=self)
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+            try:
+                if self.message is not None:
+                    await self.message.delete()
+                else:
+                    await interaction.delete_original_response()
+            except discord.NotFound:
+                pass
             self.stop()
             return
         if action == "shop":
