@@ -13,7 +13,7 @@ This audit covers the complete Idle Grow repository and deployed behavior:
 - CI/tests, Discloud deployment assumptions, stale compatibility logic, temporary artifacts, duplicated ownership, and dead code
 
 ## Status
-PHASE 11 LIVE VALIDATION — EPHEMERAL HUB REFRESH FAILURE FOUND
+PHASE 11 LIVE VALIDATION — SHOP INTERACTION ACK + BULK PURCHASE FIX IN PROGRESS
 
 ## Phase 1 Complete: Command Surface and Runtime Baseline
 Validated on exact head cae20b52d942a6a21137005f53a5778ad03d2149 with CI run 690 successful.
@@ -406,6 +406,25 @@ Required behavior:
 - The existing bounded sync validation remains authoritative; this is not a second sync implementation.
 - After deployment, verify the bot reaches `on_ready` and that a simple slash command acknowledges normally before resuming the narrower `/game` latency check.
 
+## Phase 11 Live Finding: Shop Purchase Interaction Expired Before Response
+
+Observed live error:
+- `ShopView.buy_selected` completed the purchase path and then failed in `interaction.response.edit_message()`.
+- Discord returned `404 / 10062 Unknown interaction`, followed by an unknown-view warning.
+
+Root cause:
+- Shop category/item/refresh/buy controls loaded scoped profile state before acknowledging their component interaction.
+- A component interaction must be acknowledged promptly; the shop's database and purchase work could outlive that response window.
+- After the delay, `interaction.response.edit_message()` attempted to answer an interaction Discord had already expired.
+
+Fix:
+- Shared ShopView refresh acknowledges the component immediately, then loads state and edits the owned shop message.
+- Buy Selected also acknowledges before profile/jail/purchase work.
+- Shop refresh prefers its owned response message so ephemeral shop panels use the correct interaction-message edit path.
+- Add a purchase quantity selector for repeatable seed purchases: 1, 5, 10, 25, 50, 100, or Max Affordable.
+- Bulk seed purchases mutate wallet/inventory/progression once atomically under the existing database lock instead of simulating repeated button presses.
+- Unique equipment/tools/defense and upgrade items remain single-purchase actions.
+
 ## Phase 11 Live Finding: Ephemeral Hub Refreshed Through the Wrong Message Object
 
 Observed live error:
@@ -498,4 +517,4 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - PR #32 merged the post-merge task-state correction; subsequent documentation-only commits do not change the validated PR #31 gameplay revision.
 
 ## Next Step
-Validate and deploy the ephemeral Hub refresh fix, then re-test Do Next Move plus the previously failing sell path and representative direct Hub actions. Resume remaining Phase 11 live validation only after the shared Hub execution and refresh paths are proven healthy.
+Validate and deploy the shop interaction-ack and bulk-purchase fix. Re-test selecting an item, choosing a quantity, purchasing once, refreshing, and closing from a fresh private shop panel; then continue the remaining Phase 11 Hub validation.
