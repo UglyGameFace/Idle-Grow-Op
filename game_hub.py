@@ -1618,9 +1618,7 @@ class GameHub(commands.Cog):
         )
         view.message = await interaction.original_response()
 
-    @commands.hybrid_command(name="game", aliases=["menu", "play"])
-    async def game(self, ctx):
-        """Open the private all-in-one player command center."""
+    async def _send_hub_context(self, ctx) -> None:
         guild_id = require_guild_id(ctx)
         scope, profile, world = await self.state(guild_id, ctx.author.id)
         view = GameHubView(self, ctx.author.id, guild_id)
@@ -1631,6 +1629,21 @@ class GameHub(commands.Cog):
             ephemeral=ctx.interaction is not None,
         )
         view.message = message
+
+    @commands.hybrid_command(name="game")
+    async def game(self, ctx):
+        """Open the private all-in-one player command center."""
+        await self._send_hub_context(ctx)
+
+    @commands.hybrid_command(name="menu")
+    async def menu(self, ctx):
+        """Open the same player command center as /game."""
+        await self._send_hub_context(ctx)
+
+    @commands.hybrid_command(name="play")
+    async def play(self, ctx):
+        """Open the same player command center as /game."""
+        await self._send_hub_context(ctx)
 
 
 async def setup(bot):
