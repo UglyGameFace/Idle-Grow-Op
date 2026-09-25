@@ -297,7 +297,7 @@ def test_onboarding_next_step_acknowledges_before_state_build():
                 return "next-panel"
 
         view = OnboardingView(Cog(), 42, 123)
-        await view.next_step(interaction, SimpleNamespace())
+        await view.next_step.callback(interaction)
 
         assert response.defer_calls == [{}]
         interaction.edit_original_response.assert_awaited_once()
