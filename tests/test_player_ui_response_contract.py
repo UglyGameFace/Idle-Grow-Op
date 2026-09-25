@@ -388,7 +388,7 @@ def test_profile_settings_toggle_acknowledges_before_privacy_mutation():
 
         view = ProfileSettingsView(Cog(), 42, 123, {}, {})
 
-        await ProfileSettingsView.toggle_global(view, interaction, SimpleNamespace())
+        await view.toggle_global.callback(interaction)
 
         assert response.defer_calls == [{}]
         interaction.edit_original_response.assert_awaited_once()
