@@ -381,13 +381,13 @@ def test_profile_settings_hub_adapter_keeps_followup_path_without_ctx_defer():
     async def scenario():
         response = ResponseStub()
         response.done = True
-        interaction = SimpleNamespace(response=response)
+        interaction_obj = SimpleNamespace(response=response)
         sent = []
 
         class HubLikeContext:
             guild = SimpleNamespace(id=123)
             author = SimpleNamespace(id=42)
-            interaction = interaction
+            interaction = interaction_obj
 
             async def send(self, *args, **kwargs):
                 sent.append((args, kwargs))
