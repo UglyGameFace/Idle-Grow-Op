@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 
 from guild_config import ERROR_LOG_CHANNEL_KEY, WORLD_SETTINGS_KEY
 from persistence_bootstrap import build_scoped_database
+from persistence_context import GuildContextRequired
 
 
 logging.basicConfig(
@@ -254,6 +255,9 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
         return await ctx.send("❌ You cannot use that command here.")
 
     original = getattr(error, "original", error)
+    if isinstance(original, GuildContextRequired):
+        return await ctx.send(f"❌ {original}.")
+
     guild_id = getattr(ctx.guild, "id", None)
     context = (
         f"command={getattr(ctx.command, 'qualified_name', 'unknown')} "
@@ -269,6 +273,17 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
 
 async def _tree_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     original = getattr(error, "original", error)
+    if isinstance(original, GuildContextRequired):
+        message = f"❌ {original}."
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except discord.HTTPException:
+            pass
+        return
+
     detail = (
         f"command={getattr(interaction.command, 'qualified_name', 'unknown')} "
         f"guild={interaction.guild_id} channel={interaction.channel_id} user={interaction.user.id} "
