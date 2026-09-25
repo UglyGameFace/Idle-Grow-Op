@@ -518,11 +518,12 @@ class _OpenProfileSettingsButton(discord.ui.Button):
                 ephemeral=True,
             )
             return
+        await interaction.response.defer(ephemeral=True, thinking=True)
         embed, view = await self.cog.build_settings_panel(
             self.guild_id,
             self.owner_id,
         )
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.edit_original_response(embed=embed, view=view)
 
 
 class PlatformEditModal(discord.ui.Modal):
@@ -577,6 +578,7 @@ class PlatformEditModal(discord.ui.Modal):
         except ValueError as exc:
             await interaction.response.send_message(f"❌ {exc}", ephemeral=True)
             return
+        await self.parent.acknowledge(interaction)
         await self.parent.cog.save_platform(
             self.parent.owner_id,
             self.platform_key,
@@ -625,6 +627,7 @@ class CustomPlatformModal(discord.ui.Modal, title="Edit Other Platform"):
         except ValueError as exc:
             await interaction.response.send_message(f"❌ {exc}", ephemeral=True)
             return
+        await self.parent.acknowledge(interaction)
         await self.parent.cog.save_platform(self.parent.owner_id, "custom", entry)
         await self.parent.refresh(interaction)
 
@@ -683,6 +686,7 @@ class GlobalVisibilitySelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        await self.parent_view.acknowledge(interaction)
         await self.parent_view.cog.update_global_privacy(
             self.parent_view.owner_id,
             visible_fields=set(self.values),
@@ -711,6 +715,7 @@ class ServerHiddenFieldsSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        await self.parent_view.acknowledge(interaction)
         await self.parent_view.cog.update_server_privacy(
             self.parent_view.guild_id,
             self.parent_view.owner_id,
@@ -743,6 +748,7 @@ class RemovePlatformSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        await self.parent_view.acknowledge(interaction)
         await self.parent_view.cog.remove_platform(
             self.parent_view.owner_id,
             self.values[0],
@@ -784,12 +790,17 @@ class ProfileSettingsView(discord.ui.View):
             return False
         return True
 
+    async def acknowledge(self, interaction: discord.Interaction) -> None:
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+
     async def refresh(self, interaction: discord.Interaction) -> None:
+        await self.acknowledge(interaction)
         embed, view = await self.cog.build_settings_panel(
             self.guild_id,
             self.owner_id,
         )
-        await interaction.response.edit_message(embed=embed, view=view)
+        await interaction.edit_original_response(embed=embed, view=view)
 
     @discord.ui.button(
         label="Toggle Everywhere",
@@ -802,6 +813,7 @@ class ProfileSettingsView(discord.ui.View):
         interaction: discord.Interaction,
         _button: discord.ui.Button,
     ) -> None:
+        await self.acknowledge(interaction)
         await self.cog.update_global_privacy(
             self.owner_id,
             signature_enabled=not self.global_enabled,
@@ -819,6 +831,7 @@ class ProfileSettingsView(discord.ui.View):
         interaction: discord.Interaction,
         _button: discord.ui.Button,
     ) -> None:
+        await self.acknowledge(interaction)
         await self.cog.update_server_privacy(
             self.guild_id,
             self.owner_id,
@@ -1313,8 +1326,9 @@ class ProfileSignatures(commands.Cog):
                 "🔒 Profile settings are private. Use `/profile-settings` in the server."
             )
             return
+        await ctx.defer(ephemeral=True)
         embed, view = await self.build_settings_panel(guild_id, ctx.author.id)
-        await ctx.send(embed=embed, view=view, ephemeral=True)
+        await ctx.interaction.edit_original_response(embed=embed, view=view)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
