@@ -157,20 +157,26 @@ class NotificationPreferencesView(discord.ui.View):
                 pass
 
     async def refresh(self, interaction: discord.Interaction) -> None:
+        if not interaction.response.is_done():
+            await interaction.response.defer()
         scope, preferences = await self.cog.get_state(
             self.guild_id,
             self.owner_id,
         )
-        await interaction.response.edit_message(
+        edited = await interaction.edit_original_response(
             embed=self.cog.build_panel(scope, preferences),
             view=self,
         )
+        if edited is not None:
+            self.message = edited
 
     async def toggle(
         self,
         interaction: discord.Interaction,
         target: str,
     ) -> None:
+        if not interaction.response.is_done():
+            await interaction.response.defer()
         await self.cog.toggle_preference(
             self.guild_id,
             self.owner_id,
@@ -318,18 +324,17 @@ class NotificationPreferencesCog(commands.Cog):
                 ephemeral=True,
             )
             return
+        await interaction.response.defer(ephemeral=True, thinking=True)
         scope, preferences = await self.get_state(guild_id, interaction.user.id)
         view = NotificationPreferencesView(
             self,
             interaction.user.id,
             guild_id,
         )
-        await interaction.response.send_message(
+        view.message = await interaction.edit_original_response(
             embed=self.build_panel(scope, preferences),
             view=view,
-            ephemeral=True,
         )
-        view.message = await interaction.original_response()
 
 
 async def setup(bot: commands.Bot) -> None:
