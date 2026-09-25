@@ -10,7 +10,11 @@ from notification_preferences import (
     NotificationPreferencesView,
 )
 from onboarding import Onboarding, OnboardingView
-from profile_signatures import ProfileSignatures, _OpenProfileSettingsButton
+from profile_signatures import (
+    ProfileSettingsView,
+    ProfileSignatures,
+    _OpenProfileSettingsButton,
+)
 from world_modes import PlayerWorldModeView, WorldModes
 
 
@@ -197,7 +201,7 @@ def test_world_mode_slash_launch_acknowledges_before_database_load(monkeypatch):
         )
         monkeypatch.setattr("world_modes.build_player_mode_embed", build_embed)
 
-        interaction = SimpleNamespace(
+        interaction_obj = SimpleNamespace(
             response=response,
             edit_original_response=AsyncMock(),
         )
@@ -205,7 +209,7 @@ def test_world_mode_slash_launch_acknowledges_before_database_load(monkeypatch):
         class Context:
             guild = SimpleNamespace(id=123)
             author = SimpleNamespace(id=42)
-            interaction = interaction
+            interaction = interaction_obj
 
             async def defer(self, **kwargs):
                 await response.defer(**kwargs)
@@ -218,7 +222,7 @@ def test_world_mode_slash_launch_acknowledges_before_database_load(monkeypatch):
         await WorldModes.world_mode.callback(cog, Context())
 
         assert response.defer_calls == [{"ephemeral": True}]
-        interaction.edit_original_response.assert_awaited_once()
+        interaction_obj.edit_original_response.assert_awaited_once()
 
     asyncio.run(scenario())
 
@@ -226,7 +230,7 @@ def test_world_mode_slash_launch_acknowledges_before_database_load(monkeypatch):
 def test_onboarding_start_acknowledges_before_state_build():
     async def scenario():
         response = ResponseStub()
-        interaction = SimpleNamespace(
+        interaction_obj = SimpleNamespace(
             response=response,
             edit_original_response=AsyncMock(return_value=SimpleNamespace()),
         )
@@ -234,7 +238,7 @@ def test_onboarding_start_acknowledges_before_state_build():
         class Context:
             guild = SimpleNamespace(id=123)
             author = SimpleNamespace(id=42)
-            interaction = interaction
+            interaction = interaction_obj
 
             async def defer(self, **kwargs):
                 await response.defer(**kwargs)
@@ -254,7 +258,7 @@ def test_onboarding_start_acknowledges_before_state_build():
         await Onboarding.start.callback(cog, Context())
 
         assert response.defer_calls == [{"ephemeral": True}]
-        interaction.edit_original_response.assert_awaited_once()
+        interaction_obj.edit_original_response.assert_awaited_once()
 
     asyncio.run(scenario())
 
@@ -311,7 +315,7 @@ def test_profile_settings_open_button_acknowledges_before_panel_build():
 def test_profile_settings_slash_launch_acknowledges_before_panel_build():
     async def scenario():
         response = ResponseStub()
-        interaction = SimpleNamespace(
+        interaction_obj = SimpleNamespace(
             response=response,
             edit_original_response=AsyncMock(),
         )
@@ -319,7 +323,7 @@ def test_profile_settings_slash_launch_acknowledges_before_panel_build():
         class Context:
             guild = SimpleNamespace(id=123)
             author = SimpleNamespace(id=42)
-            interaction = interaction
+            interaction = interaction_obj
 
             async def defer(self, **kwargs):
                 await response.defer(**kwargs)
@@ -339,6 +343,68 @@ def test_profile_settings_slash_launch_acknowledges_before_panel_build():
         await ProfileSignatures.profile_settings.callback(cog, Context())
 
         assert response.defer_calls == [{"ephemeral": True}]
+        interaction_obj.edit_original_response.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+def test_profile_settings_toggle_acknowledges_before_privacy_mutation():
+    async def scenario():
+        response = ResponseStub()
+        interaction = SimpleNamespace(
+            response=response,
+            edit_original_response=AsyncMock(),
+        )
+
+        class Cog:
+            async def update_global_privacy(self, user_id, **kwargs):
+                assert response.done is True
+                assert user_id == 42
+                assert kwargs == {"signature_enabled": False}
+
+            async def build_settings_panel(self, guild_id, user_id):
+                assert response.done is True
+                assert (guild_id, user_id) == (123, 42)
+                return "profile-panel", SimpleNamespace()
+
+        view = ProfileSettingsView(Cog(), 42, 123, {}, {})
+
+        await ProfileSettingsView.toggle_global(view, interaction, SimpleNamespace())
+
+        assert response.defer_calls == [{}]
         interaction.edit_original_response.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+def test_profile_settings_hub_adapter_keeps_followup_path_without_ctx_defer():
+    async def scenario():
+        response = ResponseStub()
+        response.done = True
+        interaction = SimpleNamespace(response=response)
+        sent = []
+
+        class HubLikeContext:
+            guild = SimpleNamespace(id=123)
+            author = SimpleNamespace(id=42)
+            interaction = interaction
+
+            async def send(self, *args, **kwargs):
+                sent.append((args, kwargs))
+                return SimpleNamespace()
+
+        cog = ProfileSignatures(SimpleNamespace())
+
+        async def build_settings_panel(guild_id, user_id):
+            assert response.done is True
+            assert (guild_id, user_id) == (123, 42)
+            return "profile-panel", SimpleNamespace()
+
+        cog.build_settings_panel = build_settings_panel
+
+        await ProfileSignatures.profile_settings.callback(cog, HubLikeContext())
+
+        assert len(sent) == 1
+        assert sent[0][1]["ephemeral"] is True
 
     asyncio.run(scenario())
