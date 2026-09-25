@@ -17,7 +17,9 @@ def test_onboarding_extension_replaces_the_missing_help_surface():
     assert 'name="help"' in ONBOARDING
     assert 'name="start"' in ONBOARDING
     assert "@app_commands.guild_only()" in ONBOARDING
-    assert "ephemeral=ctx.interaction is not None" in ONBOARDING
+    assert "await defer(ephemeral=True)" in ONBOARDING
+    assert "edit_original_response" in ONBOARDING
+    assert "ephemeral=interaction is not None" in ONBOARDING
 
 
 def test_onboarding_is_read_only_and_has_no_automatic_spam_listener():
