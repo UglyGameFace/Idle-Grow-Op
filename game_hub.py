@@ -1030,9 +1030,14 @@ class GameHubView(discord.ui.View):
     async def refresh_original(self, interaction: discord.Interaction) -> None:
         scope, profile, world = await self.state()
         self.rebuild(scope, profile, world)
-        message = interaction.message or self.message
+
+        # The Hub owns the InteractionMessage returned by the original ephemeral
+        # slash response. Component interactions also expose interaction.message,
+        # but discord.py treats that as a normal channel Message; editing it uses
+        # the channel-message endpoint and Discord returns 10008 for ephemerals.
+        message = self.message or interaction.message
         if message is not None:
-            await message.edit(
+            edited = await message.edit(
                 embed=self.cog.build_embed(
                     scope,
                     profile,
@@ -1042,6 +1047,8 @@ class GameHubView(discord.ui.View):
                 ),
                 view=self,
             )
+            if edited is not None:
+                self.message = edited
 
     async def open_shop(
         self,
