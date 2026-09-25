@@ -13,7 +13,7 @@ This audit covers the complete Idle Grow repository and deployed behavior:
 - CI/tests, Discloud deployment assumptions, stale compatibility logic, temporary artifacts, duplicated ownership, and dead code
 
 ## Status
-PR #31 MERGED + DISCLOUD COMMIT STATUS GREEN — LIVE DISCORD VALIDATION PENDING
+PHASE 11 VALIDATION FOUND SLASH-LAUNCH REGRESSION — FIX IN PROGRESS
 
 ## Phase 1 Complete: Command Surface and Runtime Baseline
 Validated on exact head cae20b52d942a6a21137005f53a5778ad03d2149 with CI run 690 successful.
@@ -388,6 +388,18 @@ Validation:
 - Repeated PR CI checkpoints are green through the direct hub, casino, guidance, and timeout work.
 - Exact gameplay UX code/test head 5948e859f87f573f29ae0ad513d7316b64972e87 passed PR CI run 892.
 
+## Phase 11 Validation Finding: Slash Launch Aliases
+
+Root cause:
+- PR #31 declared `@commands.hybrid_command(name="game", aliases=["menu", "play"])`.
+- In discord.py, a HybridCommand constructs one application command using the wrapped command's single `name`; `aliases` belong to the text-command command map and do not create additional slash commands.
+- The loaded application-command tree regression only advertised `game`, so CI could pass while the task record incorrectly claimed `/menu` and `/play` existed.
+
+Required fix:
+- Register `game`, `menu`, and `play` as distinct hybrid commands that delegate to one shared hub-send implementation.
+- Add `menu` and `play` to the real loaded application-command tree contract so this cannot regress silently.
+- Preserve the single authoritative Game Hub implementation; do not duplicate gameplay or persistence behavior.
+
 ## Current Follow-up Next Step
 PR #31 is already merged to main at `4e9a100335e933efed3a570f058b7bc000632059`. Its exact source head `270c7e9a03173f550293368bdfdb268bcbe27e73` passed CI, and GitHub reports `discloud/commit` success for the merge commit. Continue with live Discord validation only: confirm the deployed bot publishes /game, /menu, /play, and /shop; exercise the interactive panels; verify a planted crop remains ready across a weather change; verify one legacy XP-overflow profile reconciles and persists correctly; and exercise representative direct hub actions before closing Phase 11.
 
@@ -425,4 +437,4 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - PR #32 merged the post-merge task-state correction; subsequent documentation-only commits do not change the validated PR #31 gameplay revision.
 
 ## Next Step
-Finish the live Discord/Discloud validation checklist for PR #31. Do not start another project or unrelated Idle Grow redesign before this Phase 11 closure task is either completed or explicitly force-switched.
+Finish and validate the /menu and /play slash-publication fix, deploy it, then resume the remaining live Discord/Discloud validation checklist for PR #31. Do not start another project or unrelated Idle Grow redesign before this Phase 11 closure task is either completed or explicitly force-switched.
