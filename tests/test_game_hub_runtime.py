@@ -160,6 +160,105 @@ def test_component_hub_action_uses_context_checks_not_hybrid_baton():
     asyncio.run(scenario())
 
 
+def test_slash_game_launch_defers_before_loading_state():
+    class Context:
+        def __init__(self):
+            self.guild = SimpleNamespace(id=123)
+            self.author = SimpleNamespace(id=42)
+            self.deferred = False
+            self.sent = []
+            self.interaction = SimpleNamespace(
+                edit_original_response=AsyncMock(
+                    return_value=SimpleNamespace(edit=AsyncMock())
+                )
+            )
+
+        async def defer(self, *, ephemeral=False):
+            assert ephemeral is True
+            self.deferred = True
+
+        async def send(self, **kwargs):
+            self.sent.append(kwargs)
+            return SimpleNamespace()
+
+    async def scenario():
+        bot = SimpleNamespace()
+        cog = GameHub(bot)
+        ctx = Context()
+
+        async def state(guild_id, user_id):
+            assert ctx.deferred is True
+            assert (guild_id, user_id) == (123, 42)
+            return scope(), {
+                "grams": 500,
+                "level": 1,
+                "xp": 0,
+                "plants": [],
+                "items": {},
+                "flower_stash": {},
+                "concentrates": {},
+            }, {}
+
+        cog.state = state
+        await cog._send_hub_context(ctx)
+
+        assert ctx.sent == []
+        ctx.interaction.edit_original_response.assert_awaited_once()
+        kwargs = ctx.interaction.edit_original_response.await_args.kwargs
+        assert isinstance(kwargs["view"], GameHubView)
+
+    asyncio.run(scenario())
+
+
+def test_onboarding_game_launch_defers_component_before_loading_state():
+    class Response:
+        def __init__(self):
+            self.deferred = False
+
+        async def defer(self, *, ephemeral=False, thinking=False):
+            assert ephemeral is True
+            assert thinking is True
+            self.deferred = True
+
+        async def send_message(self, *args, **kwargs):
+            raise AssertionError("guild Hub launch should defer, not send before state load")
+
+    async def scenario():
+        bot = SimpleNamespace()
+        cog = GameHub(bot)
+        response = Response()
+        interaction = SimpleNamespace(
+            guild_id=123,
+            user=SimpleNamespace(id=42),
+            response=response,
+            edit_original_response=AsyncMock(
+                return_value=SimpleNamespace(edit=AsyncMock())
+            ),
+        )
+
+        async def state(guild_id, user_id):
+            assert response.deferred is True
+            assert (guild_id, user_id) == (123, 42)
+            return scope(), {
+                "grams": 500,
+                "level": 1,
+                "xp": 0,
+                "plants": [],
+                "items": {},
+                "flower_stash": {},
+                "concentrates": {},
+            }, {}
+
+        cog.state = state
+        await cog.send_hub_interaction(interaction)
+
+        interaction.edit_original_response.assert_awaited_once()
+        kwargs = interaction.edit_original_response.await_args.kwargs
+        assert isinstance(kwargs["view"], GameHubView)
+
+    asyncio.run(scenario())
+
+
 def test_game_menu_and_play_launchers_delegate_to_one_hub_path():
     async def scenario():
         cog = GameHub(SimpleNamespace())
