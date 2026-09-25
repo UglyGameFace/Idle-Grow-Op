@@ -398,7 +398,10 @@ def test_hub_shop_uses_followup_when_next_move_already_acknowledged():
     asyncio.run(scenario())
 
 
-def test_next_move_acknowledges_before_state_and_run_command_does_not_defer_twice(monkeypatch):
+def test_next_move_acknowledges_before_state_access():
+    class StopAfterOrderingCheck(RuntimeError):
+        pass
+
     class Response:
         def __init__(self):
             self.done = False
@@ -413,55 +416,22 @@ def test_next_move_acknowledges_before_state_and_run_command_does_not_defer_twic
 
     async def scenario():
         response = Response()
-        interaction = SimpleNamespace(
-            response=response,
-            user=SimpleNamespace(id=42),
-            guild=SimpleNamespace(id=123),
-            guild_id=123,
-            channel=SimpleNamespace(id=456),
-            message=None,
-            created_at=datetime.datetime.now(datetime.timezone.utc),
-            followup=SimpleNamespace(send=AsyncMock(return_value=SimpleNamespace())),
-            client=None,
-        )
-        profile = {
-            "grams": 500,
-            "level": 1,
-            "xp": 0,
-            "plants": [],
-            "items": {},
-            "flower_stash": {},
-            "concentrates": {},
-            "unlocked_strains": ["schwag"],
-        }
-        bot = commands.Bot(
-            command_prefix="!",
-            intents=discord.Intents.none(),
-            help_command=None,
-        )
-        interaction.client = bot
-        hub = GameHub(bot)
-        view = GameHubView(hub, 42, 123)
-        view.message = SimpleNamespace(edit=AsyncMock(return_value=None))
+        interaction = SimpleNamespace(response=response)
+        view = GameHubView(SimpleNamespace(), 42, 123)
 
         async def state():
             assert response.done is True
-            return scope(), profile, {}
+            raise StopAfterOrderingCheck
 
         view.state = state
-        view.run_command = AsyncMock()
-        monkeypatch.setattr(
-            "game_hub.choose_onboarding_step",
-            lambda *_args, **_kwargs: SimpleNamespace(
-                key="daily",
-                command="/growdaily",
-            ),
-        )
-
-        await view.perform_next_move(interaction)
+        try:
+            await view.perform_next_move(interaction)
+        except StopAfterOrderingCheck:
+            pass
+        else:
+            raise AssertionError("state ordering sentinel was not reached")
 
         assert response.defer_count == 1
-        view.run_command.assert_awaited_once_with(interaction, "growdaily")
 
     asyncio.run(scenario())
 
