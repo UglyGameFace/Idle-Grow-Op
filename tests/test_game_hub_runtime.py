@@ -1,5 +1,6 @@
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from game_hub import (
     GameHub,
@@ -31,6 +32,23 @@ def test_hub_allowlist_excludes_privileged_or_destructive_admin_surfaces():
     assert "sync" not in SAFE_HUB_COMMANDS
     assert "wipeuser" not in SAFE_HUB_COMMANDS
     assert "setmoney" not in SAFE_HUB_COMMANDS
+
+
+def test_game_menu_and_play_launchers_delegate_to_one_hub_path():
+    async def scenario():
+        cog = GameHub(SimpleNamespace())
+        ctx = SimpleNamespace()
+        shared = AsyncMock()
+        cog._send_hub_context = shared
+
+        await GameHub.game.callback(cog, ctx)
+        await GameHub.menu.callback(cog, ctx)
+        await GameHub.play.callback(cog, ctx)
+
+        assert shared.await_count == 3
+        assert all(call.args == (ctx,) for call in shared.await_args_list)
+
+    asyncio.run(scenario())
 
 
 def test_grow_page_uses_stable_ready_at_after_weather_changes(monkeypatch):
