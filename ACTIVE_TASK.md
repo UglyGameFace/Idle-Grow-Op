@@ -13,7 +13,7 @@ This audit covers the complete Idle Grow repository and deployed behavior:
 - CI/tests, Discloud deployment assumptions, stale compatibility logic, temporary artifacts, duplicated ownership, and dead code
 
 ## Status
-PHASE 11 LIVE VALIDATION — SHOP INTERACTION ACK + BULK PURCHASE FIX IN PROGRESS
+PHASE 11 LIVE VALIDATION — SERVER-ONLY DM REJECTION LOGGING FIX IN PROGRESS
 
 ## Phase 1 Complete: Command Surface and Runtime Baseline
 Validated on exact head cae20b52d942a6a21137005f53a5778ad03d2149 with CI run 690 successful.
@@ -388,6 +388,20 @@ Validation:
 - Repeated PR CI checkpoints are green through the direct hub, casino, guidance, and timeout work.
 - Exact gameplay UX code/test head 5948e859f87f573f29ae0ad513d7316b64972e87 passed PR CI run 892.
 
+## Phase 11 Live Finding: Expected DM Rejection Was Logged as a Production Error
+
+Observed post-PR #38:
+- A prefix `harvest` invocation arrived with `guild=None`.
+- `require_guild_id()` correctly raised `GuildContextRequired` because Idle Grow save state is guild-scoped.
+- The global prefix error handler treated that expected server-only rejection as an unexpected command failure and logged it at ERROR level.
+
+Fix:
+- Unwrap command errors before reporting.
+- Treat `GuildContextRequired` as a normal user-facing rejection for both prefix and slash commands.
+- Reply that Idle Grow game commands can only be used inside a server.
+- Do not send expected DM/server-context rejections through the production error reporter.
+- Preserve the existing guild-scoped persistence boundary; do not create or infer DM save state.
+
 ## P0 Live Finding: Gateway Availability Coupled to Command Sync
 
 Observed:
@@ -517,4 +531,4 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - PR #32 merged the post-merge task-state correction; subsequent documentation-only commits do not change the validated PR #31 gameplay revision.
 
 ## Next Step
-Validate and deploy the shop interaction-ack and bulk-purchase fix. Re-test selecting an item, choosing a quantity, purchasing once, refreshing, and closing from a fresh private shop panel; then continue the remaining Phase 11 Hub validation.
+Validate and deploy clean server-only DM rejection handling. Then continue the remaining Phase 11 live validation using fresh post-deployment interactions only.
