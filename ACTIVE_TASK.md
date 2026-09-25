@@ -13,7 +13,7 @@ This audit covers the complete Idle Grow repository and deployed behavior:
 - CI/tests, Discloud deployment assumptions, stale compatibility logic, temporary artifacts, duplicated ownership, and dead code
 
 ## Status
-PHASE 11 LIVE VALIDATION — COLD LAUNCH ACK HARDENING IN PROGRESS
+PHASE 11 LIVE VALIDATION — GAME HUB COMPONENT ACK CONTRACT IN PROGRESS
 
 ## Phase 1 Complete: Command Surface and Runtime Baseline
 Validated on exact head cae20b52d942a6a21137005f53a5778ad03d2149 with CI run 690 successful.
@@ -388,6 +388,20 @@ Validation:
 - Repeated PR CI checkpoints are green through the direct hub, casino, guidance, and timeout work.
 - Exact gameplay UX code/test head 5948e859f87f573f29ae0ad513d7316b64972e87 passed PR CI run 892.
 
+## Phase 11 Follow-up: Hub Component Controls Must Share One Ack Contract
+
+Audit finding:
+- Hub page Refresh, Do Next Move, Shop/Seed Shop/Equipment Shop, and Notifications could still perform scoped persistence reads before acknowledging their component interaction.
+- Do Next Move can dispatch into `run_command()`, so acknowledging early without changing `run_command()` would cause a second-response `InteractionResponded` failure.
+
+Hardening:
+- Hub refresh/navigation defers the component update before state reload.
+- Do Next Move defers the component update before choosing the next step.
+- `run_command()` only defers when the interaction is still unacknowledged.
+- Shop and Notifications defer an ephemeral response before persistence loads when they own the response.
+- If an upstream action already acknowledged the interaction, Shop/Notifications use an ephemeral followup instead of answering twice.
+- Regression coverage verifies acknowledgement ordering, owned-response vs followup routing, and no double-defer behavior.
+
 ## Phase 11 Follow-up: Cold Launches Must Acknowledge Before Persistence Loads
 
 Reason:
@@ -546,4 +560,4 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - PR #32 merged the post-merge task-state correction; subsequent documentation-only commits do not change the validated PR #31 gameplay revision.
 
 ## Next Step
-Validate and deploy cold-launch acknowledgement hardening, then continue the remaining Phase 11 live checks from fresh /game and /shop panels.
+Validate and deploy the shared Game Hub component acknowledgement contract, then continue representative Grow, Market, Lab, Crime, Social/Crew, Casino, and Settings live checks.
