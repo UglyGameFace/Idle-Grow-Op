@@ -13,7 +13,7 @@ This audit covers the complete Idle Grow repository and deployed behavior:
 - CI/tests, Discloud deployment assumptions, stale compatibility logic, temporary artifacts, duplicated ownership, and dead code
 
 ## Status
-PHASE 11 LIVE VALIDATION — GAME HUB COMPONENT ACTION CHECK FAILURE FOUND
+PHASE 11 LIVE VALIDATION — EPHEMERAL HUB REFRESH FAILURE FOUND
 
 ## Phase 1 Complete: Command Surface and Runtime Baseline
 Validated on exact head cae20b52d942a6a21137005f53a5778ad03d2149 with CI run 690 successful.
@@ -406,6 +406,25 @@ Required behavior:
 - The existing bounded sync validation remains authoritative; this is not a second sync implementation.
 - After deployment, verify the bot reaches `on_ready` and that a simple slash command acknowledges normally before resuming the narrower `/game` latency check.
 
+## Phase 11 Live Finding: Ephemeral Hub Refreshed Through the Wrong Message Object
+
+Observed live error:
+- After `Do Next Move` successfully executed its underlying action, the Hub failed in `refresh_original()`.
+- discord.py attempted `Message.edit()` through the normal channel-message endpoint and Discord returned `404 / 10008 Unknown Message`.
+- A later interaction warned that the view reference was unknown.
+
+Root cause:
+- The original `/game` response is ephemeral and the Hub stores its returned `InteractionMessage` in `self.message`.
+- discord.py overrides `InteractionMessage.edit()` to use `Interaction.edit_original_response()`, the correct webhook route for ephemeral messages.
+- `refresh_original()` incorrectly preferred `interaction.message` over `self.message`.
+- For component interactions, `interaction.message` behaves as a normal `Message`, so its edit path used the channel-message REST endpoint, where ephemeral messages do not exist.
+
+Fix:
+- Prefer the Hub-owned `self.message` for post-action refreshes.
+- Fall back to `interaction.message` only when no owned interaction response is available.
+- Retain the updated returned InteractionMessage after a successful edit.
+- Add a regression that makes component-message editing fail intentionally and proves the owned InteractionMessage is used instead.
+
 ## Phase 11 Live Finding: Component Actions Entered the Wrong Hybrid Check Path
 
 Observed live error:
@@ -479,4 +498,4 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - PR #32 merged the post-merge task-state correction; subsequent documentation-only commits do not change the validated PR #31 gameplay revision.
 
 ## Next Step
-Validate and deploy the Game Hub component-check fix, then re-test the previously failing Hub sell action and representative direct Hub actions. Resume remaining Phase 11 live validation only after the shared Hub execution path is proven healthy.
+Validate and deploy the ephemeral Hub refresh fix, then re-test Do Next Move plus the previously failing sell path and representative direct Hub actions. Resume remaining Phase 11 live validation only after the shared Hub execution and refresh paths are proven healthy.
