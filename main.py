@@ -131,9 +131,33 @@ async def sync_global_commands(
 
 
 class IdleGrowBot(commands.Bot):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.command_sync_task: asyncio.Task | None = None
+        self.command_sync_succeeded: bool | None = None
+
+    async def _sync_commands_background(self) -> None:
+        try:
+            await sync_global_commands(self.tree)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.command_sync_succeeded = False
+            logger.exception(
+                "Global command sync failed after login; "
+                "continuing with the Discord gateway so existing commands stay usable"
+            )
+        else:
+            self.command_sync_succeeded = True
+
     async def setup_hook(self) -> None:
-        """Use Discord.py's one-time startup hook to publish slash commands."""
-        await sync_global_commands(self.tree)
+        """Start command publication without blocking the Discord gateway connection."""
+        if self.command_sync_task is not None:
+            raise RuntimeError("command sync task already scheduled")
+        self.command_sync_task = asyncio.create_task(
+            self._sync_commands_background(),
+            name="idle-grow-command-sync",
+        )
 
 
 intents = discord.Intents.default()
@@ -274,6 +298,16 @@ async def on_ready():
     logger.info("Discord.py: %s", discord.__version__)
     logger.info("Database: verified guild-scoped Supabase")
     logger.info("Loaded extensions: %s", ", ".join(sorted(bot.extensions)))
+    logger.info(
+        "Command sync: %s",
+        (
+            "success"
+            if bot.command_sync_succeeded is True
+            else "failed; gateway kept online"
+            if bot.command_sync_succeeded is False
+            else "still running"
+        ),
+    )
     logger.info("=" * 40)
     await bot.change_presence(activity=discord.Game(name="/game • Growing 🌿"))
 

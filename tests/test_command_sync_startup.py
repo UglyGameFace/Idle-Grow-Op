@@ -1,8 +1,6 @@
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
-
 import discord
 import pytest
 
@@ -219,18 +217,58 @@ def test_global_sync_blocks_startup_after_bounded_failures(monkeypatch):
     assert tree.sync_calls == main.COMMAND_SYNC_ATTEMPTS
 
 
-def test_native_setup_hook_uses_the_canonical_sync_path(monkeypatch):
-    sync = AsyncMock(return_value=command_set())
-    monkeypatch.setattr(main, "sync_global_commands", sync)
-    bot = main.IdleGrowBot(
-        command_prefix="!",
-        intents=discord.Intents.none(),
-        help_command=None,
-    )
+def test_setup_hook_schedules_sync_without_blocking_gateway(monkeypatch):
+    async def scenario():
+        started = asyncio.Event()
+        release = asyncio.Event()
 
-    asyncio.run(bot.setup_hook())
+        async def sync(tree):
+            assert tree is bot.tree
+            started.set()
+            await release.wait()
+            return command_set()
 
-    sync.assert_awaited_once_with(bot.tree)
+        monkeypatch.setattr(main, "sync_global_commands", sync)
+        bot = main.IdleGrowBot(
+            command_prefix="!",
+            intents=discord.Intents.none(),
+            help_command=None,
+        )
+
+        await bot.setup_hook()
+        await asyncio.wait_for(started.wait(), timeout=1)
+
+        assert bot.command_sync_task is not None
+        assert not bot.command_sync_task.done()
+        assert bot.command_sync_succeeded is None
+
+        release.set()
+        await bot.command_sync_task
+
+        assert bot.command_sync_succeeded is True
+
+    asyncio.run(scenario())
+
+
+def test_background_sync_failure_does_not_abort_bot_startup(monkeypatch):
+    async def scenario():
+        async def fail_sync(_tree):
+            raise RuntimeError("simulated Discord sync failure")
+
+        monkeypatch.setattr(main, "sync_global_commands", fail_sync)
+        bot = main.IdleGrowBot(
+            command_prefix="!",
+            intents=discord.Intents.none(),
+            help_command=None,
+        )
+
+        await bot.setup_hook()
+        assert bot.command_sync_task is not None
+        await bot.command_sync_task
+
+        assert bot.command_sync_succeeded is False
+
+    asyncio.run(scenario())
 
 
 class SmokeBackend:
@@ -327,8 +365,13 @@ def test_extensions_load_before_start_and_sync_is_not_repeated_in_on_ready():
     source = (ROOT / "main.py").read_text(encoding="utf-8")
     assert source.index("await load_extensions()") < source.index("await bot.start(TOKEN)")
 
+    setup_hook = source.split("async def setup_hook", 1)[1].split(
+        "intents = discord.Intents.default()", 1
+    )[0]
     on_ready = source.split("async def on_ready", 1)[1].split(
         "async def load_extensions", 1
     )[0]
+
+    assert "asyncio.create_task" in setup_hook
+    assert "await sync_global_commands" not in setup_hook
     assert "tree.sync" not in on_ready
-    assert "async def setup_hook" in source
