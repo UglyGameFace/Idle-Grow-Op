@@ -63,7 +63,58 @@ class ShopCategorySelect(discord.ui.Select):
         view = self.view
         view.category = self.values[0]
         view.selected_item = None
+        view.purchase_quantity = "1"
         await view.refresh(interaction)
+
+
+class ShopQuantitySelect(discord.ui.Select):
+    def __init__(self, view: "ShopView", profile: dict) -> None:
+        selected = view.selected_item
+        item = SHOP_ITEMS.get(selected or "")
+        item_type = str((item or {}).get("type", ""))
+        repeatable = item_type == "seed"
+        options = [
+            discord.SelectOption(
+                label="1",
+                value="1",
+                description="Buy one",
+                default=view.purchase_quantity == "1",
+            )
+        ]
+        if repeatable:
+            for amount in (5, 10, 25, 50, 100):
+                options.append(
+                    discord.SelectOption(
+                        label=f"{amount}",
+                        value=str(amount),
+                        description=f"Buy {amount} at once",
+                        default=view.purchase_quantity == str(amount),
+                    )
+                )
+            options.append(
+                discord.SelectOption(
+                    label="Max Affordable",
+                    value="max",
+                    description="Buy as many as your wallet can afford",
+                    default=view.purchase_quantity == "max",
+                )
+            )
+        super().__init__(
+            placeholder=(
+                "Choose purchase quantity…"
+                if repeatable
+                else "Quantity • unique/upgrades buy one at a time"
+            ),
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=2,
+            disabled=selected is None or not repeatable,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        self.view.purchase_quantity = self.values[0]
+        await self.view.refresh(interaction)
 
 
 class ShopItemSelect(discord.ui.Select):
@@ -110,6 +161,7 @@ class ShopItemSelect(discord.ui.Select):
         view = self.view
         value = self.values[0]
         view.selected_item = None if value == "__none__" else value
+        view.purchase_quantity = "1"
         await view.refresh(interaction)
 
 
@@ -129,6 +181,7 @@ class ShopView(discord.ui.View):
         self.guild_id = int(guild_id)
         self.category = category if category in {"all", "seeds", "equipment", "misc"} else "all"
         self.selected_item: str | None = None
+        self.purchase_quantity: str = "1"
         self.message = None
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -150,12 +203,13 @@ class ShopView(discord.ui.View):
         self.clear_items()
         self.add_item(ShopCategorySelect(self))
         self.add_item(ShopItemSelect(self, profile))
+        self.add_item(ShopQuantitySelect(self, profile))
 
         buy = discord.ui.Button(
             label="Buy Selected",
             emoji="💳",
             style=discord.ButtonStyle.success,
-            row=2,
+            row=3,
             disabled=self.selected_item is None,
         )
         buy.callback = self.buy_selected
@@ -165,7 +219,7 @@ class ShopView(discord.ui.View):
             label="Refresh",
             emoji="🔄",
             style=discord.ButtonStyle.secondary,
-            row=2,
+            row=3,
         )
         refresh.callback = self.refresh_button
         self.add_item(refresh)
@@ -174,7 +228,7 @@ class ShopView(discord.ui.View):
             label="Close",
             emoji="✖️",
             style=discord.ButtonStyle.danger,
-            row=2,
+            row=3,
         )
         close.callback = self.close_button
         self.add_item(close)
@@ -188,6 +242,9 @@ class ShopView(discord.ui.View):
         *,
         notice: str | None = None,
     ) -> None:
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+
         scope, profile = await self.state()
         self.rebuild(profile)
         embed = self.cog.build_shop_embed(
@@ -195,9 +252,14 @@ class ShopView(discord.ui.View):
             profile,
             category=self.category,
             selected_item=self.selected_item,
+            selected_quantity=self.purchase_quantity,
             notice=notice,
         )
-        await interaction.response.edit_message(embed=embed, view=self)
+        message = self.message or interaction.message
+        if message is not None:
+            edited = await message.edit(embed=embed, view=self)
+            if edited is not None:
+                self.message = edited
 
     async def buy_selected(self, interaction: discord.Interaction) -> None:
         if not self.selected_item:
@@ -205,17 +267,27 @@ class ShopView(discord.ui.View):
                 "Choose an item first.",
                 ephemeral=True,
             )
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+
         scope, profile = await self.state()
         if jail_left_seconds(profile) > 0:
-            return await interaction.response.send_message(
-                "🚔 You cannot shop while jailed.",
-                ephemeral=True,
+            return await self.refresh(
+                interaction,
+                notice="🚔 You cannot shop while jailed.",
             )
+
+        quantity = self.cog.resolve_shop_quantity(
+            profile,
+            self.selected_item,
+            self.purchase_quantity,
+        )
         _success, message = await self.cog._purchase_item(
             scope,
             profile,
             self.owner_id,
             self.selected_item,
+            quantity=quantity,
         )
         await self.refresh(interaction, notice=message)
 
@@ -376,6 +448,7 @@ class Economy(commands.Cog):
         *,
         category: str = "all",
         selected_item: str | None = None,
+        selected_quantity: str = "1",
         notice: str | None = None,
     ) -> discord.Embed:
         wallet = max(0, int(profile.get("grams", 0) or 0))
@@ -407,8 +480,14 @@ class Economy(commands.Cog):
                 state = f"💸 Need ${cost - wallet:,} more"
             elif item.get("type") in {"equipment", "tool", "defense"} and owned:
                 state = "✅ Already owned"
+            quantity_label = (
+                "Max Affordable"
+                if selected_quantity == "max"
+                else f"x{max(1, int(selected_quantity or 1))}"
+            )
             details = [
-                f"💰 **Price:** ${cost:,}",
+                f"💰 **Price:** ${cost:,} each",
+                f"🧺 **Purchase Quantity:** {quantity_label}",
                 f"⭐ **Required Level:** {required}",
                 f"🎒 **Owned:** {owned}",
                 f"**Status:** {state}",
@@ -445,12 +524,38 @@ class Economy(commands.Cog):
         embed.set_footer(text="Shop panel expires after 5 minutes.")
         return embed
 
+    def resolve_shop_quantity(
+        self,
+        profile: dict,
+        item_name: str,
+        selection: str,
+    ) -> int:
+        clean_name = str(item_name or "").lower().strip()
+        item = SHOP_ITEMS.get(clean_name)
+        if item is None:
+            return 1
+        if str(item.get("type", "")) != "seed":
+            return 1
+
+        cost = _shop_price(item)
+        if cost <= 0:
+            return 1
+        if str(selection or "1") == "max":
+            balance = max(0, int(profile.get("grams", 0) or 0))
+            return max(1, balance // cost)
+        try:
+            return max(1, int(selection))
+        except (TypeError, ValueError):
+            return 1
+
     async def _purchase_item(
         self,
         scope,
         user: dict,
         user_id: int,
         item_name: str,
+        *,
+        quantity: int = 1,
     ) -> tuple[bool, str]:
         clean_name = str(item_name or "").lower().strip()
         item = SHOP_ITEMS.get(clean_name)
@@ -459,6 +564,14 @@ class Economy(commands.Cog):
         cost = _shop_price(item)
         if cost < 0:
             return False, "❌ This item is currently unavailable."
+        try:
+            purchase_quantity = int(quantity)
+        except (TypeError, ValueError):
+            return False, "❌ Purchase quantity must be a positive whole number."
+        if purchase_quantity <= 0:
+            return False, "❌ Purchase quantity must be a positive whole number."
+        if item.get("type") != "seed" and purchase_quantity != 1:
+            return False, "❌ That item can only be purchased one at a time."
         if int(user.get("level", 1) or 1) < int(item.get("level_req", 1) or 1):
             return False, f"🔒 **{clean_name.title()}** is level locked."
 
@@ -470,8 +583,9 @@ class Economy(commands.Cog):
             ):
                 purchase_error = f"✅ You already own **{clean_name.title()}**."
             balance = max(0, int(user.get("grams", 0) or 0))
-            if purchase_error is None and balance < cost:
-                purchase_error = f"💸 You need **${cost - balance:,}** more."
+            total_cost = cost * purchase_quantity
+            if purchase_error is None and balance < total_cost:
+                purchase_error = f"💸 You need **${total_cost - balance:,}** more."
             new_capacity = None
             if purchase_error is None and item.get("type") == "pot_upgrade":
                 try:
@@ -481,17 +595,21 @@ class Economy(commands.Cog):
                         "🚫 You already own the maximum number of that pot upgrade."
                     )
             if purchase_error is None:
-                user["grams"] = balance - cost
-                inv_add(user, clean_name, 1)
+                user["grams"] = balance - total_cost
+                inv_add(user, clean_name, purchase_quantity)
                 if new_capacity is not None:
                     user["max_pots"] = new_capacity
-                add_progress(user, "buy", 1, user_id=int(user_id))
+                add_progress(user, "buy", purchase_quantity, user_id=int(user_id))
                 check_achievements(user)
                 self.bot.db.mark_profile_dirty(scope.scope_id, int(user_id))
 
         if purchase_error:
             return False, purchase_error
-        return True, f"✅ Bought **{clean_name.title()}** for **${cost:,}**."
+        quantity_prefix = f"{purchase_quantity}x " if purchase_quantity > 1 else ""
+        return True, (
+            f"✅ Bought **{quantity_prefix}{clean_name.title()}** "
+            f"for **${cost * purchase_quantity:,}**."
+        )
 
     @commands.hybrid_command(name="shop", aliases=["store"])
     async def shop(self, ctx, category: str = "all"):
