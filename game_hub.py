@@ -1617,30 +1617,42 @@ class GameHub(commands.Cog):
                 "❌ The game menu can only be used inside a server.",
                 ephemeral=True,
             )
+
+        # A button interaction has the same short acknowledgement window as a slash
+        # command. A cold scope/profile/world load must never consume that window.
+        await interaction.response.defer(ephemeral=True, thinking=True)
         scope, profile, world = await self.state(
             interaction.guild_id,
             interaction.user.id,
         )
         view = GameHubView(self, interaction.user.id, interaction.guild_id)
         view.rebuild(scope, profile, world)
-        await interaction.response.send_message(
+        view.message = await interaction.edit_original_response(
             embed=self.build_embed(scope, profile, world),
             view=view,
-            ephemeral=True,
         )
-        view.message = await interaction.original_response()
 
     async def _send_hub_context(self, ctx) -> None:
         guild_id = require_guild_id(ctx)
+        interaction = ctx.interaction
+        if interaction is not None:
+            await ctx.defer(ephemeral=True)
+
         scope, profile, world = await self.state(guild_id, ctx.author.id)
         view = GameHubView(self, ctx.author.id, guild_id)
         view.rebuild(scope, profile, world)
-        message = await ctx.send(
+
+        if interaction is not None:
+            view.message = await interaction.edit_original_response(
+                embed=self.build_embed(scope, profile, world),
+                view=view,
+            )
+            return
+
+        view.message = await ctx.send(
             embed=self.build_embed(scope, profile, world),
             view=view,
-            ephemeral=ctx.interaction is not None,
         )
-        view.message = message
 
     @commands.hybrid_command(name="game")
     async def game(self, ctx):

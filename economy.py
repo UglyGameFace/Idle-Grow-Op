@@ -632,6 +632,10 @@ class Economy(commands.Cog):
     @commands.hybrid_command(name="shop", aliases=["store"])
     async def shop(self, ctx, category: str = "all"):
         guild_id = require_guild_id(ctx)
+        interaction = ctx.interaction
+        if interaction is not None:
+            await ctx.defer(ephemeral=True)
+
         scope, profile = await self._profile(ctx)
         normalized = str(category or "all").lower().strip()
         if normalized not in {"all", "seeds", "equipment", "misc"}:
@@ -644,10 +648,17 @@ class Economy(commands.Cog):
         )
         view.rebuild(profile)
         embed = self.build_shop_embed(scope, profile, category=normalized)
+
+        if interaction is not None:
+            view.message = await interaction.edit_original_response(
+                embed=embed,
+                view=view,
+            )
+            return
+
         view.message = await ctx.send(
             embed=embed,
             view=view,
-            ephemeral=ctx.interaction is not None,
         )
 
     @commands.hybrid_command(name="buy")

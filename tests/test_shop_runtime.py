@@ -159,6 +159,48 @@ def test_shop_view_has_category_item_and_transaction_controls():
     assert {"Buy Selected", "Refresh", "Close"} <= labels
 
 
+def test_slash_shop_launch_defers_before_profile_load():
+    class Context:
+        def __init__(self):
+            self.guild = SimpleNamespace(id=123)
+            self.author = SimpleNamespace(id=42)
+            self.deferred = False
+            self.sent = []
+            self.interaction = SimpleNamespace(
+                edit_original_response=AsyncMock(
+                    return_value=SimpleNamespace(edit=AsyncMock())
+                )
+            )
+
+        async def defer(self, *, ephemeral=False):
+            assert ephemeral is True
+            self.deferred = True
+
+        async def send(self, **kwargs):
+            self.sent.append(kwargs)
+            return SimpleNamespace()
+
+    async def scenario():
+        cog = Economy(SimpleNamespace(db=MemoryDatabase()))
+        ctx = Context()
+        scope = SimpleNamespace(scope_id=123, emoji="🏙️", label="Current Server World")
+        profile = {"grams": 500, "level": 1, "items": {}}
+
+        async def profile_for_context(_ctx):
+            assert ctx.deferred is True
+            return scope, profile
+
+        cog._profile = profile_for_context
+        await Economy.shop.callback(cog, ctx, "all")
+
+        assert ctx.sent == []
+        ctx.interaction.edit_original_response.assert_awaited_once()
+        kwargs = ctx.interaction.edit_original_response.await_args.kwargs
+        assert isinstance(kwargs["view"], ShopView)
+
+    asyncio.run(scenario())
+
+
 def test_shop_buy_defers_before_state_load_and_refreshes_owned_panel(monkeypatch):
     class Response:
         def __init__(self):
