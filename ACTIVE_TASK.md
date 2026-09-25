@@ -13,7 +13,7 @@ This audit covers the complete Idle Grow repository and deployed behavior:
 - CI/tests, Discloud deployment assumptions, stale compatibility logic, temporary artifacts, duplicated ownership, and dead code
 
 ## Status
-P0 LIVE OUTAGE — BOT-WIDE SLASH INTERACTIONS NOT ACKNOWLEDGING
+PHASE 11 LIVE VALIDATION — GAME HUB COMPONENT ACTION CHECK FAILURE FOUND
 
 ## Phase 1 Complete: Command Surface and Runtime Baseline
 Validated on exact head cae20b52d942a6a21137005f53a5778ad03d2149 with CI run 690 successful.
@@ -406,6 +406,24 @@ Required behavior:
 - The existing bounded sync validation remains authoritative; this is not a second sync implementation.
 - After deployment, verify the bot reaches `on_ready` and that a simple slash command acknowledges normally before resuming the narrower `/game` latency check.
 
+## Phase 11 Live Finding: Component Actions Entered the Wrong Hybrid Check Path
+
+Observed live error:
+- Game Hub action `sell` failed inside `command.can_run(ctx)`.
+- Economy.cog_check received discord.py's `_MissingSentinel` instead of the Hub context and then failed on `ctx.send`.
+
+Root cause:
+- `HubInteractionContext` intentionally retains the originating component interaction so Hub callbacks can send private followups.
+- `HybridCommand.can_run()` sees any non-null `ctx.interaction` and switches to `HybridAppCommand._check_can_run()`.
+- discord.py's hybrid application-command check path reads `interaction._baton`, which is populated for true slash-command invocation but not for button/select/modal component interactions.
+- Hub component actions therefore entered a check path whose required Context baton did not exist.
+
+Fix:
+- Keep the restricted Hub context and existing allowlist.
+- Run the public `commands.Command.can_run(command, ctx)` implementation explicitly so bot checks, cog checks, and command predicates evaluate against the real Hub context.
+- Preserve the command's existing cooldown handling and authoritative callback.
+- Add an end-to-end runtime regression using a component-like interaction with a missing baton, proving cog_check and the callback both receive `HubInteractionContext`.
+
 ## Phase 11 Validation Finding: Slash Launch Aliases
 
 Root cause:
@@ -461,4 +479,4 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - PR #32 merged the post-merge task-state correction; subsequent documentation-only commits do not change the validated PR #31 gameplay revision.
 
 ## Next Step
-Fix and validate the bot-wide startup/gateway interaction outage first. After the bot is confirmed to acknowledge ordinary slash commands again, resume the narrower /game response-latency and remaining Phase 11 live-validation checks. Do not start another project or unrelated Idle Grow redesign before this Phase 11 closure task is either completed or explicitly force-switched.
+Validate and deploy the Game Hub component-check fix, then re-test the previously failing Hub sell action and representative direct Hub actions. Resume remaining Phase 11 live validation only after the shared Hub execution path is proven healthy.

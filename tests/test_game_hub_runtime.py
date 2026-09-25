@@ -1,9 +1,14 @@
 import asyncio
+import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import discord
+from discord.ext import commands
+
 from game_hub import (
     GameHub,
+    HubInteractionContext,
     CASINO_GAMES,
     GameHubView,
     HubCasinoGameSelect,
@@ -32,6 +37,84 @@ def test_hub_allowlist_excludes_privileged_or_destructive_admin_surfaces():
     assert "sync" not in SAFE_HUB_COMMANDS
     assert "wipeuser" not in SAFE_HUB_COMMANDS
     assert "setmoney" not in SAFE_HUB_COMMANDS
+
+
+def test_component_hub_action_uses_context_checks_not_hybrid_baton():
+    class ProbeCog(commands.Cog):
+        def __init__(self):
+            self.seen_check_context = None
+            self.callback_context = None
+
+        async def cog_check(self, ctx):
+            self.seen_check_context = ctx
+            return getattr(getattr(ctx, "guild", None), "id", None) == 123
+
+        @commands.hybrid_command(name="help")
+        async def help_command(self, ctx):
+            self.callback_context = ctx
+            await ctx.send("ok")
+
+    class Response:
+        def __init__(self):
+            self.done = False
+
+        def is_done(self):
+            return self.done
+
+        async def defer(self, **_kwargs):
+            self.done = True
+
+        async def send_message(self, **_kwargs):
+            self.done = True
+
+    class Followup:
+        def __init__(self):
+            self.messages = []
+
+        async def send(self, content=None, **kwargs):
+            self.messages.append((content, kwargs))
+            return SimpleNamespace()
+
+    async def scenario():
+        bot = commands.Bot(
+            command_prefix="!",
+            intents=discord.Intents.none(),
+            help_command=None,
+        )
+        probe = ProbeCog()
+        await bot.add_cog(probe)
+        command = bot.get_command("help")
+        assert command is not None
+
+        response = Response()
+        followup = Followup()
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=42),
+            guild=SimpleNamespace(id=123),
+            guild_id=123,
+            channel=SimpleNamespace(id=456),
+            message=None,
+            created_at=datetime.datetime.now(datetime.timezone.utc),
+            response=response,
+            followup=followup,
+            client=bot,
+            # Component interactions never receive the Context baton that
+            # HybridAppCommand._check_can_run expects.
+            _baton=discord.utils.MISSING,
+        )
+
+        game_hub = GameHub(bot)
+        view = GameHubView(game_hub, 42, 123)
+        view.refresh_original = AsyncMock()
+
+        await view.run_command(interaction, "help")
+
+        assert isinstance(probe.seen_check_context, HubInteractionContext)
+        assert probe.callback_context is probe.seen_check_context
+        assert followup.messages[0][0] == "ok"
+        view.refresh_original.assert_awaited_once_with(interaction)
+
+    asyncio.run(scenario())
 
 
 def test_game_menu_and_play_launchers_delegate_to_one_hub_path():

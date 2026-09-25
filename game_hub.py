@@ -1115,7 +1115,12 @@ class GameHubView(discord.ui.View):
         await interaction.response.defer(ephemeral=True, thinking=True)
         ctx = HubInteractionContext(self.cog.bot, interaction, command)
         try:
-            if not await command.can_run(ctx):
+            # Hub actions originate from component/modal interactions, not slash-command
+            # invocations. HybridCommand.can_run() switches to discord.py's app-command
+            # path whenever ctx.interaction is present; that path expects interaction._baton
+            # to contain a real commands.Context, which component interactions do not have.
+            # Run the normal Command check pipeline explicitly against our restricted context.
+            if not await commands.Command.can_run(command, ctx):
                 raise commands.CheckFailure("command check failed")
             command._prepare_cooldowns(ctx)
             await command.callback(command.cog, ctx, **kwargs)
