@@ -15,7 +15,12 @@ from profile_signatures import (
     ProfileSignatures,
     _OpenProfileSettingsButton,
 )
-from world_modes import PlayerWorldModeView, WorldModes
+from world_modes import (
+    POLICY_CHOICE,
+    WORLD_MODE_CONFIG_KEY,
+    PlayerWorldModeView,
+    WorldModes,
+)
 
 
 class ResponseStub:
@@ -141,25 +146,40 @@ def test_notifications_slash_launch_acknowledges_before_state_load():
     asyncio.run(scenario())
 
 
-def test_player_world_selection_acknowledges_before_mode_mutation(monkeypatch):
+def test_player_world_selection_acknowledges_before_mode_mutation():
     async def scenario():
         response = ResponseStub()
-        choose_calls = []
 
-        async def choose_player_mode(_db, guild_id, user_id, mode):
-            assert response.done is True
-            choose_calls.append((guild_id, user_id, mode))
+        class Database:
+            def __init__(self):
+                self.lock = asyncio.Lock()
+                self.world = {
+                    WORLD_MODE_CONFIG_KEY: {
+                        "policy": POLICY_CHOICE,
+                        "default_player_mode": "solo",
+                        "switch_cooldown_seconds": 604800,
+                        "configured": True,
+                    }
+                }
+                self.profile = {}
+                self.dirty = []
 
-        async def build_embed(_db, _guild, user_id):
-            assert response.done is True
-            assert user_id == 42
-            return "world-panel"
+            async def get_world(self, guild_id):
+                assert response.done is True
+                assert guild_id == 123
+                return self.world
 
-        monkeypatch.setattr("world_modes.choose_player_mode", choose_player_mode)
-        monkeypatch.setattr("world_modes.build_player_mode_embed", build_embed)
+            async def get_profile(self, guild_id, user_id):
+                assert response.done is True
+                assert (guild_id, user_id) == (123, 42)
+                return self.profile
 
+            def mark_profile_dirty(self, guild_id, user_id):
+                self.dirty.append((guild_id, user_id))
+
+        db = Database()
         bot = SimpleNamespace(
-            db=object(),
+            db=db,
             get_cog=lambda _name: None,
         )
         cog = SimpleNamespace(bot=bot)
@@ -168,38 +188,37 @@ def test_player_world_selection_acknowledges_before_mode_mutation(monkeypatch):
             response=response,
             followup=SimpleNamespace(send=AsyncMock()),
             edit_original_response=AsyncMock(),
-            guild=SimpleNamespace(id=123),
+            guild=SimpleNamespace(id=123, name="Test Server"),
         )
 
         await view._select(interaction, "solo")
 
         assert response.defer_calls == [{}]
-        assert choose_calls == [(123, 42, "solo")]
+        assert db.profile["world_mode_selection"]["mode"] == "solo"
+        assert db.dirty == [(123, 42)]
         interaction.edit_original_response.assert_awaited_once()
 
     asyncio.run(scenario())
 
 
-def test_world_mode_slash_launch_acknowledges_before_database_load(monkeypatch):
+def test_world_mode_slash_launch_acknowledges_before_database_load():
     async def scenario():
         response = ResponseStub()
 
         class Database:
+            def __init__(self):
+                self.world = {}
+                self.profile = {}
+
             async def get_world(self, guild_id):
                 assert response.done is True
                 assert guild_id == 123
-                return {}
+                return self.world
 
-        async def build_embed(_db, _guild, user_id):
-            assert response.done is True
-            assert user_id == 42
-            return "world-panel"
-
-        monkeypatch.setattr(
-            "world_modes.normalize_world_mode_config",
-            lambda _world: {"policy": "server"},
-        )
-        monkeypatch.setattr("world_modes.build_player_mode_embed", build_embed)
+            async def get_profile(self, guild_id, user_id):
+                assert response.done is True
+                assert (guild_id, user_id) == (123, 42)
+                return self.profile
 
         interaction_obj = SimpleNamespace(
             response=response,
@@ -207,7 +226,7 @@ def test_world_mode_slash_launch_acknowledges_before_database_load(monkeypatch):
         )
 
         class Context:
-            guild = SimpleNamespace(id=123)
+            guild = SimpleNamespace(id=123, name="Test Server")
             author = SimpleNamespace(id=42)
             interaction = interaction_obj
 
