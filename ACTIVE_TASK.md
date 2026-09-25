@@ -13,7 +13,7 @@ This audit covers the complete Idle Grow repository and deployed behavior:
 - CI/tests, Discloud deployment assumptions, stale compatibility logic, temporary artifacts, duplicated ownership, and dead code
 
 ## Status
-SOURCE / CI AUDIT COMPLETE + EGRESS HARDENED — DEPLOYMENT VALIDATION BLOCKED
+PR #31 MERGED + DISCLOUD COMMIT STATUS GREEN — LIVE DISCORD VALIDATION PENDING
 
 ## Phase 1 Complete: Command Surface and Runtime Baseline
 Validated on exact head cae20b52d942a6a21137005f53a5778ad03d2149 with CI run 690 successful.
@@ -66,6 +66,12 @@ Cleanup:
 - Runtime behavior outranks static source-contract tests.
 - No unrelated redesign while a defect/ownership question is unresolved.
 - Preserve unrelated user work and existing production data semantics unless an intentional migration is proven necessary.
+
+## Active Task Lock
+- Active task: close PR #31 through post-merge production validation of the gameplay UX and harvest-consistency overhaul.
+- Idle Grow remains the only active implementation task until this Definition of Done is satisfied.
+- Unrelated projects, bugs, redesigns, or cleanup are backlog-only unless explicitly force-switched.
+- Scope includes exact merged-revision evidence, live command publication, /game and /shop behavior, stable harvest readiness across weather changes, legacy XP reconciliation, representative direct hub actions, cleanup, and final task-record closure.
 
 ## Validation Required Before Completion
 - Every production module compiles.
@@ -383,7 +389,7 @@ Validation:
 - Exact gameplay UX code/test head 5948e859f87f573f29ae0ad513d7316b64972e87 passed PR CI run 892.
 
 ## Current Follow-up Next Step
-Validate this documentation-only checkpoint, mark PR #31 ready, merge with expected-head protection, verify post-merge main CI, then live-validate the GitHub-connected Discloud deployment including /game, /shop, stable harvest behavior, command sync, and repaired profile XP.
+PR #31 is already merged to main at `4e9a100335e933efed3a570f058b7bc000632059`. Its exact source head `270c7e9a03173f550293368bdfdb268bcbe27e73` passed CI, and GitHub reports `discloud/commit` success for the merge commit. Continue with live Discord validation only: confirm the deployed bot publishes /game, /menu, /play, and /shop; exercise the interactive panels; verify a planted crop remains ready across a weather change; verify one legacy XP-overflow profile reconciles and persists correctly; and exercise representative direct hub actions before closing Phase 11.
 
 ## Cleanup / Conflict Review
 COMPLETE for repository source and CI scope.
@@ -398,25 +404,25 @@ Verified:
 - No unrelated repository, generated artifact, secret file, local database, backup file, or conflict artifact was introduced by the audit.
 
 ## Blockers / Risks
-- **DEPLOYMENT BLOCKER:** Production Supabase must apply `migrations/003_atomic_scoped_record_batch.sql` before this branch is deployed. Schema verification intentionally rejects production schema version 002.
-- **LIVE VALIDATION BLOCKER:** The connected tools do not currently expose the deployed Discloud file revision, startup logs, or live command-sync output. GitHub CI cannot prove the live incident is resolved.
+- **LIVE VALIDATION BLOCKER:** The connected GitHub tooling exposes Discloud's successful commit deployment status but not the authenticated Discloud startup log or a live Discord client session. Source/CI evidence therefore cannot by itself prove the new interactions work in the deployed guild.
 - ScopedRecordStore still caches every loaded mutable record for process lifetime. Naive LRU/TTL eviction is unsafe because callers retain live mutable references across awaits; this remains a scalability architecture item rather than a correctness patch.
 - Runtime legacy world-mode compatibility is intentionally retained until production data can prove no pre-world-mode guild records remain.
 
 ## Backlog Within This Master Audit
-Repository/source audit work is complete. Remaining closure work is external deployment validation:
-- apply and verify production Supabase migration 003
-- deploy only the migration-compatible audited revision
-- verify Discloud starts cleanly against schema 003
-- verify global command sync publishes the exact local tree
-- exercise representative live commands from farming, economy, progression, crime, gambling, setup, notifications, Sesh, and profile signatures
-- capture the deployed revision/startup evidence in this task before marking the live incident resolved
+Repository/source audit work is complete. Production Supabase migrations 003 and 004 were already applied before PR #31. Remaining Phase 11 closure work is live behavior validation:
+- confirm the deployed bot exposes /game, /menu, /play, and the interactive /shop
+- verify stable harvest readiness across a real weather change
+- verify one legacy XP-overflow profile reconciles and persists correctly
+- exercise representative direct game-hub actions across Grow, Lab, Market, Crime, Social/Crew, and Casino
+- capture live startup/command evidence when available before marking Phase 11 complete
 - treat mutable-record cache eviction/scalability as a separate follow-up architecture task after production correctness is verified
 
 ## Git State
-- Base: main @ af81d32378afdc46a6da9915b06985d8777d0f79
-- Audit branch: fix/idle-grow-master-audit
-- No open PR at audit start.
+- Current main: `4e9a100335e933efed3a570f058b7bc000632059` (PR #31 merge commit).
+- PR #31 source head: `270c7e9a03173f550293368bdfdb268bcbe27e73`.
+- Exact PR #31 source head CI: successful.
+- Merge-commit Discloud status: successful.
+- Task-record correction branch: `docs/idle-grow-post-merge-live-validation`.
 
 ## Next Step
-Complete the PR #31 exact-head validation and merge/live-validation sequence described in Phase 11 above.
+Finish the live Discord/Discloud validation checklist for PR #31. Do not start another project or unrelated Idle Grow redesign before this Phase 11 closure task is either completed or explicitly force-switched.
