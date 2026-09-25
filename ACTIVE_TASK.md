@@ -418,11 +418,11 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - treat mutable-record cache eviction/scalability as a separate follow-up architecture task after production correctness is verified
 
 ## Git State
-- Current main: `4e9a100335e933efed3a570f058b7bc000632059` (PR #31 merge commit).
+- PR #31 gameplay merge commit: `4e9a100335e933efed3a570f058b7bc000632059`.
 - PR #31 source head: `270c7e9a03173f550293368bdfdb268bcbe27e73`.
 - Exact PR #31 source head CI: successful.
-- Merge-commit Discloud status: successful.
-- Task-record correction branch: `docs/idle-grow-post-merge-live-validation`.
+- PR #31 gameplay merge-commit Discloud status: successful.
+- PR #32 merged the post-merge task-state correction; subsequent documentation-only commits do not change the validated PR #31 gameplay revision.
 
 ## Next Step
 Finish the live Discord/Discloud validation checklist for PR #31. Do not start another project or unrelated Idle Grow redesign before this Phase 11 closure task is either completed or explicitly force-switched.
