@@ -13,7 +13,7 @@ This audit covers the complete Idle Grow repository and deployed behavior:
 - CI/tests, Discloud deployment assumptions, stale compatibility logic, temporary artifacts, duplicated ownership, and dead code
 
 ## Status
-PHASE 11 LIVE VALIDATION — SERVER-ONLY DM REJECTION LOGGING FIX IN PROGRESS
+PHASE 11 LIVE VALIDATION — COLD LAUNCH ACK HARDENING IN PROGRESS
 
 ## Phase 1 Complete: Command Surface and Runtime Baseline
 Validated on exact head cae20b52d942a6a21137005f53a5778ad03d2149 with CI run 690 successful.
@@ -388,6 +388,21 @@ Validation:
 - Repeated PR CI checkpoints are green through the direct hub, casino, guidance, and timeout work.
 - Exact gameplay UX code/test head 5948e859f87f573f29ae0ad513d7316b64972e87 passed PR CI run 892.
 
+## Phase 11 Follow-up: Cold Launches Must Acknowledge Before Persistence Loads
+
+Reason:
+- Earlier live testing showed slash commands sitting on Discord's **Sending command…** state.
+- The bot-wide gateway and component failures are fixed, but `/game`, `/menu`, `/play`, `/shop`, and onboarding's **Play Game** button still loaded scoped persistence before their first interaction acknowledgement.
+- Warm cache timing can hide this. A cold Supabase load can reintroduce interaction expiry without any logic error in the eventual command body.
+
+Hardening:
+- Interaction-based Game Hub launches defer privately before scope/profile/world loading.
+- Interaction-based Shop launches defer privately before profile loading.
+- Onboarding Play Game defers as an ephemeral thinking response before the same Hub state load.
+- Each path edits its original deferred response when ready, preserving one private panel instead of creating duplicate followups.
+- Prefix commands retain their ordinary send behavior.
+- Runtime regressions assert that state/profile loading does not begin until the interaction has been acknowledged.
+
 ## Phase 11 Live Finding: Expected DM Rejection Was Logged as a Production Error
 
 Observed post-PR #38:
@@ -531,4 +546,4 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - PR #32 merged the post-merge task-state correction; subsequent documentation-only commits do not change the validated PR #31 gameplay revision.
 
 ## Next Step
-Validate and deploy clean server-only DM rejection handling. Then continue the remaining Phase 11 live validation using fresh post-deployment interactions only.
+Validate and deploy cold-launch acknowledgement hardening, then continue the remaining Phase 11 live checks from fresh /game and /shop panels.
