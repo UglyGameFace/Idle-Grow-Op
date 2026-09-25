@@ -1,8 +1,6 @@
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
-
 import discord
 import pytest
 
