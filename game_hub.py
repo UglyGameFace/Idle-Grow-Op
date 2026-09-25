@@ -1014,18 +1014,9 @@ class GameHubView(discord.ui.View):
         )
 
     async def refresh(self, interaction: discord.Interaction) -> None:
-        scope, profile, world = await self.state()
-        self.rebuild(scope, profile, world)
-        await interaction.response.edit_message(
-            embed=self.cog.build_embed(
-                scope,
-                profile,
-                world,
-                page=self.page,
-                selected_seed=self.selected_seed,
-            ),
-            view=self,
-        )
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await self.refresh_original(interaction)
 
     async def refresh_original(self, interaction: discord.Interaction) -> None:
         scope, profile, world = await self.state()
@@ -1058,10 +1049,21 @@ class GameHubView(discord.ui.View):
     ) -> None:
         economy = self.cog.bot.get_cog("Economy")
         if economy is None:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "⚠️ Shop is temporarily unavailable.",
+                    ephemeral=True,
+                )
+                return
             return await interaction.response.send_message(
                 "⚠️ Shop is temporarily unavailable.",
                 ephemeral=True,
             )
+
+        response_owned = not interaction.response.is_done()
+        if response_owned:
+            await interaction.response.defer(ephemeral=True, thinking=True)
+
         scope, profile = await economy._profile_for(self.guild_id, self.owner_id)
         view = ShopView(
             economy,
@@ -1070,36 +1072,64 @@ class GameHubView(discord.ui.View):
             category=category,
         )
         view.rebuild(profile)
-        await interaction.response.send_message(
-            embed=economy.build_shop_embed(
-                scope,
-                profile,
-                category=category,
-            ),
-            view=view,
-            ephemeral=True,
+        embed = economy.build_shop_embed(
+            scope,
+            profile,
+            category=category,
         )
-        view.message = await interaction.original_response()
+        if response_owned:
+            view.message = await interaction.edit_original_response(
+                embed=embed,
+                view=view,
+            )
+        else:
+            view.message = await interaction.followup.send(
+                embed=embed,
+                view=view,
+                ephemeral=True,
+                wait=True,
+            )
 
     async def open_notifications(self, interaction: discord.Interaction) -> None:
         notifications = self.cog.bot.get_cog("NotificationPreferencesCog")
         if notifications is None:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "⚠️ Notification settings are temporarily unavailable.",
+                    ephemeral=True,
+                )
+                return
             return await interaction.response.send_message(
                 "⚠️ Notification settings are temporarily unavailable.",
                 ephemeral=True,
             )
-        scope, preferences = await notifications.get_state(self.guild_id, self.owner_id)
+
+        response_owned = not interaction.response.is_done()
+        if response_owned:
+            await interaction.response.defer(ephemeral=True, thinking=True)
+
+        scope, preferences = await notifications.get_state(
+            self.guild_id,
+            self.owner_id,
+        )
         view = NotificationPreferencesView(
             notifications,
             self.owner_id,
             self.guild_id,
         )
-        await interaction.response.send_message(
-            embed=notifications.build_panel(scope, preferences),
-            view=view,
-            ephemeral=True,
-        )
-        view.message = await interaction.original_response()
+        embed = notifications.build_panel(scope, preferences)
+        if response_owned:
+            view.message = await interaction.edit_original_response(
+                embed=embed,
+                view=view,
+            )
+        else:
+            view.message = await interaction.followup.send(
+                embed=embed,
+                view=view,
+                ephemeral=True,
+                wait=True,
+            )
 
     async def run_command(
         self,
@@ -1119,7 +1149,8 @@ class GameHubView(discord.ui.View):
                 ephemeral=True,
             )
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True, thinking=True)
         ctx = HubInteractionContext(self.cog.bot, interaction, command)
         try:
             # Hub actions originate from component/modal interactions, not slash-command
@@ -1168,6 +1199,8 @@ class GameHubView(discord.ui.View):
         await self.refresh_original(interaction)
 
     async def perform_next_move(self, interaction: discord.Interaction) -> None:
+        if not interaction.response.is_done():
+            await interaction.response.defer()
         scope, profile, world = await self.state()
         step = choose_onboarding_step(scope, profile, world, now=time.time())
 

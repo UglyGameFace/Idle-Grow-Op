@@ -276,6 +276,212 @@ def test_game_menu_and_play_launchers_delegate_to_one_hub_path():
     asyncio.run(scenario())
 
 
+def test_hub_refresh_defers_before_state_load_and_edits_owned_panel():
+    class Response:
+        def __init__(self):
+            self.done = False
+            self.defer_calls = []
+
+        def is_done(self):
+            return self.done
+
+        async def defer(self, **kwargs):
+            self.defer_calls.append(kwargs)
+            self.done = True
+
+    async def scenario():
+        profile = {
+            "grams": 500,
+            "level": 1,
+            "xp": 0,
+            "plants": [],
+            "items": {},
+            "flower_stash": {},
+            "concentrates": {},
+        }
+        response = Response()
+        interaction = SimpleNamespace(
+            response=response,
+            message=SimpleNamespace(edit=AsyncMock()),
+        )
+        cog = SimpleNamespace(
+            state=AsyncMock(return_value=(scope(), profile, {})),
+            build_embed=lambda *_args, **_kwargs: "embed",
+        )
+        view = GameHubView(cog, 42, 123)
+        owned = SimpleNamespace(edit=AsyncMock(return_value=None))
+        view.message = owned
+
+        await view.refresh(interaction)
+
+        assert response.defer_calls == [{}]
+        cog.state.assert_awaited_once_with(123, 42)
+        owned.edit.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+def test_hub_shop_defers_before_profile_load_when_it_owns_response():
+    class Response:
+        def __init__(self):
+            self.done = False
+            self.defer_calls = []
+
+        def is_done(self):
+            return self.done
+
+        async def defer(self, **kwargs):
+            self.defer_calls.append(kwargs)
+            self.done = True
+
+    async def scenario():
+        response = Response()
+        interaction = SimpleNamespace(
+            response=response,
+            edit_original_response=AsyncMock(
+                return_value=SimpleNamespace(edit=AsyncMock())
+            ),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+        profile = {"grams": 500, "level": 1, "items": {}}
+        economy = SimpleNamespace(
+            _profile_for=AsyncMock(),
+            build_shop_embed=lambda *_args, **_kwargs: "shop-embed",
+        )
+
+        async def profile_for(guild_id, user_id):
+            assert response.done is True
+            assert (guild_id, user_id) == (123, 42)
+            return scope(), profile
+
+        economy._profile_for = profile_for
+        bot = SimpleNamespace(get_cog=lambda name: economy if name == "Economy" else None)
+        view = GameHubView(SimpleNamespace(bot=bot), 42, 123)
+
+        await view.open_shop(interaction, category="seeds")
+
+        assert response.defer_calls == [{"ephemeral": True, "thinking": True}]
+        interaction.edit_original_response.assert_awaited_once()
+        interaction.followup.send.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
+def test_hub_shop_uses_followup_when_next_move_already_acknowledged():
+    class Response:
+        def is_done(self):
+            return True
+
+    async def scenario():
+        sent_message = SimpleNamespace(edit=AsyncMock())
+        interaction = SimpleNamespace(
+            response=Response(),
+            followup=SimpleNamespace(
+                send=AsyncMock(return_value=sent_message)
+            ),
+        )
+        profile = {"grams": 500, "level": 1, "items": {}}
+        economy = SimpleNamespace(
+            _profile_for=AsyncMock(return_value=(scope(), profile)),
+            build_shop_embed=lambda *_args, **_kwargs: "shop-embed",
+        )
+        bot = SimpleNamespace(get_cog=lambda name: economy if name == "Economy" else None)
+        view = GameHubView(SimpleNamespace(bot=bot), 42, 123)
+
+        await view.open_shop(interaction, category="seeds")
+
+        interaction.followup.send.assert_awaited_once()
+        kwargs = interaction.followup.send.await_args.kwargs
+        assert kwargs["ephemeral"] is True
+        assert kwargs["wait"] is True
+
+    asyncio.run(scenario())
+
+
+def test_next_move_acknowledges_before_state_access():
+    class StopAfterOrderingCheck(RuntimeError):
+        pass
+
+    class Response:
+        def __init__(self):
+            self.done = False
+            self.defer_count = 0
+
+        def is_done(self):
+            return self.done
+
+        async def defer(self, **_kwargs):
+            self.defer_count += 1
+            self.done = True
+
+    async def scenario():
+        response = Response()
+        interaction = SimpleNamespace(response=response)
+        view = GameHubView(SimpleNamespace(), 42, 123)
+
+        async def state():
+            assert response.done is True
+            raise StopAfterOrderingCheck
+
+        view.state = state
+        try:
+            await view.perform_next_move(interaction)
+        except StopAfterOrderingCheck:
+            pass
+        else:
+            raise AssertionError("state ordering sentinel was not reached")
+
+        assert response.defer_count == 1
+
+    asyncio.run(scenario())
+
+
+def test_run_command_skips_second_defer_for_preacknowledged_component():
+    class Response:
+        def is_done(self):
+            return True
+
+        async def defer(self, **_kwargs):
+            raise AssertionError("run_command must not acknowledge twice")
+
+    class ProbeCog(commands.Cog):
+        @commands.hybrid_command(name="help")
+        async def help_command(self, ctx):
+            await ctx.send("ok")
+
+    async def scenario():
+        bot = commands.Bot(
+            command_prefix="!",
+            intents=discord.Intents.none(),
+            help_command=None,
+        )
+        probe = ProbeCog()
+        await bot.add_cog(probe)
+        interaction = SimpleNamespace(
+            response=Response(),
+            user=SimpleNamespace(id=42),
+            guild=SimpleNamespace(id=123),
+            guild_id=123,
+            channel=SimpleNamespace(id=456),
+            message=None,
+            created_at=datetime.datetime.now(datetime.timezone.utc),
+            followup=SimpleNamespace(
+                send=AsyncMock(return_value=SimpleNamespace())
+            ),
+            client=bot,
+        )
+        hub = GameHub(bot)
+        view = GameHubView(hub, 42, 123)
+        view.refresh_original = AsyncMock()
+
+        await view.run_command(interaction, "help")
+
+        interaction.followup.send.assert_awaited_once()
+        view.refresh_original.assert_awaited_once_with(interaction)
+
+    asyncio.run(scenario())
+
+
 def test_grow_page_uses_stable_ready_at_after_weather_changes(monkeypatch):
     monkeypatch.setattr("game_hub.time.time", lambda: 1200.0)
     cog = GameHub(SimpleNamespace())
