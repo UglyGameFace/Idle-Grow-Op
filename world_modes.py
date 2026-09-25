@@ -524,6 +524,8 @@ class PlayerWorldModeView(discord.ui.View):
         return True
 
     async def _select(self, interaction: discord.Interaction, mode: str) -> None:
+        if not interaction.response.is_done():
+            await interaction.response.defer()
         try:
             await choose_player_mode(
                 self.cog.bot.db,
@@ -532,12 +534,12 @@ class PlayerWorldModeView(discord.ui.View):
                 mode,
             )
         except WorldModeError as exc:
-            await interaction.response.send_message(f"❌ {exc}", ephemeral=True)
+            await interaction.followup.send(f"❌ {exc}", ephemeral=True)
             return
         signatures = self.cog.bot.get_cog("ProfileSignatures")
         if signatures is not None and hasattr(signatures, "remove_user_cards"):
             await signatures.remove_user_cards(self.guild_id, self.owner_id)
-        await interaction.response.edit_message(
+        await interaction.edit_original_response(
             embed=await build_player_mode_embed(
                 self.cog.bot.db,
                 interaction.guild,
@@ -682,6 +684,13 @@ class WorldModes(commands.Cog):
         except GuildContextRequired as exc:
             await ctx.send(f"❌ {exc}.")
             return
+
+        interaction = getattr(ctx, "interaction", None)
+        defer = getattr(ctx, "defer", None)
+        owns_application_response = interaction is not None and callable(defer)
+        if owns_application_response and not interaction.response.is_done():
+            await defer(ephemeral=True)
+
         guild_world = await self.bot.db.get_world(guild_id)
         config = normalize_world_mode_config(guild_world)
         view = (
@@ -689,10 +698,14 @@ class WorldModes(commands.Cog):
             if config["policy"] == POLICY_CHOICE
             else None
         )
+        embed = await build_player_mode_embed(self.bot.db, ctx.guild, ctx.author.id)
+        if owns_application_response:
+            await interaction.edit_original_response(embed=embed, view=view)
+            return
         await ctx.send(
-            embed=await build_player_mode_embed(self.bot.db, ctx.guild, ctx.author.id),
+            embed=embed,
             view=view,
-            ephemeral=ctx.interaction is not None,
+            ephemeral=interaction is not None,
         )
 
 
