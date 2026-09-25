@@ -1,5 +1,6 @@
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import economy as economy_module
 from economy import (
@@ -241,6 +242,7 @@ def test_shop_embed_exposes_live_wallet_level_and_selected_item():
     assert "Schwag Seed" in embed.fields[0].name
     assert "Owned:** 2" in embed.fields[0].value
     assert "Purchase Quantity:** x25" in embed.fields[0].value
+    assert "Total:** $375" in embed.fields[0].value
 
 
 
