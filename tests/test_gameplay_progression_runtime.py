@@ -218,6 +218,44 @@ def test_bulk_plant_clamps_to_current_empty_pots_without_overconsuming_seeds():
     asyncio.run(scenario())
 
 
+def test_bulk_plant_clamps_to_owned_selected_seed_only():
+    async def scenario():
+        guild_id, user_id = 123456789012345678, 42
+        db = MemoryDatabase(guild_id, user_id, policy=POLICY_SERVER)
+        profile = {
+            "level": 50,
+            "xp": 0,
+            "grams": 500,
+            "items": {
+                "white widow seed": 3,
+                "schwag seed": 20,
+            },
+            "plants": [],
+            "max_pots": 20,
+            "stats": {},
+            "achievements": [],
+        }
+        add_active_quests(profile, quest("plant", 10))
+        db.profiles[(guild_id, user_id)] = profile
+        ctx = ContextStub(guild_id, user_id)
+
+        await Farming.plant.callback(
+            Farming(SimpleNamespace(db=db)),
+            ctx,
+            count=10,
+            strain_name="white widow",
+        )
+
+        assert len(profile["plants"]) == 3
+        assert {plant["strain"] for plant in profile["plants"]} == {"white widow"}
+        assert profile["items"]["white widow seed"] == 0
+        assert profile["items"]["schwag seed"] == 20
+        assert profile["daily_quests"][0]["progress"] == 3
+        assert "limited by owned seeds" in ctx.sent[-1][0][0]
+
+    asyncio.run(scenario())
+
+
 def test_lab_collect_callback_advances_current_collect_quest():
     async def scenario():
         guild_id, user_id = 123456789012345678, 42
