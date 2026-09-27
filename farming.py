@@ -230,6 +230,7 @@ class Farming(commands.Cog):
         watered = 0
         skipped_fresh = 0
         skipped_ready = 0
+        no_plants = False
         async with self.bot.db.lock:
             plants = [
                 plant
@@ -237,9 +238,7 @@ class Farming(commands.Cog):
                 if isinstance(plant, dict)
             ]
             if not plants:
-                return await ctx.send(
-                    "🌱 You have no growing plants to water."
-                )
+                no_plants = True
 
             for plant in plants:
                 result = water_plant(user, world, plant, now=now)
@@ -261,6 +260,11 @@ class Farming(commands.Cog):
                 )
                 check_achievements(user)
                 self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+
+        if no_plants:
+            return await ctx.send(
+                "🌱 You have no growing plants to water."
+            )
 
         if watered <= 0:
             if skipped_ready and not skipped_fresh:
@@ -440,15 +444,13 @@ class Farming(commands.Cog):
             )
 
         embed.description = "\n\n".join(lines)
-        needs_water = sum(
-            1
-            for plant in plants
-            if not plant_is_ready(user, world, plant, now=now)
-            and (
-                (plant_moisture(user, world, plant, now=now) or 100.0)
-                <= CARE_WATER_THRESHOLD
-            )
-        )
+        needs_water = 0
+        for plant in plants:
+            if plant_is_ready(user, world, plant, now=now):
+                continue
+            moisture = plant_moisture(user, world, plant, now=now)
+            if moisture is not None and moisture <= CARE_WATER_THRESHOLD:
+                needs_water += 1
         footer_parts = []
         if ready_count > 0:
             footer_parts.append(
