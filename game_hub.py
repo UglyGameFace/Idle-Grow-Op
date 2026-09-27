@@ -268,7 +268,8 @@ class HubPlantQuantitySelect(discord.ui.Select):
             if view.selected_seed
             else 0
         )
-        available = min(owned, free_slots, MAX_PLANTS_PER_ACTION)
+        raw_available = min(owned, free_slots)
+        available = min(raw_available, MAX_PLANTS_PER_ACTION)
 
         fixed = (1, 5, 10, 25)
         quantities = [amount for amount in fixed if amount <= available]
@@ -284,11 +285,12 @@ class HubPlantQuantitySelect(discord.ui.Select):
         options = []
         for amount in quantities:
             is_max = amount == available and available > 0
-            label = (
-                f"{amount} • Max Available"
-                if is_max
-                else str(amount)
-            )
+            if is_max and raw_available > MAX_PLANTS_PER_ACTION:
+                label = f"{amount} • Max This Action"
+            elif is_max:
+                label = f"{amount} • Max Available"
+            else:
+                label = str(amount)
             options.append(
                 discord.SelectOption(
                     label=label[:100],
@@ -303,7 +305,11 @@ class HubPlantQuantitySelect(discord.ui.Select):
             )
 
         placeholder = (
-            f"Plant quantity • max {available}"
+            (
+                f"Plant quantity • max {available} this action"
+                if raw_available > MAX_PLANTS_PER_ACTION
+                else f"Plant quantity • max {available} available"
+            )
             if view.selected_seed and available > 0
             else "Choose a seed with an empty pot first"
         )
