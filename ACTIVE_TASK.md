@@ -13,7 +13,7 @@ This audit covers the complete Idle Grow repository and deployed behavior:
 - CI/tests, Discloud deployment assumptions, stale compatibility logic, temporary artifacts, duplicated ownership, and dead code
 
 ## Status
-PHASE 11 LIVE VALIDATION — REPRESENTATIVE HUB ACTION VALIDATION IN PROGRESS
+PHASE 11 LIVE VALIDATION — COMPONENT SINGLE-FLIGHT + ACK DIAGNOSTICS IN PROGRESS
 
 ## Phase 1 Complete: Command Surface and Runtime Baseline
 Validated on exact head cae20b52d942a6a21137005f53a5778ad03d2149 with CI run 690 successful.
@@ -409,6 +409,29 @@ Implementation branch:
 - `fix/phase11-player-ui-response-contract`
 - Adds a cross-panel runtime regression suite covering delete-on-close and acknowledgement-before-state/mutation ordering.
 
+## Phase 11 Live Finding: Duplicate-Tap Race + Normal Shop Ack Timeout
+
+Observed post-PR #42 on the live bot:
+- Grow → Plant Selected sometimes required repeated taps before visible results; repeated taps could overlap the same plant mutation and one interaction later failed.
+- Shop → Buy Selected timed out during normal single-use interaction while buying a bulk seed quantity.
+- The Shop callback already acknowledged before state/purchase work, so this cannot be explained solely by Supabase/profile mutation latency.
+
+Runtime hardening in branch `fix/phase11-component-single-flight`:
+- Hub mutation buttons use a per-panel single-flight lock.
+- A second tap while a Hub mutation is running is rejected immediately and does not enter the command callback.
+- Hub mutation buttons acknowledge by updating the panel to a visible `Working…` busy state before command checks or gameplay mutation work.
+- Shop purchases use their own per-panel single-flight lock.
+- Buy Selected acknowledges by changing to `Buying…` before profile lookup or purchase mutation.
+- Duplicate purchase taps are rejected without changing wallet or inventory.
+- Callback-start age and acknowledgement latency/failure warnings are logged for Hub and Shop interactions so the next timeout distinguishes late dispatch from slow/failed Discord acknowledgement.
+- Modal-launch actions remain outside the pre-ack path because Discord requires the modal itself to be the initial interaction response.
+
+Closure evidence required:
+- Exact-head CI must pass including deliberate concurrent-tap runtime tests.
+- Discloud deployment must succeed.
+- Fresh live Grow and Shop panels must complete one normal press without timeout.
+- Repeated Plant/Buy taps while the first action is still running must not produce duplicate mutations.
+
 ## Phase 11 Post-PR #42: Representative Hub Action Validation
 
 Production state:
@@ -604,4 +627,4 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - PR #42 merged player UI response timing + real Close behavior at `65658325093144cb68385a92b27003bde595e534`; exact-head CI and Discloud deployment succeeded.
 
 ## Next Step
-Run representative Grow, Market, Lab, Crime, Social/Crew, Casino, and Settings checks from fresh post-PR #42 Discord panels. Record any exact live failure before making another runtime change. If those pass, finish the weather-readiness and legacy XP persistence checks and close Phase 11.
+Validate and deploy the component single-flight + acknowledgement-diagnostic fix. Then test fresh Grow and Shop panels with one normal press and deliberate repeated taps. Use the new timing warnings to classify any remaining timeout before changing persistence or command logic.
