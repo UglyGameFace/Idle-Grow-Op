@@ -1,5 +1,5 @@
 import progression_core as progression
-from progression_data import DAILY_QUEST_TEMPLATES
+from progression_data import ACHIEVEMENTS, DAILY_QUEST_TEMPLATES
 
 
 def test_legacy_xp_overflow_reconciles_into_real_level_progress():
@@ -88,7 +88,7 @@ def test_daily_quest_pool_contains_only_implemented_event_types():
 
     assert "breed" not in events
     assert "contract_complete" not in events
-    assert "water" not in events
+    assert "water" in events
     assert {
         "plant",
         "harvest",
@@ -102,3 +102,13 @@ def test_daily_quest_pool_contains_only_implemented_event_types():
         "crew_deposit_cash",
         "buy",
     } <= events
+
+
+def test_watering_achievements_use_the_real_watered_stat():
+    plant_parent = ACHIEVEMENTS["plant_parent"]
+    grow_room_pro = ACHIEVEMENTS["grow_room_pro"]
+
+    assert plant_parent.progress({"stats": {"watered": 100}}) == (100, 100)
+    assert plant_parent.earned({"stats": {"watered": 100}}) is True
+    assert grow_room_pro.progress({"stats": {"watered": 500}}) == (500, 500)
+    assert grow_room_pro.earned({"stats": {"watered": 500}}) is True

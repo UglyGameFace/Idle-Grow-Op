@@ -23,6 +23,7 @@ from plant_lifecycle import (
     stamp_plant_ready_at,
 )
 from progression_core import add_progress, check_achievements, credit_xp
+from strain_media import get_strain_artwork
 from world_modes import effective_pot_capacity, resolve_game_scope
 from utils import (
     GROWTH_CYCLES,
@@ -481,15 +482,27 @@ class Farming(commands.Cog):
             ),
         )
         if clean_query:
-            strains = [
+            exact_matches = [
                 (name, data)
                 for name, data in strains
-                if clean_query in name.lower()
-                or clean_query
-                in str(data.get("display_name", name)).lower()
-                or clean_query
-                in " ".join(str(value).lower() for value in data.get("genetics", []))
+                if clean_query == name.lower()
+                or clean_query == str(data.get("display_name", name)).strip().lower()
             ]
+            if exact_matches:
+                strains = exact_matches
+            else:
+                strains = [
+                    (name, data)
+                    for name, data in strains
+                    if clean_query in name.lower()
+                    or clean_query
+                    in str(data.get("display_name", name)).lower()
+                    or clean_query
+                    in " ".join(
+                        str(value).lower()
+                        for value in data.get("genetics", [])
+                    )
+                ]
 
         total_pages = max(
             1,
@@ -512,6 +525,20 @@ class Farming(commands.Cog):
                 "Times, yields, and levels are **game balance values**, not real cultivation guidance."
             ),
         )
+        artwork = (
+            get_strain_artwork(strains[0][0])
+            if len(strains) == 1
+            else None
+        )
+        if artwork is not None:
+            embed.set_thumbnail(url=artwork.image_url)
+            embed.description = (
+                (embed.description or "")
+                + f"\n📷 **Artwork:** "
+                + f"[{artwork.author} • {artwork.license_name}]"
+                + f"({artwork.source_url})"
+            )
+
         for _name, data in visible:
             genetics = "/".join(str(value) for value in data.get("genetics", [])) or "Hybrid"
             embed.add_field(

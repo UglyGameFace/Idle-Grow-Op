@@ -1,4 +1,4 @@
-# Active Task: Idle Grow Master Audit and Legacy Consolidation
+# Active Task: Farming Care, 750+ Strain Catalog, and Store Expansion
 
 ## Outcome
 Establish one trustworthy, production-ready Idle Grow architecture by tracing every live subsystem, identifying authoritative ownership, removing proven obsolete/conflicting implementations, repairing runtime defects, strengthening behavioral coverage, and validating the exact final build against real deployment behavior.
@@ -13,7 +13,7 @@ This audit covers the complete Idle Grow repository and deployed behavior:
 - CI/tests, Discloud deployment assumptions, stale compatibility logic, temporary artifacts, duplicated ownership, and dead code
 
 ## Status
-PHASE 11 LIVE VALIDATION — SELECTED-STRAIN BULK GROW IN PROGRESS
+PHASE 12 SOURCE VALIDATION + REGRESSION HARDENING — FARMING/CATALOG EXPANSION IN PROGRESS
 
 ## Phase 1 Complete: Command Surface and Runtime Baseline
 Validated on exact head cae20b52d942a6a21137005f53a5778ad03d2149 with CI run 690 successful.
@@ -43,7 +43,7 @@ Cleanup:
 - Scoped persistence now protects concurrent dirty mutations and uses one atomic cross-record Supabase RPC contract.
 - Completed legacy migration tooling was removed only after repository history proved the one-time production migration succeeded. Runtime legacy world-mode compatibility remains intentionally retained for pre-world-mode guild data.
 - Shared guild, profile-signature, world-mode, and casino escrow persistence contracts have explicit dependency-free owners instead of duplicated literal schemas.
-- No public gameplay module retains player-facing !command guidance or the removed /water, /tasks, /appeal, /bail, or /sesh_setup paths.
+- No public gameplay module retains stale player-facing !command guidance. /water is intentionally restored as a real care mutation; /tasks, /appeal, /bail, and /sesh_setup remain removed.
 - Gameplay mutation paths no longer await Discord responses while holding the process-wide database mutation lock.
 - High-risk player-value flows now have callback-level failure-path coverage: transfers, theft, auctions, owner/admin mutations, crew exit/disband, and interactive Blackjack escrow.
 - Full branch comparison against the audit base is scoped to Idle Grow audit work only: the branch is ahead of the original base and not behind it.
@@ -68,10 +68,10 @@ Cleanup:
 - Preserve unrelated user work and existing production data semantics unless an intentional migration is proven necessary.
 
 ## Active Task Lock
-- Active task: close PR #31 through post-merge production validation of the gameplay UX and harvest-consistency overhaul.
+- Active task: finish the plant-care, 750+ strain catalog, and large-store expansion on feat/plant-care-store-expansion.
 - Idle Grow remains the only active implementation task until this Definition of Done is satisfied.
 - Unrelated projects, bugs, redesigns, or cleanup are backlog-only unless explicitly force-switched.
-- Scope includes exact merged-revision evidence, live command publication, /game and /shop behavior, stable harvest readiness across weather changes, legacy XP reconciliation, representative direct hub actions, cleanup, and final task-record closure.
+- Scope includes meaningful game-only watering/care, care equipment, catalog/store/Grow paging, bounded inventory output, legal strain-art sourcing, comprehensive regressions, exact-head CI, PR review/merge, and separate Discloud deployment validation.
 
 ## Validation Required Before Completion
 - Every production module compiles.
@@ -647,3 +647,20 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 
 ## Next Step
 Validate the selected-strain bulk Grow implementation on exact-head CI, merge and deploy it, then live-test 1, fixed bulk, dynamic max, full-pot, and duplicate-tap behavior from a fresh Grow panel. Continue Phase 11 only after those live checks are clean.
+
+## Phase 12 Checkpoint: Plant Care + Catalog Expansion Source Validation
+
+Current branch: feat/plant-care-store-expansion
+
+Source decision:
+- The 2017 Kushy strain snapshot remains suitable only for strain names and broad type metadata; its image column is empty for all 9,524 rows inspected.
+- Modern 500+ image collections found during source validation rely on scraped commercial strain photography or terms that do not establish redistribution rights for the underlying images.
+- The catalog therefore keeps its 750+ locally balanced strain names while artwork is handled by a separate explicit license-vetted allowlist.
+- Initial exact-strain artwork is limited to public-domain Wikimedia Commons files for OG Kush, Blue Dream, and Sour Diesel.
+- No runtime scraping, bulk image download, Leafly/Wikileaf/dispensary hotlink dependency, or unverified third-party photo relicensing is introduced.
+- Future art can be added incrementally only with per-image provenance, or replaced by original game artwork/archetype artwork.
+
+Validation status:
+- Repository structure and branch ancestry were re-inspected before edits.
+- Focused source-contract regressions are being updated only where the restored real /water mechanic invalidates the old fake-watering removal assumptions.
+- Full pytest, compile, undefined-name scan, extension-load validation, exact-head CI, PR creation, merge, and Discloud deployment validation remain pending and must not be claimed complete yet.

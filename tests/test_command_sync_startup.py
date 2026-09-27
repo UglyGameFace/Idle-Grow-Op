@@ -50,6 +50,7 @@ ADVERTISED_PUBLIC_COMMAND_PATHS = {
     "auction list",
     "bid",
     "plant",
+    "water",
     "harvest",
     "status",
     "strains",
@@ -106,7 +107,6 @@ ADVERTISED_PUBLIC_COMMAND_PATHS = {
 }
 
 REMOVED_OR_NEVER_IMPLEMENTED_PUBLIC_PATHS = {
-    "water",
     "tasks",
     "appeal",
     "bail",
@@ -357,7 +357,7 @@ def test_complete_extension_tree_contains_public_entry_points_and_no_stale_sesh_
     assert main.REQUIRED_PUBLIC_COMMANDS <= names
     assert CONSOLIDATED_GAMEPLAY_COMMANDS <= names
     assert "sesh_setup" not in names
-    assert "water" not in names
+    assert "water" in names
     assert len(names) > len(main.REQUIRED_PUBLIC_COMMANDS)
 
 
