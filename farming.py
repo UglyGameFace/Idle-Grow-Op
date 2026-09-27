@@ -24,6 +24,72 @@ from utils import (
 )
 
 
+class StrainCatalogView(discord.ui.View):
+    def __init__(
+        self,
+        cog: "Farming",
+        owner_id: int,
+        *,
+        page: int = 0,
+        query: str = "",
+        timeout: float = 300,
+    ) -> None:
+        super().__init__(timeout=timeout)
+        self.cog = cog
+        self.owner_id = int(owner_id)
+        self.page = max(0, int(page))
+        self.query = str(query or "").strip()
+        self.total_pages = 1
+        self._sync_buttons()
+
+    def _sync_buttons(self) -> None:
+        self.clear_items()
+        previous = discord.ui.Button(
+            label="Prev",
+            emoji="◀️",
+            style=discord.ButtonStyle.secondary,
+            disabled=self.page <= 0,
+        )
+        previous.callback = self.previous_page
+        self.add_item(previous)
+
+        next_page = discord.ui.Button(
+            label="Next",
+            emoji="▶️",
+            style=discord.ButtonStyle.secondary,
+            disabled=self.page >= self.total_pages - 1,
+        )
+        next_page.callback = self.next_page
+        self.add_item(next_page)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                "❌ This strain browser belongs to another player.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def _render(self, interaction: discord.Interaction) -> None:
+        embed, total_pages = self.cog.build_strains_embed(
+            page=self.page,
+            query=self.query,
+        )
+        self.total_pages = total_pages
+        self.page = max(0, min(self.page, self.total_pages - 1))
+        self._sync_buttons()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def previous_page(self, interaction: discord.Interaction) -> None:
+        self.page = max(0, self.page - 1)
+        await self._render(interaction)
+
+    async def next_page(self, interaction: discord.Interaction) -> None:
+        self.page = min(max(0, self.total_pages - 1), self.page + 1)
+        await self._render(interaction)
+
+
 class Farming(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -262,21 +328,95 @@ class Farming(commands.Cog):
             )
         await ctx.send(embed=embed)
 
-    @commands.hybrid_command(name="strains", aliases=["seeds"])
-    async def strains(self, ctx):
-        """List available strains."""
-        require_guild_id(ctx)
-        embed = discord.Embed(title="🧬 Strain Database", color=discord.Color.purple())
-        sorted_strains = sorted(GROWTH_CYCLES.items(), key=lambda item: item[1]["level_req"])
+    STRAIN_PAGE_SIZE = 12
 
-        for _name, data in sorted_strains:
+    def build_strains_embed(
+        self,
+        *,
+        page: int = 0,
+        query: str = "",
+    ) -> tuple[discord.Embed, int]:
+        clean_query = str(query or "").strip().lower()
+        strains = sorted(
+            GROWTH_CYCLES.items(),
+            key=lambda item: (
+                max(1, int(item[1].get("level_req", 1) or 1)),
+                str(item[1].get("display_name", item[0])).lower(),
+            ),
+        )
+        if clean_query:
+            strains = [
+                (name, data)
+                for name, data in strains
+                if clean_query in name.lower()
+                or clean_query
+                in str(data.get("display_name", name)).lower()
+                or clean_query
+                in " ".join(str(value).lower() for value in data.get("genetics", []))
+            ]
+
+        total_pages = max(
+            1,
+            (len(strains) + self.STRAIN_PAGE_SIZE - 1)
+            // self.STRAIN_PAGE_SIZE,
+        )
+        page = max(0, min(int(page), total_pages - 1))
+        start = page * self.STRAIN_PAGE_SIZE
+        visible = strains[start : start + self.STRAIN_PAGE_SIZE]
+
+        title = "🧬 Strain Database"
+        if clean_query:
+            title += f" • {query.strip()[:40]}"
+        embed = discord.Embed(
+            title=title,
+            color=discord.Color.purple(),
+            description=(
+                f"**{len(strains)}** matching game strain(s) • "
+                f"Page **{page + 1}/{total_pages}**\n"
+                "Times, yields, and levels are **game balance values**, not real cultivation guidance."
+            ),
+        )
+        for _name, data in visible:
+            genetics = "/".join(str(value) for value in data.get("genetics", [])) or "Hybrid"
             embed.add_field(
                 name=f"Lv{data['level_req']} {data['display_name']}",
-                value=f"⏱️ {int(data['time'] / 60)}m | 📦 Yield: {data['yield'][0]}-{data['yield'][1]}g",
+                value=(
+                    f"🧬 {genetics}\n"
+                    f"⏱️ Game cycle: {int(data['time'] / 60)}m\n"
+                    f"📦 Game yield: {data['yield'][0]}-{data['yield'][1]}g"
+                ),
                 inline=True,
             )
+        if not visible:
+            embed.add_field(
+                name="No matches",
+                value="Try a shorter name, genetics type, or clear the query.",
+                inline=False,
+            )
+        embed.set_footer(
+            text="Use /strains query:<name or type> to jump to a strain quickly."
+        )
+        return embed, total_pages
 
-        await ctx.send(embed=embed)
+    @commands.hybrid_command(name="strains", aliases=["seeds"])
+    async def strains(self, ctx, page: int = 1, *, query: str = ""):
+        """Browse the game strain catalog."""
+        require_guild_id(ctx)
+        page_index = max(0, int(page or 1) - 1)
+        embed, total_pages = self.build_strains_embed(
+            page=page_index,
+            query=query,
+        )
+        page_index = max(0, min(page_index, total_pages - 1))
+        view = StrainCatalogView(
+            self,
+            ctx.author.id,
+            page=page_index,
+            query=query,
+        )
+        view.total_pages = total_pages
+        view._sync_buttons()
+        await ctx.send(embed=embed, view=view)
 
 
 async def setup(bot):
