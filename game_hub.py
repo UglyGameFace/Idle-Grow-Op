@@ -13,10 +13,10 @@ from economy import ShopView
 from notification_preferences import NotificationPreferencesView
 from onboarding import choose_onboarding_step
 from persistence_context import GuildContextRequired, require_guild_id
-from plant_lifecycle import plant_is_ready, plant_ready_at
+from plant_lifecycle import MAX_PLANTS_PER_ACTION, plant_is_ready, plant_ready_at
 from progression_core import xp_needed_for_level
 from utils import CONCENTRATE_TYPES, GROWTH_CYCLES
-from world_modes import resolve_game_scope
+from world_modes import effective_pot_capacity, resolve_game_scope
 
 
 logger = logging.getLogger(__name__)
@@ -196,6 +196,7 @@ class HubPageSelect(discord.ui.Select):
         view = self.view
         view.page = self.values[0]
         view.selected_seed = None
+        view.selected_plant_quantity = "1"
         view.selected_concentrate = None
         view.selected_steal_target = None
         view.selected_casino_game = None
@@ -245,6 +246,78 @@ class HubSeedSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction) -> None:
         value = self.values[0]
         self.view.selected_seed = None if value == "__none__" else value
+        self.view.selected_plant_quantity = "1"
+        await self.view.refresh(interaction)
+
+
+class HubPlantQuantitySelect(discord.ui.Select):
+    def __init__(self, view: "GameHubView", profile: dict, scope) -> None:
+        plants = [
+            plant
+            for plant in profile.get("plants", []) or []
+            if isinstance(plant, dict)
+        ]
+        free_slots = max(
+            0,
+            effective_pot_capacity(profile, scope) - len(plants),
+        )
+        items = profile.get("items")
+        items = items if isinstance(items, dict) else {}
+        owned = (
+            _positive_int(items.get(f"{view.selected_seed} seed"))
+            if view.selected_seed
+            else 0
+        )
+        available = min(owned, free_slots, MAX_PLANTS_PER_ACTION)
+
+        fixed = (1, 5, 10, 25)
+        quantities = [amount for amount in fixed if amount <= available]
+        if available > 0 and available not in quantities:
+            quantities.append(available)
+        if not quantities:
+            quantities = [1]
+
+        valid_values = {str(amount) for amount in quantities}
+        if view.selected_plant_quantity not in valid_values:
+            view.selected_plant_quantity = "1"
+
+        options = []
+        for amount in quantities:
+            is_max = amount == available and available > 0
+            label = (
+                f"{amount} • Max Available"
+                if is_max
+                else str(amount)
+            )
+            options.append(
+                discord.SelectOption(
+                    label=label[:100],
+                    value=str(amount),
+                    description=(
+                        f"Plant {amount} {view.selected_seed.title()} seed(s)"
+                        if view.selected_seed
+                        else "Choose a seed first"
+                    )[:100],
+                    default=view.selected_plant_quantity == str(amount),
+                )
+            )
+
+        placeholder = (
+            f"Plant quantity • max {available}"
+            if view.selected_seed and available > 0
+            else "Choose a seed with an empty pot first"
+        )
+        super().__init__(
+            placeholder=placeholder[:150],
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=2,
+            disabled=not view.selected_seed or available <= 0,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        self.view.selected_plant_quantity = self.values[0]
         await self.view.refresh(interaction)
 
 
@@ -741,6 +814,7 @@ class GameHubView(discord.ui.View):
         valid_pages = {key for key, _label, _emoji in HUB_PAGES}
         self.page = page if page in valid_pages else "home"
         self.selected_seed: str | None = None
+        self.selected_plant_quantity: str = "1"
         self.selected_concentrate: str | None = None
         self.selected_steal_target = None
         self.selected_casino_game: str | None = None
@@ -905,25 +979,49 @@ class GameHubView(discord.ui.View):
         crew_id = profile.get("crew_id")
 
         if self.page == "grow":
+            items = profile.get("items")
+            items = items if isinstance(items, dict) else {}
+            selected_owned = (
+                _positive_int(items.get(f"{self.selected_seed} seed"))
+                if self.selected_seed
+                else 0
+            )
+            free_slots = max(
+                0,
+                effective_pot_capacity(profile, scope) - len(plants),
+            )
+            selected_available = min(
+                selected_owned,
+                free_slots,
+                MAX_PLANTS_PER_ACTION,
+            )
+            if self.selected_seed and selected_owned <= 0:
+                self.selected_seed = None
+                self.selected_plant_quantity = "1"
+
             self.add_item(HubSeedSelect(self, profile))
+            self.add_item(HubPlantQuantitySelect(self, profile, scope))
             self.add_action(
                 "plant",
                 "Plant Selected",
                 "🌱",
-                row=2,
+                row=3,
                 style=discord.ButtonStyle.success,
-                disabled=self.selected_seed is None,
+                disabled=(
+                    self.selected_seed is None
+                    or selected_available <= 0
+                ),
             )
             self.add_action(
                 "harvest",
                 "Harvest Ready",
                 "✂️",
-                row=2,
+                row=3,
                 style=discord.ButtonStyle.success,
                 disabled=ready_count <= 0,
             )
-            self.add_action("status", "Garden", "🪴", row=2)
-            self.add_action("shop_seeds", "Seed Shop", "🛒", row=2)
+            self.add_action("status", "Garden", "🪴", row=3)
+            self.add_action("shop_seeds", "Seed Shop", "🛒", row=3)
         elif self.page == "inventory":
             self.add_action("inventory", "Inventory", "🎒", row=1)
             self.add_action(
@@ -1150,6 +1248,7 @@ class GameHubView(discord.ui.View):
                     world,
                     page=self.page,
                     selected_seed=self.selected_seed,
+                    selected_plant_quantity=self.selected_plant_quantity,
                 ),
                 view=self,
             )
@@ -1339,9 +1438,11 @@ class GameHubView(discord.ui.View):
             marker = "strain_name:"
             if marker in step.command:
                 self.selected_seed = step.command.split(marker, 1)[1].strip()
+                self.selected_plant_quantity = "1"
                 return await self.run_command(
                     interaction,
                     "plant",
+                    count=1,
                     strain_name=self.selected_seed,
                 )
             self.page = "grow"
@@ -1431,7 +1532,12 @@ class GameHubView(discord.ui.View):
                     "🌱 Choose one of your owned seeds first.",
                     ephemeral=True,
                 )
-            return await self.run_command(interaction, "plant", strain_name=self.selected_seed)
+            return await self.run_command(
+                interaction,
+                "plant",
+                count=max(1, _positive_int(self.selected_plant_quantity)),
+                strain_name=self.selected_seed,
+            )
         if action == "sell_all":
             return await self.run_command(
                 interaction,
@@ -1512,6 +1618,7 @@ class GameHub(commands.Cog):
         *,
         page: str = "home",
         selected_seed: str | None = None,
+        selected_plant_quantity: str = "1",
     ) -> discord.Embed:
         now = time.time()
         plants = [
@@ -1572,7 +1679,10 @@ class GameHub(commands.Cog):
             embed.add_field(
                 name="Next Plant",
                 value=(
-                    f"Selected seed: **{selected_seed.title()}**"
+                    (
+                        f"Selected seed: **{selected_seed.title()}**\n"
+                        f"Bulk quantity: **×{max(1, _positive_int(selected_plant_quantity))}**"
+                    )
                     if selected_seed
                     else "Choose one of your owned seeds below."
                 ),
