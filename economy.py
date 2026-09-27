@@ -46,6 +46,25 @@ def _shop_section(item: dict) -> str:
     return "misc"
 
 
+SHOP_PAGE_SIZE = 25
+
+
+def _shop_items(category: str) -> list[tuple[str, dict]]:
+    items = [
+        (name, item)
+        for name, item in SHOP_ITEMS.items()
+        if category == "all" or _shop_section(item) == category
+    ]
+    return sorted(
+        items,
+        key=lambda pair: (
+            max(1, int(pair[1].get("level_req", 1) or 1)),
+            _shop_price(pair[1]),
+            pair[0],
+        ),
+    )
+
+
 class ShopCategorySelect(discord.ui.Select):
     def __init__(self, view: "ShopView") -> None:
         options = [
@@ -67,6 +86,7 @@ class ShopCategorySelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction) -> None:
         view = self.view
         view.category = self.values[0]
+        view.page = 0
         view.selected_item = None
         view.purchase_quantity = "1"
         await view.refresh(interaction)
@@ -128,14 +148,15 @@ class ShopQuantitySelect(discord.ui.Select):
 
 class ShopItemSelect(discord.ui.Select):
     def __init__(self, view: "ShopView", profile: dict) -> None:
-        items = [
-            (name, item)
-            for name, item in SHOP_ITEMS.items()
-            if view.category == "all" or _shop_section(item) == view.category
-        ]
+        items = _shop_items(view.category)
+        view.total_pages = max(1, (len(items) + SHOP_PAGE_SIZE - 1) // SHOP_PAGE_SIZE)
+        view.page = max(0, min(int(view.page), view.total_pages - 1))
+        start = view.page * SHOP_PAGE_SIZE
+        page_items = items[start : start + SHOP_PAGE_SIZE]
+
         level = max(1, int(profile.get("level", 1) or 1))
         options = []
-        for name, item in items[:25]:
+        for name, item in page_items:
             cost = _shop_price(item)
             required = max(1, int(item.get("level_req", 1) or 1))
             owned = inv_get(profile, name)
@@ -159,7 +180,11 @@ class ShopItemSelect(discord.ui.Select):
                 )
             ]
         super().__init__(
-            placeholder="Choose an item to inspect or buy…",
+            placeholder=(
+                f"Choose an item • page {view.page + 1}/{view.total_pages}"
+                if view.total_pages > 1
+                else "Choose an item to inspect or buy…"
+            ),
             min_values=1,
             max_values=1,
             options=options,
@@ -189,6 +214,8 @@ class ShopView(discord.ui.View):
         self.owner_id = int(owner_id)
         self.guild_id = int(guild_id)
         self.category = category if category in {"all", "seeds", "equipment", "misc"} else "all"
+        self.page: int = 0
+        self.total_pages: int = 1
         self.selected_item: str | None = None
         self.purchase_quantity: str = "1"
         self.message = None
@@ -231,6 +258,16 @@ class ShopView(discord.ui.View):
         self.add_item(ShopItemSelect(self, profile))
         self.add_item(ShopQuantitySelect(self, profile))
 
+        previous = discord.ui.Button(
+            label="Prev",
+            emoji="◀️",
+            style=discord.ButtonStyle.secondary,
+            row=3,
+            disabled=self.page <= 0,
+        )
+        previous.callback = self.previous_page
+        self.add_item(previous)
+
         buy = discord.ui.Button(
             label="Buy Selected",
             emoji="💳",
@@ -240,6 +277,16 @@ class ShopView(discord.ui.View):
         )
         buy.callback = self.buy_selected
         self.add_item(buy)
+
+        next_page = discord.ui.Button(
+            label="Next",
+            emoji="▶️",
+            style=discord.ButtonStyle.secondary,
+            row=3,
+            disabled=self.page >= self.total_pages - 1,
+        )
+        next_page.callback = self.next_page
+        self.add_item(next_page)
 
         refresh = discord.ui.Button(
             label="Refresh",
@@ -280,6 +327,8 @@ class ShopView(discord.ui.View):
             selected_item=self.selected_item,
             selected_quantity=self.purchase_quantity,
             notice=notice,
+            page=self.page,
+            total_pages=self.total_pages,
         )
         message = self.message or interaction.message
         if message is not None:
@@ -373,6 +422,18 @@ class ShopView(discord.ui.View):
                             await self.message.edit(view=self)
                         except discord.HTTPException:
                             pass
+
+    async def previous_page(self, interaction: discord.Interaction) -> None:
+        self.page = max(0, self.page - 1)
+        self.selected_item = None
+        self.purchase_quantity = "1"
+        await self.refresh(interaction)
+
+    async def next_page(self, interaction: discord.Interaction) -> None:
+        self.page = min(max(0, self.total_pages - 1), self.page + 1)
+        self.selected_item = None
+        self.purchase_quantity = "1"
+        await self.refresh(interaction)
 
     async def refresh_button(self, interaction: discord.Interaction) -> None:
         await self.refresh(interaction)
@@ -539,6 +600,8 @@ class Economy(commands.Cog):
         selected_item: str | None = None,
         selected_quantity: str = "1",
         notice: str | None = None,
+        page: int = 0,
+        total_pages: int = 1,
     ) -> discord.Embed:
         wallet = max(0, int(profile.get("grams", 0) or 0))
         level = max(1, int(profile.get("level", 1) or 1))
@@ -624,7 +687,12 @@ class Economy(commands.Cog):
                 ),
                 inline=False,
             )
-        embed.set_footer(text="Shop panel expires after 5 minutes.")
+        page_text = (
+            f" • Page {max(0, int(page)) + 1}/{max(1, int(total_pages))}"
+            if int(total_pages or 1) > 1
+            else ""
+        )
+        embed.set_footer(text=f"Shop panel expires after 5 minutes.{page_text}")
         return embed
 
     def resolve_shop_quantity(
