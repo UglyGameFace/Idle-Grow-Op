@@ -1364,6 +1364,8 @@ class GameHubView(discord.ui.View):
             scope,
             profile,
             category=category,
+            page=view.page,
+            total_pages=view.total_pages,
         )
         if response_owned:
             view.message = await interaction.edit_original_response(
