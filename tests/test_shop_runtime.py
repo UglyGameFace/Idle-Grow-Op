@@ -201,18 +201,23 @@ def test_slash_shop_launch_defers_before_profile_load():
     asyncio.run(scenario())
 
 
-def test_shop_buy_defers_before_state_load_and_refreshes_owned_panel(monkeypatch):
+def test_shop_buy_acknowledges_busy_before_state_load_and_refreshes_owned_panel(monkeypatch):
     class Response:
         def __init__(self):
             self.done = False
-            self.deferred = 0
+            self.edit_calls = []
+            self.sent = []
 
         def is_done(self):
             return self.done
 
-        async def defer(self):
+        async def edit_message(self, **kwargs):
             self.done = True
-            self.deferred += 1
+            self.edit_calls.append(kwargs)
+
+        async def send_message(self, content=None, **kwargs):
+            self.done = True
+            self.sent.append((content, kwargs))
 
     class Message:
         def __init__(self):
@@ -237,13 +242,28 @@ def test_shop_buy_defers_before_state_load_and_refreshes_owned_panel(monkeypatch
             "stats": {},
         }
         scope = SimpleNamespace(scope_id=123, emoji="🏙️", label="Current Server World")
-        view.state = AsyncMock(return_value=(scope, profile))
+        view.rebuild(profile)
+        view.selected_item = "schwag seed"
+        view.purchase_quantity = "10"
+
+        response = Response()
+
+        async def state():
+            assert response.done is True
+            buy = next(
+                child
+                for child in view.children
+                if getattr(child, "label", None) == "Buying…"
+            )
+            assert buy.disabled is True
+            return scope, profile
+
+        view.state = state
         monkeypatch.setattr(economy_module, "add_progress", lambda *args, **kwargs: None)
         monkeypatch.setattr(economy_module, "check_achievements", lambda *args, **kwargs: [])
 
         owned = Message()
         view.message = owned
-        response = Response()
         interaction = SimpleNamespace(
             response=response,
             message=SimpleNamespace(
@@ -253,11 +273,90 @@ def test_shop_buy_defers_before_state_load_and_refreshes_owned_panel(monkeypatch
 
         await view.buy_selected(interaction)
 
-        assert response.deferred == 1
+        assert len(response.edit_calls) == 1
+        assert response.edit_calls[0]["view"] is view
         assert profile["items"]["schwag seed"] == 10
         assert profile["grams"] == 850
         assert len(owned.edits) == 1
         assert view.message is owned
+
+    asyncio.run(scenario())
+
+
+def test_shop_purchase_is_single_flight_under_duplicate_taps(monkeypatch):
+    class Response:
+        def __init__(self):
+            self.done = False
+            self.edit_calls = []
+            self.sent = []
+
+        def is_done(self):
+            return self.done
+
+        async def edit_message(self, **kwargs):
+            self.done = True
+            self.edit_calls.append(kwargs)
+
+        async def send_message(self, content=None, **kwargs):
+            self.done = True
+            self.sent.append((content, kwargs))
+
+    class Message:
+        async def edit(self, **_kwargs):
+            return self
+
+    async def scenario():
+        db = MemoryDatabase()
+        cog = Economy(SimpleNamespace(db=db))
+        profile = {
+            "grams": 1_000,
+            "level": 1,
+            "items": {},
+            "daily_quests": [],
+            "achievements": [],
+            "stats": {},
+        }
+        scope = SimpleNamespace(scope_id=123, emoji="🏙️", label="Current Server World")
+        view = ShopView(cog, 42, 123)
+        view.selected_item = "schwag seed"
+        view.purchase_quantity = "1"
+        view.rebuild(profile)
+        view.selected_item = "schwag seed"
+        view.purchase_quantity = "1"
+        view.message = Message()
+
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        state_calls = 0
+
+        async def state():
+            nonlocal state_calls
+            state_calls += 1
+            entered.set()
+            await release.wait()
+            return scope, profile
+
+        view.state = state
+        monkeypatch.setattr(economy_module, "add_progress", lambda *args, **kwargs: None)
+        monkeypatch.setattr(economy_module, "check_achievements", lambda *args, **kwargs: [])
+
+        first = SimpleNamespace(response=Response(), message=None)
+        second = SimpleNamespace(response=Response(), message=None)
+
+        first_task = asyncio.create_task(view.buy_selected(first))
+        await entered.wait()
+        await view.buy_selected(second)
+
+        assert state_calls == 1
+        assert len(second.response.sent) == 1
+        assert "No duplicate purchase was started" in second.response.sent[0][0]
+        assert profile["items"] == {}
+
+        release.set()
+        await first_task
+
+        assert profile["items"]["schwag seed"] == 1
+        assert profile["grams"] == 985
 
     asyncio.run(scenario())
 
