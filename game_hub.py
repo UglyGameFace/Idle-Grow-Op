@@ -197,6 +197,7 @@ class HubPageSelect(discord.ui.Select):
         view.page = self.values[0]
         view.selected_seed = None
         view.selected_plant_quantity = "1"
+        view.seed_page = 0
         view.selected_concentrate = None
         view.selected_steal_target = None
         view.selected_casino_game = None
@@ -204,11 +205,13 @@ class HubPageSelect(discord.ui.Select):
 
 
 class HubSeedSelect(discord.ui.Select):
+    PAGE_SIZE = 25
+
     def __init__(self, view: "GameHubView", profile: dict) -> None:
         level = max(1, _positive_int(profile.get("level")) or 1)
         items = profile.get("items")
         items = items if isinstance(items, dict) else {}
-        options = []
+        owned_seeds = []
         for item_name, amount in sorted(items.items()):
             if not str(item_name).endswith(" seed") or _positive_int(amount) <= 0:
                 continue
@@ -219,11 +222,32 @@ class HubSeedSelect(discord.ui.Select):
             required = max(1, _positive_int(config.get("level_req")) or 1)
             if level < required:
                 continue
+            owned_seeds.append((strain, _positive_int(amount), required))
+
+        owned_seeds.sort(
+            key=lambda entry: (
+                int(GROWTH_CYCLES.get(entry[0], {}).get("level_req", 1)),
+                str(GROWTH_CYCLES.get(entry[0], {}).get("display_name", entry[0])),
+            )
+        )
+        view.seed_total_pages = max(
+            1,
+            (len(owned_seeds) + self.PAGE_SIZE - 1) // self.PAGE_SIZE,
+        )
+        view.seed_page = max(0, min(int(view.seed_page), view.seed_total_pages - 1))
+        start = view.seed_page * self.PAGE_SIZE
+        page_seeds = owned_seeds[start : start + self.PAGE_SIZE]
+
+        options = []
+        for strain, amount, _required in page_seeds:
+            display = str(
+                GROWTH_CYCLES.get(strain, {}).get("display_name", strain.title())
+            )
             options.append(
                 discord.SelectOption(
-                    label=strain.title()[:100],
+                    label=display[:100],
                     value=strain,
-                    description=f"{_positive_int(amount)} seed(s) owned",
+                    description=f"{amount} seed(s) owned",
                     default=view.selected_seed == strain,
                 )
             )
@@ -235,11 +259,16 @@ class HubSeedSelect(discord.ui.Select):
                     description="Open Shop to buy a seed.",
                 )
             ]
+        placeholder = (
+            f"Choose a seed • page {view.seed_page + 1}/{view.seed_total_pages}"
+            if view.seed_total_pages > 1
+            else "Choose a seed to plant…"
+        )
         super().__init__(
-            placeholder="Choose a seed to plant…",
+            placeholder=placeholder[:150],
             min_values=1,
             max_values=1,
-            options=options[:25],
+            options=options,
             row=1,
         )
 
@@ -821,6 +850,8 @@ class GameHubView(discord.ui.View):
         self.page = page if page in valid_pages else "home"
         self.selected_seed: str | None = None
         self.selected_plant_quantity: str = "1"
+        self.seed_page: int = 0
+        self.seed_total_pages: int = 1
         self.selected_concentrate: str | None = None
         self.selected_steal_target = None
         self.selected_casino_game: str | None = None
@@ -1223,6 +1254,21 @@ class GameHubView(discord.ui.View):
             self.add_action("profile", "Profile", "👤", row=2)
             self.add_action("inventory", "Inventory", "🎒", row=2)
 
+        if self.page == "grow" and self.seed_total_pages > 1:
+            self.add_action(
+                "seed_prev",
+                "Prev Seeds",
+                "◀️",
+                row=4,
+                disabled=self.seed_page <= 0,
+            )
+            self.add_action(
+                "seed_next",
+                "Next Seeds",
+                "▶️",
+                row=4,
+                disabled=self.seed_page >= self.seed_total_pages - 1,
+            )
         self.add_action("refresh", "Refresh", "🔄", row=4)
         self.add_action(
             "close",
@@ -1461,6 +1507,19 @@ class GameHubView(discord.ui.View):
         return await self.run_command(interaction, "help")
 
     async def handle_action(self, interaction: discord.Interaction, action: str) -> None:
+        if action == "seed_prev":
+            self.seed_page = max(0, self.seed_page - 1)
+            self.selected_seed = None
+            self.selected_plant_quantity = "1"
+            return await self.refresh(interaction)
+        if action == "seed_next":
+            self.seed_page = min(
+                max(0, self.seed_total_pages - 1),
+                self.seed_page + 1,
+            )
+            self.selected_seed = None
+            self.selected_plant_quantity = "1"
+            return await self.refresh(interaction)
         if action == "refresh":
             return await self.refresh(interaction)
         if action == "close":
