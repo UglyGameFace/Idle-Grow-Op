@@ -248,7 +248,7 @@ def test_bulk_plant_clamps_to_owned_selected_seed_only():
 
         assert len(profile["plants"]) == 3
         assert {plant["strain"] for plant in profile["plants"]} == {"white widow"}
-        assert profile["items"]["white widow seed"] == 0
+        assert profile["items"].get("white widow seed", 0) == 0
         assert profile["items"]["schwag seed"] == 20
         assert profile["daily_quests"][0]["progress"] == 3
         assert "limited by owned seeds" in ctx.sent[-1][0][0]
