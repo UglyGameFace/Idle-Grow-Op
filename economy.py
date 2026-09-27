@@ -37,6 +37,18 @@ from world_modes import (
 logger = logging.getLogger(__name__)
 
 
+def _bounded_listing(lines: list[str], *, limit: int = 18) -> str:
+    clean = [str(line) for line in lines if str(line).strip()]
+    if not clean:
+        return ""
+    visible = clean[: max(1, int(limit))]
+    omitted = max(0, len(clean) - len(visible))
+    if omitted:
+        visible.append(f"…and **{omitted} more**. Open /game for focused views.")
+    text = "\n".join(visible)
+    return text[:1024]
+
+
 def _shop_section(item: dict) -> str:
     item_type = str(item.get("type", "misc"))
     if "seed" in item_type:
@@ -572,16 +584,26 @@ class Economy(commands.Cog):
         items = user.get("items", {})
         flower = user.get("flower_stash", {})
         concentrates = user.get("concentrates", {})
-        items_desc = "\n".join(
-            f"**{name.title()}**: x{count}" for name, count in sorted(items.items()) if int(count) > 0
+        items_desc = _bounded_listing(
+            [
+                f"**{name.title()}**: x{count}"
+                for name, count in sorted(items.items())
+                if int(count) > 0
+            ]
         ) or "Nothing."
-        flower_desc = "\n".join(
-            f"🌿 **{name.title()}**: {count}g" for name, count in sorted(flower.items()) if int(count) > 0
+        flower_desc = _bounded_listing(
+            [
+                f"🌿 **{name.title()}**: {count}g"
+                for name, count in sorted(flower.items())
+                if int(count) > 0
+            ]
         ) or "Empty."
-        concentrate_desc = "\n".join(
-            f"🍯 **{name.title()}**: {count}g"
-            for name, count in sorted(concentrates.items())
-            if int(count) > 0
+        concentrate_desc = _bounded_listing(
+            [
+                f"🍯 **{name.title()}**: {count}g"
+                for name, count in sorted(concentrates.items())
+                if int(count) > 0
+            ]
         ) or "Empty."
         embed = discord.Embed(title=f"🎒 {ctx.author.name}'s Inventory", color=discord.Color.blue())
         embed.description = f"**Active save:** {scope.emoji} {scope.label}"
