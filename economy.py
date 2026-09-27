@@ -315,18 +315,27 @@ class ShopView(discord.ui.View):
                 buy_button.label = "Buying…"
 
             age = self._interaction_age_seconds(interaction)
+            if age is not None and age >= 1.0:
+                logger.warning(
+                    "Late Shop interaction dispatch guild=%s user=%s age=%.3fs",
+                    self.guild_id,
+                    self.owner_id,
+                    age,
+                )
             ack_started = time.monotonic()
             try:
                 if not interaction.response.is_done():
-                    await interaction.response.edit_message(view=self)
+                    try:
+                        await interaction.response.edit_message(view=self)
+                    except discord.HTTPException as exc:
+                        logger.warning(
+                            "Shop interaction acknowledgement failed guild=%s user=%s error=%s",
+                            self.guild_id,
+                            self.owner_id,
+                            exc,
+                        )
+                        raise
                 ack_elapsed = time.monotonic() - ack_started
-                if age is not None and age >= 1.0:
-                    logger.warning(
-                        "Late Shop interaction dispatch guild=%s user=%s age=%.3fs",
-                        self.guild_id,
-                        self.owner_id,
-                        age,
-                    )
                 if ack_elapsed >= 1.0:
                     logger.warning(
                         "Slow Shop interaction acknowledgement guild=%s user=%s elapsed=%.3fs",
