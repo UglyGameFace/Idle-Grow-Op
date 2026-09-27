@@ -80,6 +80,8 @@ _ACHIEVEMENTS = [
     _achievement("first_grow", "🌱 First Harvest", "Harvest your first plant.", 500, 250, ("stats", "harvested"), 1),
     _achievement("green_thumb", "🌿 Green Thumb", "Harvest 100 plants.", 5_000, 1_500, ("stats", "harvested"), 100),
     _achievement("master_grower", "🏡 Master Grower", "Harvest 500 plants.", 15_000, 5_000, ("stats", "harvested"), 500),
+    _achievement("plant_parent", "💧 Plant Parent", "Water 100 plants when they actually need care.", 7_500, 2_500, ("stats", "watered"), 100),
+    _achievement("grow_room_pro", "🌿 Grow Room Pro", "Water 500 plants when they actually need care.", 25_000, 7_500, ("stats", "watered"), 500),
     _achievement("weed_baron", "💰 Weed Baron", "Earn $1,000,000 total.", 50_000, 8_000, ("stats", "total_earned"), 1_000_000),
     _achievement("mogul", "🏦 Mogul", "Earn $10,000,000 total.", 250_000, 20_000, ("stats", "total_earned"), 10_000_000),
     _achievement("dab_king", "🍯 Dab King", "Process 100g concentrates.", 10_000, 4_000, ("stats", "concentrate_made"), 100),
@@ -136,6 +138,7 @@ ACHIEVEMENTS: dict[str, Achievement] = {item.id: item for item in _ACHIEVEMENTS}
 DAILY_QUEST_TEMPLATES = [
     DailyQuestTemplate("dq_plant", "🌰 Plant Seeds", "Plant some seeds.", "plant", 2, 5),
     DailyQuestTemplate("dq_harvest", "✂️ Harvest", "Harvest ready plants.", "harvest", 1, 4),
+    DailyQuestTemplate("dq_water", "💧 Tend the Grow Room", "Water plants that enter the care window.", "water", 1, 5, 3),
     DailyQuestTemplate("dq_collect", "📦 Collect Lab Output", "Collect finished lab batches.", "collect_dabs", 10, 60, 5),
     DailyQuestTemplate("dq_steal", "🔫 Rob Players", "Attempt robberies.", "steal", 1, 4, 3),
     DailyQuestTemplate("dq_heist", "🏦 Run Heists", "Pull bigger jobs.", "heist", 1, 3, 5),
