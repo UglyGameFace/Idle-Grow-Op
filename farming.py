@@ -112,10 +112,7 @@ class Farming(commands.Cog):
                                 user_id=ctx.author.id,
                             )
                             check_achievements(user)
-                            self.bot.db.mark_profile_dirty(
-                                scope.scope_id,
-                                ctx.author.id,
-                            )
+                            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
                         else:
                             plant_error = "❌ That seed is no longer available. Try again."
 
