@@ -697,6 +697,126 @@ def test_keno_launcher_disambiguates_small_numeric_bets_from_picks():
 
 
 
+
+
+def test_market_page_gates_multiplayer_actions_by_active_scope():
+    profile = {
+        "grams": 5_000,
+        "level": 1,
+        "xp": 0,
+        "plants": [],
+        "items": {},
+    }
+    private_scope = SimpleNamespace(multiplayer=False)
+
+    view = GameHubView(SimpleNamespace(), 42, 123, page="market")
+    view.rebuild(private_scope, profile, {})
+
+    for label in ("Browse Auctions", "Place Bid", "List Item", "Leaderboard"):
+        assert _button(view, label).disabled is True
+
+    view.rebuild(scope(), profile, {})
+
+    for label in ("Browse Auctions", "Place Bid", "List Item", "Leaderboard"):
+        assert _button(view, label).disabled is False
+
+
+def test_settings_page_exposes_full_player_settings_panels():
+    profile = {
+        "grams": 500,
+        "level": 1,
+        "xp": 0,
+        "plants": [],
+        "items": {},
+        "settings": {"notifications": True},
+        "profile_signature_privacy": {},
+    }
+    view = GameHubView(SimpleNamespace(), 42, 123, page="settings")
+    view.rebuild(scope(), profile, {})
+
+    labels = {getattr(item, "label", None) for item in view.children}
+    assert {
+        "Notifications",
+        "World Mode",
+        "Profile & Privacy",
+        "Help",
+        "Refresh",
+        "Close",
+    } <= labels
+
+
+def test_representative_hub_actions_route_to_authoritative_commands():
+    async def scenario():
+        interaction = SimpleNamespace()
+        view = GameHubView(SimpleNamespace(), 42, 123)
+        view.run_command = AsyncMock()
+
+        view.selected_seed = "schwag"
+        await view.handle_action(interaction, "plant")
+        view.run_command.assert_awaited_once_with(
+            interaction,
+            "plant",
+            strain_name="schwag",
+        )
+
+        view.run_command.reset_mock()
+        await view.handle_action(interaction, "sell_all")
+        view.run_command.assert_awaited_once_with(
+            interaction,
+            "sell",
+            amount="all",
+            strain_name=None,
+        )
+
+        view.run_command.reset_mock()
+        await view.handle_action(interaction, "auction")
+        view.run_command.assert_awaited_once_with(interaction, "auction")
+
+        view.run_command.reset_mock()
+        await view.handle_action(interaction, "collect")
+        view.run_command.assert_awaited_once_with(interaction, "collect")
+
+        view.run_command.reset_mock()
+        await view.handle_action(interaction, "heist_loud")
+        view.run_command.assert_awaited_once_with(
+            interaction,
+            "heist",
+            mode="solo",
+            arg="loud",
+        )
+
+        view.run_command.reset_mock()
+        await view.handle_action(interaction, "daily")
+        view.run_command.assert_awaited_once_with(interaction, "growdaily")
+
+        view.run_command.reset_mock()
+        await view.handle_action(interaction, "crew_info")
+        view.run_command.assert_awaited_once_with(interaction, "crew info")
+
+        view.run_command.reset_mock()
+        await view.handle_action(interaction, "casino")
+        view.run_command.assert_awaited_once_with(interaction, "casino")
+
+        view.run_command.reset_mock()
+        await view.handle_action(interaction, "profile-settings")
+        view.run_command.assert_awaited_once_with(interaction, "profile-settings")
+
+    asyncio.run(scenario())
+
+
+def test_settings_notifications_action_uses_owned_notification_panel_path():
+    async def scenario():
+        interaction = SimpleNamespace()
+        view = GameHubView(SimpleNamespace(), 42, 123, page="settings")
+        view.open_notifications = AsyncMock()
+
+        await view.handle_action(interaction, "notifications")
+
+        view.open_notifications.assert_awaited_once_with(interaction)
+
+    asyncio.run(scenario())
+
+
 def test_game_hub_timeout_disables_visible_controls_and_edits_message():
     class Message:
         def __init__(self):
