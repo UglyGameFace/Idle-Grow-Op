@@ -13,9 +13,14 @@ from economy import ShopView
 from notification_preferences import NotificationPreferencesView
 from onboarding import choose_onboarding_step
 from persistence_context import GuildContextRequired, require_guild_id
+from plant_care import (
+    CARE_WATER_THRESHOLD,
+    plant_care_status,
+    plant_moisture,
+)
 from plant_lifecycle import MAX_PLANTS_PER_ACTION, plant_is_ready, plant_ready_at
 from progression_core import xp_needed_for_level
-from utils import CONCENTRATE_TYPES, GROWTH_CYCLES
+from utils import CONCENTRATE_TYPES, GROWTH_CYCLES, inv_get
 from world_modes import effective_pot_capacity, resolve_game_scope
 
 
@@ -52,6 +57,7 @@ HUB_SINGLE_FLIGHT_ACTIONS = frozenset(
     {
         "next_move",
         "plant",
+        "water",
         "harvest",
         "sell_all",
         "collect",
@@ -68,6 +74,7 @@ HUB_SINGLE_FLIGHT_ACTIONS = frozenset(
 SAFE_HUB_COMMANDS = frozenset(
     {
         "harvest",
+        "water",
         "status",
         "plant",
         "inventory",
@@ -1002,6 +1009,13 @@ class GameHubView(discord.ui.View):
             for plant in plants
             if plant_is_ready(profile, world, plant, now=now)
         )
+        water_needed_count = 0
+        for plant in plants:
+            if plant_is_ready(profile, world, plant, now=now):
+                continue
+            moisture = plant_moisture(profile, world, plant, now=now)
+            if moisture is not None and moisture <= CARE_WATER_THRESHOLD:
+                water_needed_count += 1
         flower = _sum_mapping(profile.get("flower_stash"))
         queue = [
             item
@@ -1048,6 +1062,14 @@ class GameHubView(discord.ui.View):
                     self.selected_seed is None
                     or selected_available <= 0
                 ),
+            )
+            self.add_action(
+                "water",
+                "Water All",
+                "💧",
+                row=3,
+                style=discord.ButtonStyle.primary,
+                disabled=water_needed_count <= 0,
             )
             self.add_action(
                 "harvest",
@@ -1481,6 +1503,8 @@ class GameHubView(discord.ui.View):
             )
         if step.key == "harvest":
             return await self.run_command(interaction, "harvest")
+        if step.key == "water":
+            return await self.run_command(interaction, "water")
         if step.key == "collect":
             return await self.run_command(interaction, "collect")
         if step.key == "status":
@@ -1613,6 +1637,7 @@ class GameHubView(discord.ui.View):
 
         command_name = {
             "harvest": "harvest",
+            "water": "water",
             "status": "status",
             "inventory": "inventory",
             "collect": "collect",
@@ -1727,14 +1752,28 @@ class GameHub(commands.Cog):
 
         if page == "grow":
             lines = []
+            exact_moisture = inv_get(profile, "moisture meter") > 0
             for index, plant in enumerate(plants[:10], start=1):
-                strain = str(plant.get("strain", "unknown")).title()
+                strain_key = str(plant.get("strain", "unknown")).strip().lower()
+                strain = str(
+                    GROWTH_CYCLES.get(strain_key, {}).get(
+                        "display_name",
+                        strain_key.title(),
+                    )
+                )
                 status = (
                     "✅ READY"
                     if plant_is_ready(profile, world, plant, now=now)
                     else f"<t:{int(plant_ready_at(profile, world, plant))}:R>"
                 )
-                lines.append(f"**{index}. {strain}** • {status}")
+                care = plant_care_status(
+                    profile,
+                    world,
+                    plant,
+                    now=now,
+                    exact=exact_moisture,
+                )
+                lines.append(f"**{index}. {strain}** • {status} • {care}")
             embed.add_field(
                 name="Your Garden",
                 value="\n".join(lines)
