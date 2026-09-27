@@ -1,3 +1,5 @@
+import asyncio
+import logging
 import time
 
 import discord
@@ -30,6 +32,9 @@ from world_modes import (
     require_same_multiplayer_scope,
     resolve_game_scope,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def _shop_section(item: dict) -> str:
@@ -187,6 +192,7 @@ class ShopView(discord.ui.View):
         self.selected_item: str | None = None
         self.purchase_quantity: str = "1"
         self.message = None
+        self._purchase_lock = asyncio.Lock()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.owner_id:
@@ -201,7 +207,23 @@ class ShopView(discord.ui.View):
                 ephemeral=True,
             )
             return False
+        if self._purchase_lock.locked():
+            await interaction.response.send_message(
+                "⏳ Your purchase is still finishing. No duplicate purchase was started.",
+                ephemeral=True,
+            )
+            return False
         return True
+
+    @staticmethod
+    def _interaction_age_seconds(interaction: discord.Interaction) -> float | None:
+        created_at = getattr(interaction, "created_at", None)
+        if created_at is None:
+            return None
+        try:
+            return max(0.0, time.time() - created_at.timestamp())
+        except (AttributeError, TypeError, ValueError):
+            return None
 
     def rebuild(self, profile: dict) -> None:
         self.clear_items()
@@ -271,29 +293,86 @@ class ShopView(discord.ui.View):
                 "Choose an item first.",
                 ephemeral=True,
             )
-        if not interaction.response.is_done():
-            await interaction.response.defer()
+        if self._purchase_lock.locked():
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "⏳ Your purchase is still finishing. No duplicate purchase was started.",
+                    ephemeral=True,
+                )
+            return
 
-        scope, profile = await self.state()
-        if jail_left_seconds(profile) > 0:
-            return await self.refresh(
-                interaction,
-                notice="🚔 You cannot shop while jailed.",
+        async with self._purchase_lock:
+            buy_button = next(
+                (
+                    child
+                    for child in self.children
+                    if getattr(child, "label", None) == "Buy Selected"
+                ),
+                None,
             )
+            if buy_button is not None:
+                buy_button.disabled = True
+                buy_button.label = "Buying…"
 
-        quantity = self.cog.resolve_shop_quantity(
-            profile,
-            self.selected_item,
-            self.purchase_quantity,
-        )
-        _success, message = await self.cog._purchase_item(
-            scope,
-            profile,
-            self.owner_id,
-            self.selected_item,
-            quantity=quantity,
-        )
-        await self.refresh(interaction, notice=message)
+            age = self._interaction_age_seconds(interaction)
+            if age is not None and age >= 1.0:
+                logger.warning(
+                    "Late Shop interaction dispatch guild=%s user=%s age=%.3fs",
+                    self.guild_id,
+                    self.owner_id,
+                    age,
+                )
+            ack_started = time.monotonic()
+            try:
+                if not interaction.response.is_done():
+                    try:
+                        await interaction.response.edit_message(view=self)
+                    except discord.HTTPException as exc:
+                        logger.warning(
+                            "Shop interaction acknowledgement failed guild=%s user=%s error=%s",
+                            self.guild_id,
+                            self.owner_id,
+                            exc,
+                        )
+                        raise
+                ack_elapsed = time.monotonic() - ack_started
+                if ack_elapsed >= 1.0:
+                    logger.warning(
+                        "Slow Shop interaction acknowledgement guild=%s user=%s elapsed=%.3fs",
+                        self.guild_id,
+                        self.owner_id,
+                        ack_elapsed,
+                    )
+
+                scope, profile = await self.state()
+                if jail_left_seconds(profile) > 0:
+                    return await self.refresh(
+                        interaction,
+                        notice="🚔 You cannot shop while jailed.",
+                    )
+
+                quantity = self.cog.resolve_shop_quantity(
+                    profile,
+                    self.selected_item,
+                    self.purchase_quantity,
+                )
+                _success, message = await self.cog._purchase_item(
+                    scope,
+                    profile,
+                    self.owner_id,
+                    self.selected_item,
+                    quantity=quantity,
+                )
+                await self.refresh(interaction, notice=message)
+            finally:
+                if buy_button is not None and buy_button in self.children:
+                    buy_button.disabled = False
+                    buy_button.label = "Buy Selected"
+                    if self.message is not None:
+                        try:
+                            await self.message.edit(view=self)
+                        except discord.HTTPException:
+                            pass
 
     async def refresh_button(self, interaction: discord.Interaction) -> None:
         await self.refresh(interaction)
