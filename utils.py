@@ -2,6 +2,8 @@ import time
 
 import discord
 
+from strain_catalog import GROWTH_CYCLES, generated_seed_shop_items
+
 
 POT_UPGRADE_LIMITS = {"clay pot": 3, "plastic pot": 5, "smart pot": 10}
 
@@ -14,24 +16,6 @@ WEATHER_TYPES = {
     "Windy 💨": {"growth": 0.95, "price": 0.95},
     "420 Day 🍁": {"growth": 2.00, "price": 2.00},
     "Harvest Moon 🌕": {"growth": 1.50, "price": 1.50},
-}
-
-GROWTH_CYCLES = {
-    "schwag": {"time": 300, "base_value": 15, "yield": (5, 10), "level_req": 1, "genetics": ["Indica"], "display_name": "Schwag"},
-    "mexican brick": {"time": 600, "base_value": 20, "yield": (8, 12), "level_req": 1, "genetics": ["Sativa"], "display_name": "Mexican Brick"},
-    "purple haze": {"time": 1800, "base_value": 60, "yield": (10, 20), "level_req": 3, "genetics": ["Sativa"], "display_name": "Purple Haze"},
-    "sour diesel": {"time": 3600, "base_value": 125, "yield": (15, 30), "level_req": 5, "genetics": ["Sativa"], "display_name": "Sour Diesel"},
-    "granddaddy purp": {"time": 5400, "base_value": 150, "yield": (20, 35), "level_req": 7, "genetics": ["Indica"], "display_name": "Granddaddy Purp"},
-    "og kush": {"time": 7200, "base_value": 250, "yield": (20, 40), "level_req": 10, "genetics": ["Indica"], "display_name": "OG Kush"},
-    "blue dream": {"time": 14400, "base_value": 500, "yield": (30, 60), "level_req": 15, "genetics": ["Hybrid"], "display_name": "Blue Dream"},
-    "girl scout cookies": {"time": 18000, "base_value": 600, "yield": (35, 70), "level_req": 18, "genetics": ["Hybrid"], "display_name": "GSC"},
-    "white widow": {"time": 28800, "base_value": 1000, "yield": (50, 100), "level_req": 20, "genetics": ["Indica"], "display_name": "White Widow"},
-    "alaskan thunder f*ck": {"time": 30000, "base_value": 1100, "yield": (55, 110), "level_req": 22, "genetics": ["Sativa"], "display_name": "ATF"},
-    "gelato": {"time": 21600, "base_value": 750, "yield": (40, 80), "level_req": 25, "genetics": ["Hybrid"], "display_name": "Gelato #33"},
-    "zkittlez": {"time": 32400, "base_value": 1200, "yield": (60, 120), "level_req": 30, "genetics": ["Indica"], "display_name": "Zkittlez"},
-    "mac 1": {"time": 43200, "base_value": 2000, "yield": (80, 160), "level_req": 40, "genetics": ["Hybrid"], "display_name": "MAC 1"},
-    "donny burger": {"time": 50000, "base_value": 2500, "yield": (100, 200), "level_req": 45, "genetics": ["Indica", "GMO"], "display_name": "Donny Burger"},
-    "durban poison": {"time": 55000, "base_value": 2800, "yield": (110, 220), "level_req": 50, "genetics": ["Sativa", "Landrace"], "display_name": "Durban Poison"},
 }
 
 SLOTS_SYMBOLS = ["🍒", "🍋", "🍇", "💎", "7️⃣"]
@@ -79,6 +63,9 @@ SHOP_ITEMS = {
     "pager": {"type": "tool", "cost": 2500, "description": "+20% Daily Rewards.", "level_req": 5},
     "lawyer": {"type": "tool", "cost": 50000, "description": "Reduces jail time by 25%.", "level_req": 30},
 }
+
+for _seed_name, _seed_item in generated_seed_shop_items().items():
+    SHOP_ITEMS.setdefault(_seed_name, _seed_item)
 
 CONCENTRATE_TYPES = {
     "hash": {"level_req": 3, "req_item": None, "yield_ratio": 0.20, "value_mult": 2.0},
