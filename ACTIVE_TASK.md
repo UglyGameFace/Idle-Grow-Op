@@ -13,7 +13,7 @@ This audit covers the complete Idle Grow repository and deployed behavior:
 - CI/tests, Discloud deployment assumptions, stale compatibility logic, temporary artifacts, duplicated ownership, and dead code
 
 ## Status
-PHASE 11 LIVE VALIDATION — COMPONENT SINGLE-FLIGHT + ACK DIAGNOSTICS IN PROGRESS
+PHASE 11 LIVE VALIDATION — SELECTED-STRAIN BULK GROW IN PROGRESS
 
 ## Phase 1 Complete: Command Surface and Runtime Baseline
 Validated on exact head cae20b52d942a6a21137005f53a5778ad03d2149 with CI run 690 successful.
@@ -409,6 +409,25 @@ Implementation branch:
 - `fix/phase11-player-ui-response-contract`
 - Adds a cross-panel runtime regression suite covering delete-on-close and acknowledgement-before-state/mutation ordering.
 
+## Phase 11 Follow-up: Selected-Strain Bulk Grow
+
+Production baseline:
+- PR #44 merged the component single-flight + acknowledgement diagnostics fix at `78c8e5a6150969f2daa7f97d4cdea4af855eea52`.
+- Exact-head CI passed and Discloud reported the merge commit deployed successfully.
+
+Requested UX:
+- Grow page must support planting multiple copies of the specifically selected strain without button spam.
+- Quantity choices should be bounded by owned seeds, empty pots, and the existing 25-plants-per-action safety ceiling.
+- Existing `/qplant` remains the smart auto-selection shortcut; it must not become the owner for selected-strain planting.
+
+Implementation:
+- `/plant` remains the canonical selected-strain mutation owner and accepts an optional batch count.
+- Batch planting runs under the existing database lock, removes only the selected seed, stamps one frozen `ready_at` per new plant, advances plant progression by the actual planted count, checks achievements once, and dirties the profile once.
+- Game Hub Grow adds a quantity selector with 1 / 5 / 10 / 25 plus a dynamic max when the true available amount falls between those values.
+- The UI resets quantity to 1 when the selected strain changes, preventing accidental large batches on a newly selected seed.
+- Quantities are capped at 25 per action, matching the existing `/qplant` safety limit.
+- Existing single-flight protection remains authoritative, so repeated Plant taps cannot start overlapping bulk mutations.
+
 ## Phase 11 Live Finding: Duplicate-Tap Race + Normal Shop Ack Timeout
 
 Observed post-PR #42 on the live bot:
@@ -627,4 +646,4 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - PR #42 merged player UI response timing + real Close behavior at `65658325093144cb68385a92b27003bde595e534`; exact-head CI and Discloud deployment succeeded.
 
 ## Next Step
-Validate and deploy the component single-flight + acknowledgement-diagnostic fix. Then test fresh Grow and Shop panels with one normal press and deliberate repeated taps. Use the new timing warnings to classify any remaining timeout before changing persistence or command logic.
+Validate the selected-strain bulk Grow implementation on exact-head CI, merge and deploy it, then live-test 1, fixed bulk, dynamic max, full-pot, and duplicate-tap behavior from a fresh Grow panel. Continue Phase 11 only after those live checks are clean.

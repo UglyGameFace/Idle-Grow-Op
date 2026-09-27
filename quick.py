@@ -4,7 +4,7 @@ import discord
 from discord.ext import commands
 
 from persistence_context import GuildContextRequired, require_guild_id
-from plant_lifecycle import plant_is_ready, stamp_plant_ready_at
+from plant_lifecycle import MAX_PLANTS_PER_ACTION, plant_is_ready, stamp_plant_ready_at
 from progression_core import add_progress, check_achievements
 from world_modes import (
     effective_market_multiplier,
@@ -21,7 +21,7 @@ from utils import (
     jail_left_seconds,
 )
 
-QPLANT_MAX_PLANT_PER_CALL = 25
+QPLANT_MAX_PLANT_PER_CALL = MAX_PLANTS_PER_ACTION
 
 
 def _safe_int(value, default=0):

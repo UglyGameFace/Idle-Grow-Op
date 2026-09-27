@@ -7,6 +7,7 @@ from discord.ext import commands
 from economy_integrity import calculate_harvest_outcome
 from persistence_context import require_guild_id
 from plant_lifecycle import (
+    MAX_PLANTS_PER_ACTION,
     plant_duration_seconds,
     plant_is_ready,
     plant_ready_at,
@@ -28,8 +29,8 @@ class Farming(commands.Cog):
         self.bot = bot
 
     @commands.hybrid_command(name="plant", aliases=["p", "grow"])
-    async def plant(self, ctx, *, strain_name: str = ""):
-        """Plant a seed in the current server's grow operation."""
+    async def plant(self, ctx, count: int = 1, *, strain_name: str = ""):
+        """Plant one or more seeds of one selected strain."""
         guild_id = require_guild_id(ctx)
         scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
         user = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
@@ -39,7 +40,7 @@ class Farming(commands.Cog):
         if not strain_name:
             return await ctx.send(
                 "🌱 Open **`/game` → Grow** to choose an owned seed and plant it, "
-                "or use the shortcut `/plant strain_name:<strain>`."
+                "or use the shortcut `/plant strain_name:<strain> count:<number>`."
             )
 
         clean_name = strain_name.lower().replace(" seed", "").strip()
@@ -48,50 +49,93 @@ class Farming(commands.Cog):
         if clean_name not in GROWTH_CYCLES:
             return await ctx.send(f"❌ Unknown strain: **{clean_name}**. Check `/strains`.")
 
+        try:
+            requested = int(count or 1)
+        except (TypeError, ValueError):
+            requested = 1
+        requested = max(1, min(requested, MAX_PLANTS_PER_ACTION))
+
         strain_info = GROWTH_CYCLES[clean_name]
         world = await self.bot.db.get_world(scope.scope_id)
 
         plant_error = None
-        planted_at = 0.0
-        new_plant = None
+        planted_count = 0
+        ready_at = 0.0
+        limited_by = None
         async with self.bot.db.lock:
             if int(user.get("level", 1)) < int(strain_info.get("level_req", 1)):
                 plant_error = f"🔒 You need Level **{strain_info['level_req']}** to grow this."
-            elif inv_get(user, seed_item_name) < 1:
-                plant_error = (
-                    f"❌ You don\'t have any **{clean_name.title()} Seeds**!\n"
-                    "Open **`/game` → Grow → Seed Shop** to buy one without typing item names."
-                )
             else:
-                max_pots = effective_pot_capacity(user, scope)
-                current_plants = user.setdefault("plants", [])
-                if len(current_plants) >= max_pots:
+                owned = max(0, inv_get(user, seed_item_name))
+                if owned < 1:
                     plant_error = (
-                        f"🚫 **No Pots Available!** ({len(current_plants)}/{max_pots})\n"
-                        "Harvest plants or buy Pot Upgrades in the shop."
+                        f"❌ You don't have any **{clean_name.title()} Seeds**!\n"
+                        "Open **`/game` → Grow → Seed Shop** to buy one without typing item names."
                     )
-                elif not inv_take(user, seed_item_name, 1):
-                    plant_error = "❌ That seed is no longer available. Try again."
                 else:
-                    planted_at = time.time()
-                    new_plant = {"strain": clean_name}
-                    ready_at = stamp_plant_ready_at(
-                        user,
-                        world,
-                        new_plant,
-                        planted_at=planted_at,
-                    )
-                    current_plants.append(new_plant)
-                    add_progress(user, "plant", 1, user_id=ctx.author.id)
-                    check_achievements(user)
-                    self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                    max_pots = effective_pot_capacity(user, scope)
+                    current_plants = user.setdefault("plants", [])
+                    free_slots = max(0, max_pots - len(current_plants))
+                    if free_slots <= 0:
+                        plant_error = (
+                            f"🚫 **No Pots Available!** ({len(current_plants)}/{max_pots})\n"
+                            "Harvest plants or buy Pot Upgrades in the shop."
+                        )
+                    else:
+                        target = min(requested, owned, free_slots)
+                        if target < requested:
+                            if free_slots < requested and free_slots <= owned:
+                                limited_by = "empty pots"
+                            elif owned < requested:
+                                limited_by = "owned seeds"
+
+                        planted_at = time.time()
+                        for _ in range(target):
+                            if not inv_take(user, seed_item_name, 1):
+                                limited_by = "owned seeds"
+                                break
+                            new_plant = {"strain": clean_name}
+                            ready_at = stamp_plant_ready_at(
+                                user,
+                                world,
+                                new_plant,
+                                planted_at=planted_at,
+                            )
+                            current_plants.append(new_plant)
+                            planted_count += 1
+
+                        if planted_count:
+                            add_progress(
+                                user,
+                                "plant",
+                                planted_count,
+                                user_id=ctx.author.id,
+                            )
+                            check_achievements(user)
+                            self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+                        else:
+                            plant_error = "❌ That seed is no longer available. Try again."
 
         if plant_error:
             return await ctx.send(plant_error)
-        await ctx.send(
-            f"🌱 **Planted:** {clean_name.title()}\n"
-            f"⏳ **Ready:** {discord_relative_time(ready_at)}"
-        )
+
+        if planted_count == 1:
+            planted_line = f"🌱 **Planted:** {clean_name.title()}"
+        else:
+            planted_line = (
+                f"🌱 **Planted:** {planted_count} × {clean_name.title()}"
+            )
+        lines = [
+            planted_line,
+            f"⏳ **Ready:** {discord_relative_time(ready_at)}",
+        ]
+        if planted_count < requested:
+            reason = limited_by or "current availability"
+            lines.append(
+                f"ℹ️ Requested **{requested}** • planted **{planted_count}** "
+                f"(limited by {reason})."
+            )
+        await ctx.send("\n".join(lines))
 
     @commands.hybrid_command(name="harvest", aliases=["h"])
     async def harvest(self, ctx):
