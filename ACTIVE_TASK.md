@@ -13,7 +13,7 @@ This audit covers the complete Idle Grow repository and deployed behavior:
 - CI/tests, Discloud deployment assumptions, stale compatibility logic, temporary artifacts, duplicated ownership, and dead code
 
 ## Status
-PHASE 11 LIVE VALIDATION — PLAYER UI RESPONSE CONTRACT + REAL CLOSE IN PROGRESS
+PHASE 11 LIVE VALIDATION — REPRESENTATIVE HUB ACTION VALIDATION IN PROGRESS
 
 ## Phase 1 Complete: Command Surface and Runtime Baseline
 Validated on exact head cae20b52d942a6a21137005f53a5778ad03d2149 with CI run 690 successful.
@@ -409,6 +409,28 @@ Implementation branch:
 - `fix/phase11-player-ui-response-contract`
 - Adds a cross-panel runtime regression suite covering delete-on-close and acknowledgement-before-state/mutation ordering.
 
+## Phase 11 Post-PR #42: Representative Hub Action Validation
+
+Production state:
+- PR #42 merged at `65658325093144cb68385a92b27003bde595e534`.
+- Exact PR #42 head CI passed compilation, undefined-name checks, full pytest, extension loading, and legacy-artifact checks.
+- Discloud reported `success` for the PR #42 merge commit.
+
+Source-side validation now covers:
+- Grow direct planting routes to the canonical `plant` command with the selected strain.
+- Inventory sell-all routes to canonical `sell amount=all`.
+- Market browse routes to canonical `auction`; private saves disable auction/bid/list/leaderboard controls.
+- Lab collect routes to canonical `collect`.
+- Crime loud heist routes to canonical `heist mode=solo arg=loud`.
+- Progress daily routes to canonical `growdaily`.
+- Social crew info routes to canonical nested `crew info`.
+- Casino profile routes to canonical `casino`.
+- Settings Profile & Privacy routes to canonical `profile-settings`.
+- Settings Notifications uses the owned notification-panel path.
+- Settings page exposes Notifications, World Mode, Profile & Privacy, Help, Refresh, and Close.
+
+Remaining evidence is live Discord behavior, not source ownership: open fresh post-deploy panels and exercise representative actions without timeout, dead-panel, or wrong-route errors.
+
 ## Phase 11 Follow-up: Hub Component Controls Must Share One Ack Contract
 
 Audit finding:
@@ -579,6 +601,7 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - Exact PR #31 source head CI: successful.
 - PR #31 gameplay merge-commit Discloud status: successful.
 - PR #32 merged the post-merge task-state correction; subsequent documentation-only commits do not change the validated PR #31 gameplay revision.
+- PR #42 merged player UI response timing + real Close behavior at `65658325093144cb68385a92b27003bde595e534`; exact-head CI and Discloud deployment succeeded.
 
 ## Next Step
-Validate and deploy the player UI response contract and real Close behavior, then resume representative Grow, Market, Lab, Crime, Social/Crew, Casino, and Settings live checks from fresh panels.
+Run representative Grow, Market, Lab, Crime, Social/Crew, Casino, and Settings checks from fresh post-PR #42 Discord panels. Record any exact live failure before making another runtime change. If those pass, finish the weather-readiness and legacy XP persistence checks and close Phase 11.
