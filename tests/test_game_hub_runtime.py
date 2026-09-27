@@ -817,6 +817,83 @@ def test_settings_notifications_action_uses_owned_notification_panel_path():
     asyncio.run(scenario())
 
 
+def test_hub_mutation_action_is_single_flight_and_acknowledges_busy_first():
+    class Response:
+        def __init__(self):
+            self.done = False
+            self.edit_calls = []
+            self.sent = []
+
+        def is_done(self):
+            return self.done
+
+        async def edit_message(self, **kwargs):
+            self.done = True
+            self.edit_calls.append(kwargs)
+
+        async def send_message(self, content=None, **kwargs):
+            self.done = True
+            self.sent.append((content, kwargs))
+
+    async def scenario():
+        profile = {
+            "grams": 500,
+            "level": 1,
+            "xp": 0,
+            "plants": [],
+            "items": {"schwag seed": 2},
+        }
+        view = GameHubView(SimpleNamespace(), 42, 123, page="grow")
+        view.selected_seed = "schwag"
+        view.rebuild(scope(), profile, {})
+        view.selected_seed = "schwag"
+
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        calls = []
+
+        async def slow_handle(interaction, action):
+            calls.append(action)
+            assert interaction.response.done is True
+            working = next(
+                item
+                for item in view.children
+                if getattr(item, "action", None) == "plant"
+            )
+            assert working.disabled is True
+            assert working.label == "Working…"
+            entered.set()
+            await release.wait()
+
+        view.handle_action = slow_handle
+
+        first = SimpleNamespace(response=Response())
+        second = SimpleNamespace(response=Response())
+
+        first_task = asyncio.create_task(view.dispatch_action(first, "plant"))
+        await entered.wait()
+        await view.dispatch_action(second, "plant")
+
+        assert calls == ["plant"]
+        assert len(first.response.edit_calls) == 1
+        assert first.response.edit_calls[0]["view"] is view
+        assert len(second.response.sent) == 1
+        assert "No duplicate action was started" in second.response.sent[0][0]
+
+        release.set()
+        await first_task
+
+        plant_button = next(
+            item
+            for item in view.children
+            if getattr(item, "action", None) == "plant"
+        )
+        assert plant_button.label == "Plant Selected"
+        assert plant_button.disabled is False
+
+    asyncio.run(scenario())
+
+
 def test_game_hub_timeout_disables_visible_controls_and_edits_message():
     class Message:
         def __init__(self):
