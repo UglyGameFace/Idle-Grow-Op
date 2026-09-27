@@ -25,9 +25,6 @@ from utils import (
     jail_guard,
     jail_left_seconds,
 )
-logger = logging.getLogger(__name__)
-
-
 from world_modes import (
     WorldModeDenied,
     effective_market_multiplier,
@@ -35,6 +32,9 @@ from world_modes import (
     require_same_multiplayer_scope,
     resolve_game_scope,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def _shop_section(item: dict) -> str:
