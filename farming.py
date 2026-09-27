@@ -6,6 +6,15 @@ from discord.ext import commands
 
 from economy_integrity import calculate_harvest_outcome
 from persistence_context import require_guild_id
+from plant_care import (
+    CARE_WATER_THRESHOLD,
+    care_multiplier,
+    initialize_plant_care,
+    plant_care_grade,
+    plant_care_status,
+    plant_moisture,
+    water_plant,
+)
 from plant_lifecycle import (
     MAX_PLANTS_PER_ACTION,
     plant_duration_seconds,
@@ -167,6 +176,10 @@ class Farming(commands.Cog):
                                 new_plant,
                                 planted_at=planted_at,
                             )
+                            initialize_plant_care(
+                                new_plant,
+                                now=planted_at,
+                            )
                             current_plants.append(new_plant)
                             planted_count += 1
 
@@ -203,6 +216,71 @@ class Farming(commands.Cog):
             )
         await ctx.send("\n".join(lines))
 
+    @commands.hybrid_command(name="water", aliases=["waterall"])
+    async def water(self, ctx):
+        """Water growing plants that currently need care."""
+        guild_id = require_guild_id(ctx)
+        scope = await resolve_game_scope(self.bot.db, guild_id, ctx.author.id)
+        user = await self.bot.db.get_profile(scope.scope_id, ctx.author.id)
+        if await jail_guard(ctx, user, "water"):
+            return
+        world = await self.bot.db.get_world(scope.scope_id)
+        now = time.time()
+
+        watered = 0
+        skipped_fresh = 0
+        skipped_ready = 0
+        async with self.bot.db.lock:
+            plants = [
+                plant
+                for plant in user.get("plants", []) or []
+                if isinstance(plant, dict)
+            ]
+            if not plants:
+                return await ctx.send(
+                    "🌱 You have no growing plants to water."
+                )
+
+            for plant in plants:
+                result = water_plant(user, world, plant, now=now)
+                if result["watered"]:
+                    watered += 1
+                elif result["reason"] == "ready":
+                    skipped_ready += 1
+                else:
+                    skipped_fresh += 1
+
+            if watered:
+                stats = user.setdefault("stats", {})
+                stats["watered"] = max(0, int(stats.get("watered", 0))) + watered
+                add_progress(
+                    user,
+                    "water",
+                    watered,
+                    user_id=ctx.author.id,
+                )
+                check_achievements(user)
+                self.bot.db.mark_profile_dirty(scope.scope_id, ctx.author.id)
+
+        if watered <= 0:
+            if skipped_ready and not skipped_fresh:
+                return await ctx.send(
+                    "✂️ Your plants are ready to harvest. They do not need more water."
+                )
+            return await ctx.send(
+                "💧 Your growing plants are still comfortably watered. No care action was needed."
+            )
+
+        details = [f"💧 **Watered:** {watered} plant(s)"]
+        if skipped_fresh:
+            details.append(f"🌿 **Still fresh:** {skipped_fresh}")
+        if skipped_ready:
+            details.append(f"✂️ **Already ready:** {skipped_ready}")
+        details.append(
+            "Care affects the **game harvest condition**, not the plant's ready time."
+        )
+        await ctx.send("\n".join(details))
+
     @commands.hybrid_command(name="harvest", aliases=["h"])
     async def harvest(self, ctx):
         """Harvest ready plants into this server's flower stash."""
@@ -228,13 +306,32 @@ class Farming(commands.Cog):
                 if inv_get(user, "hydroponic") > 0:
                     multiplier += 1.0
 
+                harvest_now = time.time()
+                ready_care = {}
+                for plant in plants:
+                    if not plant_is_ready(user, world, plant, now=harvest_now):
+                        continue
+                    label, _care_mult, _score = plant_care_grade(
+                        user,
+                        world,
+                        plant,
+                        now=harvest_now,
+                    )
+                    ready_care[label] = ready_care.get(label, 0) + 1
+
                 outcome = calculate_harvest_outcome(
                     plants,
-                    now=time.time(),
+                    now=harvest_now,
                     strain_configs=GROWTH_CYCLES,
                     grow_time_for_plant=lambda plant: plant_duration_seconds(user, world, plant),
                     yield_multiplier=multiplier,
                     randint=random.randint,
+                    yield_multiplier_for_plant=lambda plant: care_multiplier(
+                        user,
+                        world,
+                        plant,
+                        now=harvest_now,
+                    ),
                 )
 
                 if outcome["harvested_count"] == 0:
@@ -276,6 +373,16 @@ class Farming(commands.Cog):
         embed.add_field(name="Yield", value=f"**{outcome['total_yield']}g** Flower", inline=True)
         embed.add_field(name="XP Gained", value=f"+{outcome['total_xp']} XP", inline=True)
         embed.add_field(name="Plants", value=harvested_summary, inline=False)
+        if ready_care:
+            care_summary = " • ".join(
+                f"{label}: {count}"
+                for label, count in sorted(ready_care.items())
+            )
+            embed.add_field(
+                name="Care Grade",
+                value=care_summary,
+                inline=False,
+            )
         embed.set_footer(text=f"Remaining Plants: {len(outcome['remaining_plants'])}")
         await ctx.send(embed=embed)
 
@@ -319,13 +426,40 @@ class Farming(commands.Cog):
                 minutes, seconds = divmod(remaining_seconds, 60)
                 status_text = f"**{percent}%** ({int(minutes)}m {int(seconds)}s left)"
 
-            lines.append(f"**{index}. {strain.title()}**\n{bar} {status_text}")
+            exact_moisture = inv_get(user, "moisture meter") > 0
+            care_text = plant_care_status(
+                user,
+                world,
+                plant,
+                now=now,
+                exact=exact_moisture,
+            )
+            lines.append(
+                f"**{index}. {strain.title()}**\n"
+                f"{bar} {status_text}\n{care_text}"
+            )
 
         embed.description = "\n\n".join(lines)
-        if ready_count > 0:
-            embed.set_footer(
-                text=f"{ready_count} plants ready! Use Game → Grow → Harvest Ready or /harvest."
+        needs_water = sum(
+            1
+            for plant in plants
+            if not plant_is_ready(user, world, plant, now=now)
+            and (
+                (plant_moisture(user, world, plant, now=now) or 100.0)
+                <= CARE_WATER_THRESHOLD
             )
+        )
+        footer_parts = []
+        if ready_count > 0:
+            footer_parts.append(
+                f"{ready_count} ready to harvest"
+            )
+        if needs_water > 0:
+            footer_parts.append(
+                f"{needs_water} need water"
+            )
+        if footer_parts:
+            embed.set_footer(text=" • ".join(footer_parts))
         await ctx.send(embed=embed)
 
     STRAIN_PAGE_SIZE = 12
