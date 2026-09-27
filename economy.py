@@ -800,7 +800,13 @@ class Economy(commands.Cog):
             category=normalized,
         )
         view.rebuild(profile)
-        embed = self.build_shop_embed(scope, profile, category=normalized)
+        embed = self.build_shop_embed(
+            scope,
+            profile,
+            category=normalized,
+            page=view.page,
+            total_pages=view.total_pages,
+        )
 
         if interaction is not None:
             view.message = await interaction.edit_original_response(
