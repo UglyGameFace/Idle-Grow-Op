@@ -12,6 +12,9 @@ from typing import Any, Mapping, MutableMapping
 from utils import GROWTH_CYCLES, get_plant_grow_time
 
 
+MAX_PLANTS_PER_ACTION = 25
+
+
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
