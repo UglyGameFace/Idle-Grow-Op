@@ -170,6 +170,7 @@ def calculate_harvest_outcome(
     grow_time_for_plant: Callable[[dict[str, Any]], int],
     yield_multiplier: float,
     randint: Callable[[int, int], int],
+    yield_multiplier_for_plant: Callable[[dict[str, Any]], float] | None = None,
 ) -> dict[str, Any]:
     """Calculate a harvest without mutating player state."""
     if yield_multiplier < 0:
@@ -197,7 +198,15 @@ def calculate_harvest_outcome(
         minimum = max(0, int(minimum))
         maximum = max(minimum, int(maximum))
         base_yield = randint(minimum, maximum)
-        final_yield = max(0, int(base_yield * yield_multiplier))
+        plant_multiplier = 1.0
+        if yield_multiplier_for_plant is not None:
+            plant_multiplier = float(yield_multiplier_for_plant(plant))
+            if plant_multiplier < 0:
+                raise ValueError("per-plant yield multiplier cannot be negative")
+        final_yield = max(
+            0,
+            int(base_yield * yield_multiplier * plant_multiplier),
+        )
 
         flower_by_strain[strain] = flower_by_strain.get(strain, 0) + final_yield
         total_xp += int(grow_time / 100) + 5
