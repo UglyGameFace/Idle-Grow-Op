@@ -140,7 +140,7 @@ def test_plant_callback_advances_current_plant_quest():
 def test_bulk_plant_selected_strain_is_atomic_and_advances_progress_by_batch():
     async def scenario():
         guild_id, user_id = 123456789012345678, 42
-        db = MemoryDatabase(guild_id, user_id)
+        db = MemoryDatabase(guild_id, user_id, policy=POLICY_SERVER)
         profile = {
             "level": 50,
             "xp": 0,
