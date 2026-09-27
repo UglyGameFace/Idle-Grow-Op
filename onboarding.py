@@ -8,6 +8,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from plant_care import CARE_WATER_THRESHOLD, plant_moisture
 from plant_lifecycle import plant_is_ready
 from utils import GROWTH_CYCLES, SHOP_ITEMS, inv_get
 from world_modes import GameScope, POLICY_CHOICE, normalize_world_mode_config, resolve_game_scope
@@ -131,12 +132,32 @@ def choose_onboarding_step(
 
     plants = [item for item in profile.get("plants", []) or [] if isinstance(item, dict)]
     if plants:
+        water_needed = 0
+        for plant in plants:
+            if plant_is_ready(profile, world, plant, now=current_time):
+                continue
+            moisture = plant_moisture(
+                profile,
+                world,
+                plant,
+                now=current_time,
+            )
+            if moisture is not None and moisture <= CARE_WATER_THRESHOLD:
+                water_needed += 1
+        if water_needed:
+            return OnboardingStep(
+                "water",
+                "💧",
+                "Give your grow room some attention",
+                "/water",
+                f"{water_needed} growing plant(s) are in the Water All care window. Care affects game harvest condition, not the ready timer.",
+            )
         return OnboardingStep(
             "status",
             "⏳",
             "Check your garden while it grows",
             "/status",
-            "Your plants are still growing. Weather and equipment can change the timer, so the live garden view is the source of truth.",
+            "Your plants are still growing. Their ready time is fixed when planted; the garden view also shows their current game care condition.",
         )
 
     owned_seed = _owned_plantable_seed(profile)
