@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from types import SimpleNamespace
@@ -45,6 +46,23 @@ CASINO_GAMES = (
     ("crash", "Crash", "🚀"),
     ("wheel", "Wheel", "🎯"),
     ("keno", "Keno", "🔢"),
+)
+
+HUB_SINGLE_FLIGHT_ACTIONS = frozenset(
+    {
+        "next_move",
+        "plant",
+        "harvest",
+        "sell_all",
+        "collect",
+        "heist_stealth",
+        "heist_loud",
+        "heist_con",
+        "steal_selected",
+        "daily",
+        "crew_leave",
+        "crew_war",
+    }
 )
 
 SAFE_HUB_COMMANDS = frozenset(
@@ -703,7 +721,7 @@ class HubActionButton(discord.ui.Button):
         self.action = action
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        await self.view.handle_action(interaction, self.action)
+        await self.view.dispatch_action(interaction, self.action)
 
 
 class GameHubView(discord.ui.View):
@@ -727,6 +745,7 @@ class GameHubView(discord.ui.View):
         self.selected_steal_target = None
         self.selected_casino_game: str | None = None
         self.message = None
+        self._action_lock = asyncio.Lock()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.owner_id or interaction.guild_id != self.guild_id:
@@ -735,10 +754,96 @@ class GameHubView(discord.ui.View):
                 ephemeral=True,
             )
             return False
+        if self._action_lock.locked():
+            await interaction.response.send_message(
+                "⏳ Your previous game action is still finishing. No duplicate action was started.",
+                ephemeral=True,
+            )
+            return False
         return True
 
     async def state(self):
         return await self.cog.state(self.guild_id, self.owner_id)
+
+    @staticmethod
+    def _interaction_age_seconds(interaction: discord.Interaction) -> float | None:
+        created_at = getattr(interaction, "created_at", None)
+        if created_at is None:
+            return None
+        try:
+            return max(0.0, time.time() - created_at.timestamp())
+        except (AttributeError, TypeError, ValueError):
+            return None
+
+    async def _reject_duplicate_action(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        message = "⏳ Your previous game action is still finishing. No duplicate action was started."
+        if not interaction.response.is_done():
+            await interaction.response.send_message(message, ephemeral=True)
+            return
+        followup = getattr(interaction, "followup", None)
+        if followup is not None:
+            await followup.send(message, ephemeral=True)
+
+    async def dispatch_action(
+        self,
+        interaction: discord.Interaction,
+        action: str,
+    ) -> None:
+        if action not in HUB_SINGLE_FLIGHT_ACTIONS:
+            return await self.handle_action(interaction, action)
+        if self._action_lock.locked():
+            return await self._reject_duplicate_action(interaction)
+
+        async with self._action_lock:
+            busy_button = next(
+                (
+                    item
+                    for item in self.children
+                    if isinstance(item, HubActionButton) and item.action == action
+                ),
+                None,
+            )
+            original_label = getattr(busy_button, "label", None)
+            original_disabled = getattr(busy_button, "disabled", False)
+            if busy_button is not None:
+                busy_button.disabled = True
+                busy_button.label = "Working…"
+
+            age = self._interaction_age_seconds(interaction)
+            ack_started = time.monotonic()
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.edit_message(view=self)
+                ack_elapsed = time.monotonic() - ack_started
+                if age is not None and age >= 1.0:
+                    logger.warning(
+                        "Late Hub interaction dispatch action=%s guild=%s user=%s age=%.3fs",
+                        action,
+                        self.guild_id,
+                        self.owner_id,
+                        age,
+                    )
+                if ack_elapsed >= 1.0:
+                    logger.warning(
+                        "Slow Hub interaction acknowledgement action=%s guild=%s user=%s elapsed=%.3fs",
+                        action,
+                        self.guild_id,
+                        self.owner_id,
+                        ack_elapsed,
+                    )
+                await self.handle_action(interaction, action)
+            finally:
+                if busy_button is not None and busy_button in self.children:
+                    busy_button.disabled = original_disabled
+                    busy_button.label = original_label
+                    if self.message is not None:
+                        try:
+                            await self.message.edit(view=self)
+                        except discord.HTTPException:
+                            pass
 
     def add_action(
         self,
