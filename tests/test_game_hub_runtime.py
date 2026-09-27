@@ -667,7 +667,7 @@ def test_grow_page_bulk_quantity_caps_at_twenty_five():
         if isinstance(item, HubPlantQuantitySelect)
     )
     assert [option.value for option in quantity.options] == ["1", "5", "10", "25"]
-    assert quantity.options[-1].label == "25 • Max Available"
+    assert quantity.options[-1].label == "25 • Max This Action"
 
 
 def test_grow_page_resets_bulk_quantity_when_seed_changes():
