@@ -813,19 +813,29 @@ class GameHubView(discord.ui.View):
                 busy_button.label = "Working…"
 
             age = self._interaction_age_seconds(interaction)
+            if age is not None and age >= 1.0:
+                logger.warning(
+                    "Late Hub interaction dispatch action=%s guild=%s user=%s age=%.3fs",
+                    action,
+                    self.guild_id,
+                    self.owner_id,
+                    age,
+                )
             ack_started = time.monotonic()
             try:
                 if not interaction.response.is_done():
-                    await interaction.response.edit_message(view=self)
+                    try:
+                        await interaction.response.edit_message(view=self)
+                    except discord.HTTPException as exc:
+                        logger.warning(
+                            "Hub interaction acknowledgement failed action=%s guild=%s user=%s error=%s",
+                            action,
+                            self.guild_id,
+                            self.owner_id,
+                            exc,
+                        )
+                        raise
                 ack_elapsed = time.monotonic() - ack_started
-                if age is not None and age >= 1.0:
-                    logger.warning(
-                        "Late Hub interaction dispatch action=%s guild=%s user=%s age=%.3fs",
-                        action,
-                        self.guild_id,
-                        self.owner_id,
-                        age,
-                    )
                 if ack_elapsed >= 1.0:
                     logger.warning(
                         "Slow Hub interaction acknowledgement action=%s guild=%s user=%s elapsed=%.3fs",
