@@ -13,6 +13,7 @@ from game_hub import (
     GameHubView,
     HubCasinoGameSelect,
     HubConcentrateSelect,
+    HubPlantQuantitySelect,
     HubStealTargetSelect,
     SAFE_HUB_COMMANDS,
     _keno_bet_token,
@@ -605,6 +606,108 @@ def test_grow_inventory_and_lab_buttons_disable_when_action_has_no_work(monkeypa
     assert _button(lab, "Collect Ready").disabled is False
 
 
+def test_grow_page_bulk_quantity_tracks_selected_seed_and_available_pots():
+    profile = {
+        "grams": 500,
+        "level": 50,
+        "xp": 0,
+        "plants": [],
+        "items": {"white widow seed": 17},
+        "max_pots": 20,
+    }
+    view = GameHubView(SimpleNamespace(), 42, 123, page="grow")
+    view.selected_seed = "white widow"
+    view.rebuild(scope(), profile, {})
+
+    quantity = next(
+        item
+        for item in view.children
+        if isinstance(item, HubPlantQuantitySelect)
+    )
+    values = [option.value for option in quantity.options]
+    labels = [option.label for option in quantity.options]
+
+    assert values == ["1", "5", "10", "17"]
+    assert labels[-1] == "17 • Max Available"
+    assert quantity.disabled is False
+    assert view.selected_plant_quantity == "1"
+    assert _button(view, "Plant Selected").disabled is False
+
+    profile["plants"] = [
+        {"strain": "schwag", "planted_at": 0.0, "ready_at": 1_000.0}
+        for _ in range(18)
+    ]
+    view.rebuild(scope(), profile, {})
+
+    quantity = next(
+        item
+        for item in view.children
+        if isinstance(item, HubPlantQuantitySelect)
+    )
+    assert [option.value for option in quantity.options] == ["1", "2"]
+    assert quantity.options[-1].label == "2 • Max Available"
+
+
+def test_grow_page_bulk_quantity_caps_at_twenty_five():
+    profile = {
+        "grams": 500,
+        "level": 50,
+        "xp": 0,
+        "plants": [],
+        "items": {"white widow seed": 100},
+        "max_pots": 100,
+    }
+    view = GameHubView(SimpleNamespace(), 42, 123, page="grow")
+    view.selected_seed = "white widow"
+    view.rebuild(scope(), profile, {})
+
+    quantity = next(
+        item
+        for item in view.children
+        if isinstance(item, HubPlantQuantitySelect)
+    )
+    assert [option.value for option in quantity.options] == ["1", "5", "10", "25"]
+    assert quantity.options[-1].label == "25 • Max Available"
+
+
+def test_grow_page_resets_bulk_quantity_when_seed_changes():
+    class SelectInteraction:
+        pass
+
+    async def scenario():
+        profile = {
+            "grams": 500,
+            "level": 50,
+            "xp": 0,
+            "plants": [],
+            "items": {
+                "white widow seed": 20,
+                "schwag seed": 20,
+            },
+            "max_pots": 20,
+        }
+        view = GameHubView(SimpleNamespace(), 42, 123, page="grow")
+        view.selected_seed = "white widow"
+        view.selected_plant_quantity = "10"
+        view.rebuild(scope(), profile, {})
+
+        seed_select = next(
+            item
+            for item in view.children
+            if item.__class__.__name__ == "HubSeedSelect"
+        )
+        seed_select._values = ["schwag"]
+        view.refresh = AsyncMock()
+
+        await seed_select.callback(SelectInteraction())
+
+        assert view.selected_seed == "schwag"
+        assert view.selected_plant_quantity == "1"
+        view.refresh.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
 def test_social_page_changes_from_join_flow_to_member_controls():
     profile = {
         "grams": 100_000,
@@ -752,10 +855,12 @@ def test_representative_hub_actions_route_to_authoritative_commands():
         view.run_command = AsyncMock()
 
         view.selected_seed = "schwag"
+        view.selected_plant_quantity = "10"
         await view.handle_action(interaction, "plant")
         view.run_command.assert_awaited_once_with(
             interaction,
             "plant",
+            count=10,
             strain_name="schwag",
         )
 
