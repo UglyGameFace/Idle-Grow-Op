@@ -659,11 +659,16 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - Add a regression that loads a legacy list-only inventory, verifies the seed picker and quantity choices, and proves Plant Selected stays enabled.
 - PR #46 merged as commit `926371fed66c462c55890b64886de628a50a21ea` with passing main-head CI and Discloud commit status. Live Discord acceptance remains necessary; this source-only change is not Phase 11 closure.
 
-## Phase 11 Follow-up: Component Callback Error Visibility (PR pending)
+## Phase 11 Follow-up: Component Callback Error Visibility (PR #47 merged)
 - Game Hub and Shop interactive views lack an explicit `on_error()` route to the configured guild error reporter. Exceptions from seed/quantity selectors, panel refreshes, purchasing, or component callbacks fall to discord.py's default view handler.
 - Add one small shared component error reporting path that logs the original traceback, reports safe metadata to the existing `bot.report_command_error` callback, and acknowledges the player via an ephemeral initial or followup response according to the interaction state.
 - The reporter failure must never suppress the player's feedback. Discord HTTP failures during error feedback must not rethrow and obscure the original error.
-- Add regression coverage for both Game Hub and Shop, initial versus previously acknowledged interactions, and a failing configured reporter. Do not claim these synthetic tests establish live Discord behavior.
+- Added regression coverage for both Game Hub and Shop, initial versus previously acknowledged interactions, and a failing configured reporter. PR #47 merged as `cc7b34986c7c3731ec0b406c48a58929a6465ed0`, with successful main-head CI and Discloud commit status. These synthetic tests do not establish live Discord behavior.
+
+## Phase 11 Finding: Legacy Pot Upgrade Limits and Shop Availability (PR pending)
+- Pot upgrade capacity checks consult `user["items"]` directly, while older profiles can still have list-only `inventory`. The purchase handler previously skipped canonical `inv_get()` normalization for these upgrade types, potentially permitting another purchase beyond `POT_UPGRADE_LIMITS`.
+- Normalize the inventory before purchase capacity validation, keeping the existing costs, item limits, and one-transaction database lock. Confirm a maxed legacy profile receives a rejection without a wallet charge or dirty-write and that a valid older profile retains its preexisting upgrade count.
+- The Shop item picker and preview should show the real maxed state rather than `Available` by using the existing authoritative pot capacity validator. Add regression tests; live Shop confirmation stays pending.
 
 ## Next Step
 After exact-head CI and Discloud deployment succeed, perform these live acceptance cases on fresh Discord panels, in one server and the actual selected world mode:
