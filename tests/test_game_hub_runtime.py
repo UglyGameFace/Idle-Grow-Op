@@ -701,6 +701,37 @@ def test_grow_page_bulk_quantity_tracks_selected_seed_and_available_pots():
     assert quantity.options[-1].label == "2 • Max Available"
 
 
+def test_grow_page_shows_legacy_inventory_seeds_accepted_by_plant_command():
+    # Legacy profiles can still have only the pre-items inventory list.
+    # The canonical inv_get() reader migrates that list when first accessed.
+    profile = {
+        "grams": 500,
+        "level": 1,
+        "xp": 0,
+        "plants": [],
+        "inventory": ["schwag seed", "schwag seed", "mexican brick seed"],
+        "max_pots": 3,
+    }
+    view = GameHubView(SimpleNamespace(), 42, 123, page="grow")
+    view.selected_seed = "schwag"
+    view.rebuild(scope(), profile, {})
+
+    seed_select = next(
+        item for item in view.children if item.__class__.__name__ == "HubSeedSelect"
+    )
+    owned = {option.value: option.description for option in seed_select.options}
+    assert owned["schwag"] == "2 seed(s) owned"
+    assert owned["mexican brick"] == "1 seed(s) owned"
+
+    quantity = next(
+        item for item in view.children if isinstance(item, HubPlantQuantitySelect)
+    )
+    assert [option.value for option in quantity.options] == ["1", "2"]
+    assert view.selected_seed == "schwag"
+    assert _button(view, "Plant Selected").disabled is False
+    assert profile["items"]["schwag seed"] == 2
+
+
 def test_grow_page_bulk_quantity_caps_at_twenty_five():
     profile = {
         "grams": 500,
