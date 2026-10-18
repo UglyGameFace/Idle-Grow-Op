@@ -20,6 +20,7 @@ from utils import (
     POT_UPGRADE_LIMITS,
     SHOP_ITEMS,
     _shop_price,
+    _inv_dict,
     inv_add,
     inv_get,
     inv_take,
@@ -528,7 +529,9 @@ class Economy(commands.Cog):
     @commands.hybrid_command(name="inventory", aliases=["inv", "bag", "stash"])
     async def inventory(self, ctx):
         scope, user = await self._profile(ctx)
-        items = user.get("items", {})
+        # The inventory view must agree with the canonical Grow/Shop reader
+        # for profiles whose items still live in the legacy inventory list.
+        items = _inv_dict(user)
         flower = user.get("flower_stash", {})
         concentrates = user.get("concentrates", {})
         items_desc = "\n".join(
