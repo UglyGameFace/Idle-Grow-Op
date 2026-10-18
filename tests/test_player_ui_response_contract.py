@@ -53,6 +53,11 @@ def test_game_hub_and_shop_report_component_failures_and_acknowledge_safely():
                 view = view_class(SimpleNamespace(bot=bot), 42, 123)
                 response = ResponseStub()
                 response.done = already_acked
+
+                async def assert_ack_before_reporting(**_kwargs):
+                    assert response.done, "Reporter must not delay the initial Discord acknowledgement"
+
+                reported.side_effect = assert_ack_before_reporting
                 followup = SimpleNamespace(send=AsyncMock())
                 interaction = SimpleNamespace(
                     user=SimpleNamespace(id=42),

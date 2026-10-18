@@ -1,8 +1,8 @@
 """Shared error handling for private player-facing Discord UI panels.
 
 Component exceptions that escape callbacks do not go through on_command_error.
-Always keep local traceback details and attempt the configured guild reporter,
-then give the player a safe ephemeral acknowledgement if Discord still accepts it.
+Always keep local traceback details and acknowledge the player promptly,
+then attempt the configured guild reporter without delaying the acknowledgement.
 """
 
 from __future__ import annotations
@@ -42,6 +42,23 @@ async def report_player_ui_error(
         exc_info=(type(error), error, error.__traceback__),
     )
 
+    message = "❌ This panel action failed. Please try again or reopen the panel."
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+    except discord.HTTPException:
+        # The interaction token may already have expired or the message may
+        # have been deleted. The original failure is logged above regardless.
+        logger.warning(
+            "Could not send player UI error feedback surface=%s guild=%s user=%s",
+            surface,
+            guild_id,
+            user_id,
+            exc_info=True,
+        )
+
     reporter = getattr(bot, "report_command_error", None)
     if callable(reporter):
         try:
@@ -61,19 +78,3 @@ async def report_player_ui_error(
                 user_id,
             )
 
-    message = "❌ This panel action failed. Please try again or reopen the panel."
-    try:
-        if interaction.response.is_done():
-            await interaction.followup.send(message, ephemeral=True)
-        else:
-            await interaction.response.send_message(message, ephemeral=True)
-    except discord.HTTPException:
-        # The interaction token may already have expired or the message may
-        # have been deleted. The original failure is logged above regardless.
-        logger.warning(
-            "Could not send player UI error feedback surface=%s guild=%s user=%s",
-            surface,
-            guild_id,
-            user_id,
-            exc_info=True,
-        )
