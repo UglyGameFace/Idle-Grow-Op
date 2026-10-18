@@ -652,12 +652,18 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - Added focused runtime regression coverage for both response states and both denial types.
 - **Validation pending:** exact new main-head CI and Discloud status; no authenticated live Discord or Discloud logs are available through this GitHub-only workflow.
 
-## Phase 11 Follow-up: Legacy Inventory / Grow Picker Consistency (PR pending)
+## Phase 11 Follow-up: Legacy Inventory / Grow Picker Consistency (PR #46 merged)
 - The canonical `utils.inv_get()` reader recognizes legacy inventory-list seed records when `items` is absent, and the /plant mutation uses this reader.
 - The Grow picker, quantity selector, and button enabled-state previously read only `profile["items"]`, hiding otherwise plantable legacy seeds and contradicting the actual command.
 - Align all three Game Hub surfaces with `inv_get()` without introducing a duplicate inventory parser or changing planting/persistence semantics.
 - Add a regression that loads a legacy list-only inventory, verifies the seed picker and quantity choices, and proves Plant Selected stays enabled.
-- Exact PR-head CI/Discloud validation and live Discord acceptance remain necessary; do not treat this source-only change as closure.
+- PR #46 merged as commit `926371fed66c462c55890b64886de628a50a21ea` with passing main-head CI and Discloud commit status. Live Discord acceptance remains necessary; this source-only change is not Phase 11 closure.
+
+## Phase 11 Follow-up: Component Callback Error Visibility (PR pending)
+- Game Hub and Shop interactive views lack an explicit `on_error()` route to the configured guild error reporter. Exceptions from seed/quantity selectors, panel refreshes, purchasing, or component callbacks fall to discord.py's default view handler.
+- Add one small shared component error reporting path that logs the original traceback, reports safe metadata to the existing `bot.report_command_error` callback, and acknowledges the player via an ephemeral initial or followup response according to the interaction state.
+- The reporter failure must never suppress the player's feedback. Discord HTTP failures during error feedback must not rethrow and obscure the original error.
+- Add regression coverage for both Game Hub and Shop, initial versus previously acknowledged interactions, and a failing configured reporter. Do not claim these synthetic tests establish live Discord behavior.
 
 ## Next Step
 After exact-head CI and Discloud deployment succeed, perform these live acceptance cases on fresh Discord panels, in one server and the actual selected world mode:

@@ -13,6 +13,7 @@ from economy_integrity import (
 )
 from persistence_context import GuildContextRequired, require_guild_id
 from progression_core import add_progress, check_achievements
+from player_ui_errors import report_player_ui_error
 from utils import (
     CONCENTRATE_TYPES,
     GROWTH_CYCLES,
@@ -388,6 +389,20 @@ class ShopView(discord.ui.View):
         except discord.NotFound:
             pass
         self.stop()
+
+    async def on_error(
+        self,
+        interaction: discord.Interaction,
+        error: Exception,
+        item: discord.ui.Item,
+    ) -> None:
+        await report_player_ui_error(
+            self.cog.bot,
+            interaction,
+            error,
+            item,
+            surface="Shop",
+        )
 
     async def on_timeout(self) -> None:
         for child in self.children:
