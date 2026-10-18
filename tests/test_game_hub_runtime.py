@@ -822,7 +822,7 @@ def test_game_hub_plants_legacy_seed_through_real_command_path():
         assert database.profile["plants"][0]["strain"] == "schwag"
         assert database.profile["items"].get("schwag seed", 0) == 1
         assert database.dirty == [(123, 42)]
-        assert "Planted" in followup.send.await_args.args[0]
+        assert "Planted" in followup.send.await_args.kwargs["content"]
         view.refresh_original.assert_awaited_once_with(interaction)
         await bot.close()
 
