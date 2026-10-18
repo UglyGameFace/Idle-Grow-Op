@@ -485,6 +485,82 @@ def test_run_command_skips_second_defer_for_preacknowledged_component():
     asyncio.run(scenario())
 
 
+def test_hub_command_failure_acknowledges_and_reports_even_when_error_channel_fails():
+    class ProbeCog(commands.Cog):
+        @commands.hybrid_command(name="help")
+        async def help_command(self, _ctx):
+            raise RuntimeError("simulated game failure")
+
+    class Response:
+        def __init__(self, *, acknowledged):
+            self.done = acknowledged
+            self.defer_calls = 0
+
+        def is_done(self):
+            return self.done
+
+        async def defer(self, **kwargs):
+            assert not self.done
+            assert kwargs == {"ephemeral": True, "thinking": True}
+            self.defer_calls += 1
+            self.done = True
+
+    async def scenario():
+        bot = commands.Bot(
+            command_prefix="!",
+            intents=discord.Intents.none(),
+            help_command=None,
+        )
+        await bot.add_cog(ProbeCog())
+        view = GameHubView(GameHub(bot), 42, 123)
+        view.refresh_original = AsyncMock()
+
+        for acknowledged in (False, True):
+            response = Response(acknowledged=acknowledged)
+            calls = []
+            async def send_feedback(message, *, ephemeral):
+                assert response.done is True
+                assert ephemeral is True
+                calls.append(("feedback", message))
+
+            async def report_failure(**metadata):
+                assert response.done is True
+                assert calls and calls[0][0] == "feedback"
+                calls.append(("report", metadata))
+                raise RuntimeError("error channel temporarily unavailable")
+
+            bot.report_command_error = report_failure
+            interaction = SimpleNamespace(
+                user=SimpleNamespace(id=42),
+                guild=SimpleNamespace(id=123),
+                guild_id=123,
+                channel=SimpleNamespace(id=456),
+                message=None,
+                created_at=datetime.datetime.now(datetime.timezone.utc),
+                response=response,
+                followup=SimpleNamespace(send=send_feedback),
+                client=bot,
+            )
+
+            await view.run_command(interaction, "help")
+
+            assert response.defer_calls == (0 if acknowledged else 1)
+            assert len(calls) == 2
+            assert "panel action failed" in calls[0][1]
+            assert calls[1][1] == {
+                "guild_id": 123,
+                "title": "Game Hub action interaction failure",
+                "description": (
+                    "surface=Game Hub action control=/help guild=123 "
+                    "user=42 error_type=RuntimeError"
+                ),
+            }
+        view.refresh_original.assert_not_awaited()
+        await bot.close()
+
+    asyncio.run(scenario())
+
+
 def test_unavailable_hub_actions_respect_initial_or_acknowledged_response():
     class Response:
         def __init__(self, *, acknowledged):

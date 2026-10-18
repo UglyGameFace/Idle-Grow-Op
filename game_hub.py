@@ -1392,27 +1392,16 @@ class GameHubView(discord.ui.View):
             )
             return
         except Exception as exc:
-            logger.exception(
-                "Game hub action failed command=%s guild=%s user=%s",
-                command_name,
-                interaction.guild_id,
-                interaction.user.id,
+            # Command callbacks execute inside this adapter, not discord.py's
+            # View.on_error(). Use the same response-first reporting path as
+            # the Game Hub and Shop component handlers.
+            return await report_player_ui_error(
+                self.cog.bot,
+                interaction,
+                exc,
+                SimpleNamespace(label=f"/{command_name}"),
+                surface="Game Hub action",
             )
-            reporter = getattr(self.cog.bot, "report_command_error", None)
-            if callable(reporter):
-                await reporter(
-                    guild_id=interaction.guild_id,
-                    title="Game hub action failure",
-                    description=(
-                        f"command={command_name} user={interaction.user.id} "
-                        f"error={type(exc).__name__}: {exc}"
-                    ),
-                )
-            await interaction.followup.send(
-                "❌ Something went wrong running that action. The error was recorded.",
-                ephemeral=True,
-            )
-            return
         await self.refresh_original(interaction)
 
     async def perform_next_move(self, interaction: discord.Interaction) -> None:
