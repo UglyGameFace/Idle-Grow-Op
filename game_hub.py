@@ -15,7 +15,7 @@ from onboarding import choose_onboarding_step
 from persistence_context import GuildContextRequired, require_guild_id
 from plant_lifecycle import MAX_PLANTS_PER_ACTION, plant_is_ready, plant_ready_at
 from progression_core import xp_needed_for_level
-from utils import CONCENTRATE_TYPES, GROWTH_CYCLES
+from utils import CONCENTRATE_TYPES, GROWTH_CYCLES, inv_get
 from world_modes import effective_pot_capacity, resolve_game_scope
 
 
@@ -206,15 +206,12 @@ class HubPageSelect(discord.ui.Select):
 class HubSeedSelect(discord.ui.Select):
     def __init__(self, view: "GameHubView", profile: dict) -> None:
         level = max(1, _positive_int(profile.get("level")) or 1)
-        items = profile.get("items")
-        items = items if isinstance(items, dict) else {}
         options = []
-        for item_name, amount in sorted(items.items()):
-            if not str(item_name).endswith(" seed") or _positive_int(amount) <= 0:
-                continue
-            strain = str(item_name)[:-5].strip().lower()
-            config = GROWTH_CYCLES.get(strain)
-            if not isinstance(config, dict):
+        for strain, config in sorted(GROWTH_CYCLES.items()):
+            # Match the canonical planting inventory reader, including old
+            # profiles whose seeds are still stored in the legacy list.
+            amount = _positive_int(inv_get(profile, f"{strain} seed"))
+            if not isinstance(config, dict) or amount <= 0:
                 continue
             required = max(1, _positive_int(config.get("level_req")) or 1)
             if level < required:
@@ -261,10 +258,8 @@ class HubPlantQuantitySelect(discord.ui.Select):
             0,
             effective_pot_capacity(profile, scope) - len(plants),
         )
-        items = profile.get("items")
-        items = items if isinstance(items, dict) else {}
         owned = (
-            _positive_int(items.get(f"{view.selected_seed} seed"))
+            _positive_int(inv_get(profile, f"{view.selected_seed} seed"))
             if view.selected_seed
             else 0
         )
@@ -985,10 +980,8 @@ class GameHubView(discord.ui.View):
         crew_id = profile.get("crew_id")
 
         if self.page == "grow":
-            items = profile.get("items")
-            items = items if isinstance(items, dict) else {}
             selected_owned = (
-                _positive_int(items.get(f"{self.selected_seed} seed"))
+                _positive_int(inv_get(profile, f"{self.selected_seed} seed"))
                 if self.selected_seed
                 else 0
             )

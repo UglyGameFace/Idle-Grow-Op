@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock
 import discord
 from discord.ext import commands
 
+from farming import Farming
+
 from game_hub import (
     GameHub,
     HubInteractionContext,
@@ -19,7 +21,7 @@ from game_hub import (
     _keno_bet_token,
 )
 from utils import CONCENTRATE_TYPES
-from world_modes import GameScope, MODE_SERVER, POLICY_SERVER
+from world_modes import GameScope, MODE_SERVER, POLICY_SERVER, new_world_mode_config
 
 
 def scope():
@@ -699,6 +701,132 @@ def test_grow_page_bulk_quantity_tracks_selected_seed_and_available_pots():
     )
     assert [option.value for option in quantity.options] == ["1", "2"]
     assert quantity.options[-1].label == "2 • Max Available"
+
+
+def test_grow_page_shows_legacy_inventory_seeds_accepted_by_plant_command():
+    # Legacy profiles can still have only the pre-items inventory list.
+    # The canonical inv_get() reader migrates that list when first accessed.
+    profile = {
+        "grams": 500,
+        "level": 1,
+        "xp": 0,
+        "plants": [],
+        "inventory": ["schwag seed", "schwag seed", "mexican brick seed"],
+        "max_pots": 3,
+    }
+    view = GameHubView(SimpleNamespace(), 42, 123, page="grow")
+    view.selected_seed = "schwag"
+    view.rebuild(scope(), profile, {})
+
+    seed_select = next(
+        item for item in view.children if item.__class__.__name__ == "HubSeedSelect"
+    )
+    owned = {option.value: option.description for option in seed_select.options}
+    assert owned["schwag"] == "2 seed(s) owned"
+    assert owned["mexican brick"] == "1 seed(s) owned"
+
+    quantity = next(
+        item for item in view.children if isinstance(item, HubPlantQuantitySelect)
+    )
+    assert [option.value for option in quantity.options] == ["1", "2"]
+    assert view.selected_seed == "schwag"
+    assert _button(view, "Plant Selected").disabled is False
+    assert profile["items"]["schwag seed"] == 2
+
+
+
+def test_game_hub_plants_legacy_seed_through_real_command_path():
+    class MemoryDatabase:
+        def __init__(self):
+            self.lock = asyncio.Lock()
+            self.profile = {
+                "grams": 500,
+                "level": 1,
+                "xp": 0,
+                "plants": [],
+                "inventory": ["schwag seed", "schwag seed"],
+                "max_pots": 3,
+                "stats": {},
+                "achievements": [],
+            }
+            self.world = {
+                "world_mode_config": {
+                    **new_world_mode_config(),
+                    "policy": POLICY_SERVER,
+                    "configured": True,
+                },
+                "weather": "Sunny ☀️",
+            }
+            self.dirty = []
+
+        async def get_profile(self, scope_id, user_id):
+            assert (scope_id, user_id) == (123, 42)
+            return self.profile
+
+        async def get_world(self, scope_id):
+            assert scope_id == 123
+            return self.world
+
+        def mark_profile_dirty(self, scope_id, user_id):
+            self.dirty.append((scope_id, user_id))
+
+    class Response:
+        def __init__(self):
+            self.done = False
+            self.deferred = []
+
+        def is_done(self):
+            return self.done
+
+        async def defer(self, **kwargs):
+            self.done = True
+            self.deferred.append(kwargs)
+
+    async def scenario():
+        database = MemoryDatabase()
+        bot = commands.Bot(
+            command_prefix="!",
+            intents=discord.Intents.none(),
+            help_command=None,
+        )
+        bot.db = database
+        await bot.add_cog(Farming(bot))
+
+        game_hub = GameHub(bot)
+        view = GameHubView(game_hub, 42, 123, page="grow")
+        view.selected_seed = "schwag"
+        view.rebuild(scope(), database.profile, database.world)
+        assert _button(view, "Plant Selected").disabled is False
+
+        response = Response()
+        followup = SimpleNamespace(
+            send=AsyncMock(return_value=SimpleNamespace()),
+        )
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=42, name="Tester"),
+            guild=SimpleNamespace(id=123),
+            guild_id=123,
+            channel=SimpleNamespace(id=456),
+            created_at=datetime.datetime.now(datetime.timezone.utc),
+            message=None,
+            response=response,
+            followup=followup,
+            client=bot,
+        )
+        view.refresh_original = AsyncMock()
+
+        await view.handle_action(interaction, "plant")
+
+        assert response.deferred == [{"ephemeral": True, "thinking": True}]
+        assert len(database.profile["plants"]) == 1
+        assert database.profile["plants"][0]["strain"] == "schwag"
+        assert database.profile["items"].get("schwag seed", 0) == 1
+        assert database.dirty == [(123, 42)]
+        assert "Planted" in followup.send.await_args.kwargs["content"]
+        view.refresh_original.assert_awaited_once_with(interaction)
+        await bot.close()
+
+    asyncio.run(scenario())
 
 
 def test_grow_page_bulk_quantity_caps_at_twenty_five():

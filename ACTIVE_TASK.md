@@ -652,6 +652,13 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - Added focused runtime regression coverage for both response states and both denial types.
 - **Validation pending:** exact new main-head CI and Discloud status; no authenticated live Discord or Discloud logs are available through this GitHub-only workflow.
 
+## Phase 11 Follow-up: Legacy Inventory / Grow Picker Consistency (PR pending)
+- The canonical `utils.inv_get()` reader recognizes legacy inventory-list seed records when `items` is absent, and the /plant mutation uses this reader.
+- The Grow picker, quantity selector, and button enabled-state previously read only `profile["items"]`, hiding otherwise plantable legacy seeds and contradicting the actual command.
+- Align all three Game Hub surfaces with `inv_get()` without introducing a duplicate inventory parser or changing planting/persistence semantics.
+- Add a regression that loads a legacy list-only inventory, verifies the seed picker and quantity choices, and proves Plant Selected stays enabled.
+- Exact PR-head CI/Discloud validation and live Discord acceptance remain necessary; do not treat this source-only change as closure.
+
 ## Next Step
 After exact-head CI and Discloud deployment succeed, perform these live acceptance cases on fresh Discord panels, in one server and the actual selected world mode:
 1. Confirm `/game`, `/menu`, `/play`, and `/shop` open on first press, including a cold profile load.
