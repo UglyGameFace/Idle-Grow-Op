@@ -675,10 +675,15 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - Use the existing shared `report_player_ui_error()` path for command-adapter exceptions too. Preserve canonical allowed command checks and cooldown behavior, and label the failing command so server logs identify its origin.
 - Added regression using a real hybrid command callback failure in both acknowledgment states. PR #49 merged as `c3492ba533c97c28ab953bcba61e5842febdc91e`, with successful exact-main CI and Discloud commit status. Phase 11 still requires live Discord acceptance.
 
-## Phase 11 Finding: Legacy Inventory Display Consistency (PR pending)
+## Phase 11 Finding: Legacy Inventory Display Consistency (PR #50 merged)
 - `/inventory` currently reads `profile["items"]` directly even when older player profiles store items only under the legacy list-based `inventory` key. In that case players can see `Nothing.` while the already-updated Grow and Shop commands recognize their owned items.
 - Use the exact existing `_inv_dict()` normalization helper already behind `inv_get()` to render inventory items consistently. No new migration parser, gameplay math, purchases, inventory schema, or persistence behavior.
-- Add command-level tests for legacy-list items and for an existing authoritative `items` dictionary. Keep live inventory acceptance pending.
+- Added command-level tests for legacy-list items and the authoritative `items` dictionary. PR #50 merged as `6e9b325f9e07c8ca1a16775d0b7000ae8c116e9f`; main-head GitHub CI and Discloud commit status both succeeded. Live inventory acceptance remains pending.
+
+## Phase 11 Finding: Missing Shop Seed Prices Misrepresented as Free in `/calc` (PR pending)
+- Seven strains defined in `GROWTH_CYCLES` are not present in `SHOP_ITEMS`, but the profit calculator `_seed_cost()` returned zero for these missing listings. This misrepresented a nonexistent Shop price as a free seed and overstated the net profit estimate.
+- Make the missing-price result explicit without adding seeds or choosing speculative prices. Continue calculating yield and estimated revenue, but report net profit as unavailable without a Shop cost. Preserve real listed prices, economy math, player scope, and save behavior.
+- Add runtime tests covering an unlisted strain and a priced, purchasable strain. No gameplay-balance changes; actual Discord acceptance still required.
 
 ## Next Step
 After exact-head CI and Discloud deployment succeed, perform these live acceptance cases on fresh Discord panels, in one server and the actual selected world mode:

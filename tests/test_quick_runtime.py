@@ -54,3 +54,34 @@ def test_calc_uses_resolved_game_scope_for_effective_market_multiplier():
         assert embed.footer.text == "Current Market: 125%"
 
     asyncio.run(scenario())
+
+def test_calc_distinguishes_unlisted_seeds_from_free_seeds():
+    async def scenario():
+        guild_id = 123456789012345678
+        user_id = 42
+        db = MemoryDatabase()
+        db.worlds[guild_id] = {
+            "world_mode_config": {
+                **new_world_mode_config(),
+                "policy": POLICY_SOLO,
+                "configured": True,
+            },
+        }
+        ctx = ContextStub(guild_id, user_id)
+        cog = Quick(SimpleNamespace(db=db))
+
+        await Quick.calc.callback(cog, ctx, strain="gelato")
+        unlisted = ctx.sent[-1][1]["embed"]
+        fields = {field.name: field.value for field in unlisted.fields}
+        assert fields["🌱 Seed Cost"] == "Not sold in Shop"
+        assert fields["📈 Net Profit"] == "Unavailable without a listed seed price"
+        assert fields["💰 Est. Revenue"].startswith("$")
+
+        await Quick.calc.callback(cog, ctx, strain="schwag")
+        listed = ctx.sent[-1][1]["embed"]
+        listed_fields = {field.name: field.value for field in listed.fields}
+        assert listed_fields["🌱 Seed Cost"] == "$15"
+        assert listed_fields["📈 Net Profit"].startswith("**$")
+        assert "Unavailable" not in listed_fields["📈 Net Profit"]
+
+    asyncio.run(scenario())
