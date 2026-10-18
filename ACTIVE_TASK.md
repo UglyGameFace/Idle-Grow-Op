@@ -670,10 +670,15 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - Normalize the inventory before purchase capacity validation, keeping the existing costs, item limits, and one-transaction database lock. Confirm a maxed legacy profile receives a rejection without a wallet charge or dirty-write and that a valid older profile retains its preexisting upgrade count.
 - The Shop item picker and preview now show the real maxed state using the existing authoritative pot capacity validator, with regression tests. PR #48 merged at `4afcf5637ad365d44e62a8c5692d6a974bf572a1`, with successful main-head CI and Discloud commit status. Live Shop confirmation stays pending.
 
-## Phase 11 Follow-up: Command Adapter Error Reporter Failure (PR pending)
+## Phase 11 Follow-up: Command Adapter Error Reporter Failure (PR #49 merged)
 - `GameHubView.run_command()` caught unexpected command errors separately from `View.on_error()` and awaited `bot.report_command_error` before giving the player feedback. A slow or failing configured error channel could make an already-acknowledged player action fail again instead of receiving prompt feedback.
 - Use the existing shared `report_player_ui_error()` path for command-adapter exceptions too. Preserve canonical allowed command checks and cooldown behavior, and label the failing command so server logs identify its origin.
-- Add a regression using a real hybrid command callback failure in both acknowledgment states. Require player feedback before reporting and continued feedback when reporter itself fails. Phase 11 still requires live Discord acceptance.
+- Added regression using a real hybrid command callback failure in both acknowledgment states. PR #49 merged as `c3492ba533c97c28ab953bcba61e5842febdc91e`, with successful exact-main CI and Discloud commit status. Phase 11 still requires live Discord acceptance.
+
+## Phase 11 Finding: Legacy Inventory Display Consistency (PR pending)
+- `/inventory` currently reads `profile["items"]` directly even when older player profiles store items only under the legacy list-based `inventory` key. In that case players can see `Nothing.` while the already-updated Grow and Shop commands recognize their owned items.
+- Use the exact existing `_inv_dict()` normalization helper already behind `inv_get()` to render inventory items consistently. No new migration parser, gameplay math, purchases, inventory schema, or persistence behavior.
+- Add command-level tests for legacy-list items and for an existing authoritative `items` dictionary. Keep live inventory acceptance pending.
 
 ## Next Step
 After exact-head CI and Discloud deployment succeed, perform these live acceptance cases on fresh Discord panels, in one server and the actual selected world mode:

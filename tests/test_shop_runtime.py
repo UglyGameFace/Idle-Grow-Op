@@ -21,6 +21,43 @@ class MemoryDatabase:
         self.dirty.add((int(scope_id), int(user_id)))
 
 
+def test_inventory_command_shows_legacy_items_without_duplicate_counts():
+    async def scenario():
+        cog = Economy(SimpleNamespace())
+        legacy = {
+            "grams": 90,
+            "inventory": ["schwag seed", "schwag seed", "clay pot"],
+        }
+        current = {
+            "grams": 90,
+            "inventory": ["schwag seed"],
+            "items": {"clay pot": 2},
+        }
+        scope = SimpleNamespace(emoji="🏙️", label="Current Server World")
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(name="Tester"),
+            send=AsyncMock(),
+        )
+
+        cog._profile = AsyncMock(return_value=(scope, legacy))
+        await Economy.inventory.callback(cog, ctx)
+        embed = ctx.send.await_args.kwargs["embed"]
+        assert embed.fields[1].name == "📦 Items"
+        assert "Schwag Seed**: x2" in embed.fields[1].value
+        assert "Clay Pot**: x1" in embed.fields[1].value
+        assert legacy["items"] == {"schwag seed": 2, "clay pot": 1}
+
+        ctx.send.reset_mock()
+        cog._profile = AsyncMock(return_value=(scope, current))
+        await Economy.inventory.callback(cog, ctx)
+        embed = ctx.send.await_args.kwargs["embed"]
+        assert "Clay Pot**: x2" in embed.fields[1].value
+        assert "Schwag Seed" not in embed.fields[1].value
+        assert current["items"] == {"clay pot": 2}
+
+    asyncio.run(scenario())
+
+
 def test_purchase_item_success_uses_shared_mutation_path(monkeypatch):
     async def scenario():
         db = MemoryDatabase()
