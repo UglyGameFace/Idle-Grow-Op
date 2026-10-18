@@ -665,10 +665,15 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - The reporter failure must never suppress the player's feedback. Discord HTTP failures during error feedback must not rethrow and obscure the original error.
 - Added regression coverage for both Game Hub and Shop, initial versus previously acknowledged interactions, and a failing configured reporter. PR #47 merged as `cc7b34986c7c3731ec0b406c48a58929a6465ed0`, with successful main-head CI and Discloud commit status. These synthetic tests do not establish live Discord behavior.
 
-## Phase 11 Finding: Legacy Pot Upgrade Limits and Shop Availability (PR pending)
+## Phase 11 Finding: Legacy Pot Upgrade Limits and Shop Availability (PR #48 merged)
 - Pot upgrade capacity checks consult `user["items"]` directly, while older profiles can still have list-only `inventory`. The purchase handler previously skipped canonical `inv_get()` normalization for these upgrade types, potentially permitting another purchase beyond `POT_UPGRADE_LIMITS`.
 - Normalize the inventory before purchase capacity validation, keeping the existing costs, item limits, and one-transaction database lock. Confirm a maxed legacy profile receives a rejection without a wallet charge or dirty-write and that a valid older profile retains its preexisting upgrade count.
-- The Shop item picker and preview should show the real maxed state rather than `Available` by using the existing authoritative pot capacity validator. Add regression tests; live Shop confirmation stays pending.
+- The Shop item picker and preview now show the real maxed state using the existing authoritative pot capacity validator, with regression tests. PR #48 merged at `4afcf5637ad365d44e62a8c5692d6a974bf572a1`, with successful main-head CI and Discloud commit status. Live Shop confirmation stays pending.
+
+## Phase 11 Follow-up: Command Adapter Error Reporter Failure (PR pending)
+- `GameHubView.run_command()` caught unexpected command errors separately from `View.on_error()` and awaited `bot.report_command_error` before giving the player feedback. A slow or failing configured error channel could make an already-acknowledged player action fail again instead of receiving prompt feedback.
+- Use the existing shared `report_player_ui_error()` path for command-adapter exceptions too. Preserve canonical allowed command checks and cooldown behavior, and label the failing command so server logs identify its origin.
+- Add a regression using a real hybrid command callback failure in both acknowledgment states. Require player feedback before reporting and continued feedback when reporter itself fails. Phase 11 still requires live Discord acceptance.
 
 ## Next Step
 After exact-head CI and Discloud deployment succeed, perform these live acceptance cases on fresh Discord panels, in one server and the actual selected world mode:
