@@ -13,7 +13,7 @@ This audit covers the complete Idle Grow repository and deployed behavior:
 - CI/tests, Discloud deployment assumptions, stale compatibility logic, temporary artifacts, duplicated ownership, and dead code
 
 ## Status
-PHASE 11 LIVE VALIDATION — SELECTED-STRAIN BULK GROW IN PROGRESS
+PHASE 11 LIVE VALIDATION — PR #45 MERGED; LIVE DISCORD ACCEPTANCE PENDING
 
 ## Phase 1 Complete: Command Surface and Runtime Baseline
 Validated on exact head cae20b52d942a6a21137005f53a5778ad03d2149 with CI run 690 successful.
@@ -609,7 +609,7 @@ Closure criteria for this finding:
 - The live Discord command surface must show `/game`, `/menu`, and `/play`.
 
 ## Current Follow-up Next Step
-PR #31 is already merged to main at `4e9a100335e933efed3a570f058b7bc000632059`. Its exact source head `270c7e9a03173f550293368bdfdb268bcbe27e73` passed CI, and GitHub reports `discloud/commit` success for the merge commit. Continue with live Discord validation only: confirm the deployed bot publishes /game, /menu, /play, and /shop; exercise the interactive panels; verify a planted crop remains ready across a weather change; verify one legacy XP-overflow profile reconciles and persists correctly; and exercise representative direct hub actions before closing Phase 11.
+PR #45 merged to main on 2026-09-27 at `80b0e461aad7276e7f6a7ef672b8a7be0f39875b`. Its exact PR head `729d4a1bfc2d86ca62b2abc81f5a2b1afbed866d` passed GitHub CI run `36309380774`, including compilation, targeted static checks, pytest, extension loading, and legacy-artifact checks. The main merge commit has `discloud/commit=success`. These checks do not establish live button behavior; continue live Discord validation of the actual deployed revision before Phase 11 closure.
 
 ## Cleanup / Conflict Review
 COMPLETE for repository source and CI scope.
@@ -645,5 +645,22 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - PR #32 merged the post-merge task-state correction; subsequent documentation-only commits do not change the validated PR #31 gameplay revision.
 - PR #42 merged player UI response timing + real Close behavior at `65658325093144cb68385a92b27003bde595e534`; exact-head CI and Discloud deployment succeeded.
 
+## Phase 11 Checkpoint: Acknowledged Unavailable Actions (2026-10-18)
+- Inspected canonical `GameHubView.run_command()`, direct Hub buttons, next-move routing, and modal callers.
+- A preacknowledged component can reach an unavailable command (for example, after a partial extension load). The early error paths previously attempted `interaction.response.send_message()` even when the initial response was already consumed, resulting in `InteractionResponded`.
+- Route denial/unavailability through an ephemeral followup when acknowledged and through the initial ephemeral response otherwise. Keep the existing allowlist; never look up or dispatch rejected privileged commands.
+- Added focused runtime regression coverage for both response states and both denial types.
+- **Validation pending:** exact new main-head CI and Discloud status; no authenticated live Discord or Discloud logs are available through this GitHub-only workflow.
+
 ## Next Step
-Validate the selected-strain bulk Grow implementation on exact-head CI, merge and deploy it, then live-test 1, fixed bulk, dynamic max, full-pot, and duplicate-tap behavior from a fresh Grow panel. Continue Phase 11 only after those live checks are clean.
+After exact-head CI and Discloud deployment succeed, perform these live acceptance cases on fresh Discord panels, in one server and the actual selected world mode:
+1. Confirm `/game`, `/menu`, `/play`, and `/shop` open on first press, including a cold profile load.
+2. In Grow, plant 1, 5, 10, and dynamic Max of a specific owned strain; confirm inventory, pots, XP/quests, 25-action cap, and no seed substitution.
+3. Reopen Grow with only 2 free pots and with no free pots; confirm proper clamping/disabled controls.
+4. Rapidly double-tap Plant Selected and Shop Buy Selected; confirm one mutation, no timeout or dead panel. Repeat under slow network conditions if possible.
+5. Use Shop's bulk seed quantity choices and Max Affordable; confirm wallet and inventory totals, then Close both panels and verify they actually disappear.
+6. Change weather before harvest readiness; confirm the crop never becomes unready. Check one legacy XP-overflow profile for correct reconciliation and persistence.
+7. Exercise representative Lab, Market, Crime, Crew, Casino, and Settings actions, including denied/unavailable command feedback after a component is already acknowledged.
+8. Capture Discord behavior, deployment revision, and errors, if any. Do not mark Phase 11 complete until the acceptance evidence is recorded.
+
+Avoid new gameplay features, cache redesign, or Issue #13 profile-signature expansion during this active validation task.

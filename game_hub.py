@@ -1357,17 +1357,20 @@ class GameHubView(discord.ui.View):
         command_name: str,
         **kwargs,
     ) -> None:
+        command = None
         if command_name not in SAFE_HUB_COMMANDS:
-            return await interaction.response.send_message(
-                "❌ That action is not available from the game panel.",
-                ephemeral=True,
+            denial = "❌ That action is not available from the game panel."
+        else:
+            command = self.cog.bot.get_command(command_name)
+            denial = (
+                f"⚠️ /{command_name} is temporarily unavailable."
+                if command is None or command.cog is None
+                else None
             )
-        command = self.cog.bot.get_command(command_name)
-        if command is None or command.cog is None:
-            return await interaction.response.send_message(
-                f"⚠️ /{command_name} is temporarily unavailable.",
-                ephemeral=True,
-            )
+        if denial is not None:
+            if interaction.response.is_done():
+                return await interaction.followup.send(denial, ephemeral=True)
+            return await interaction.response.send_message(denial, ephemeral=True)
 
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True, thinking=True)

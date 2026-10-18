@@ -483,6 +483,59 @@ def test_run_command_skips_second_defer_for_preacknowledged_component():
     asyncio.run(scenario())
 
 
+def test_unavailable_hub_actions_respect_initial_or_acknowledged_response():
+    class Response:
+        def __init__(self, *, acknowledged):
+            self.done = acknowledged
+            self.messages = []
+
+        def is_done(self):
+            return self.done
+
+        async def send_message(self, content, *, ephemeral):
+            assert not self.done, "Cannot send a second initial response"
+            self.done = True
+            self.messages.append((content, ephemeral))
+
+        async def defer(self, **_kwargs):
+            raise AssertionError("Unavailable commands must not be dispatched")
+
+    async def scenario():
+        looked_up = []
+
+        def get_command(name):
+            looked_up.append(name)
+            return None
+
+        hub = GameHubView(
+            SimpleNamespace(bot=SimpleNamespace(get_command=get_command)),
+            42,
+            123,
+        )
+        for acknowledged in (False, True):
+            for name, expected in (
+                ("plant", "⚠️ /plant is temporarily unavailable."),
+                ("setup", "❌ That action is not available from the game panel."),
+            ):
+                response = Response(acknowledged=acknowledged)
+                followup = SimpleNamespace(send=AsyncMock())
+                interaction = SimpleNamespace(response=response, followup=followup)
+
+                await hub.run_command(interaction, name)
+
+                if acknowledged:
+                    assert response.messages == []
+                    followup.send.assert_awaited_once_with(expected, ephemeral=True)
+                else:
+                    assert response.messages == [(expected, True)]
+                    followup.send.assert_not_awaited()
+
+        # Disallowed/admin commands never reach the command lookup.
+        assert looked_up == ["plant", "plant"]
+
+    asyncio.run(scenario())
+
+
 def test_grow_page_uses_stable_ready_at_after_weather_changes(monkeypatch):
     monkeypatch.setattr("game_hub.time.time", lambda: 1200.0)
     cog = GameHub(SimpleNamespace())
