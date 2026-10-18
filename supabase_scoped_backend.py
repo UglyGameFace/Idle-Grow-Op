@@ -33,6 +33,10 @@ class SupabaseSchemaError(RuntimeError):
     """Raised when the required scoped persistence schema is unavailable."""
 
 
+class SupabaseServiceRestrictedError(RuntimeError):
+    """Raised when billing or usage limits block the Supabase Data API."""
+
+
 class SupabaseScopedBackend:
     """Persist scoped records in the normalized Supabase tables."""
 
@@ -44,6 +48,30 @@ class SupabaseScopedBackend:
     async def verify_schema(self) -> None:
         await asyncio.to_thread(self._verify_schema_sync)
 
+    @staticmethod
+    def _raise_if_service_restricted(exc: Exception) -> None:
+        # The Supabase gateway may return a minimal 402 JSON body that
+        # postgrest-py wraps as "JSON could not be generated". The original
+        # restriction reason remains in the exception's details string.
+        detail = str(exc).lower()
+        if "exceed_egress_quota" in detail:
+            raise SupabaseServiceRestrictedError(
+                "Supabase REST API is restricted (HTTP 402: egress quota exceeded). "
+                "This is a usage/billing restriction, not evidence of missing "
+                "database migrations. Check Supabase organization usage and "
+                "billing; restore API access before restarting Idle Grow."
+            ) from exc
+        if "402" in detail and (
+            "restricted" in detail
+            or "overdue_payment" in detail
+            or "exceed_" in detail
+        ):
+            raise SupabaseServiceRestrictedError(
+                "Supabase REST API is restricted (HTTP 402). Check Supabase "
+                "organization usage and billing. Do not rerun database "
+                "migrations to resolve an API restriction."
+            ) from exc
+
     def _verify_schema_sync(self) -> None:
         try:
             response = (
@@ -54,8 +82,10 @@ class SupabaseScopedBackend:
                 .execute()
             )
         except Exception as exc:
+            self._raise_if_service_restricted(exc)
             raise SupabaseSchemaError(
-                "Enterprise scoped Supabase schema is unavailable. Run migrations/001_guild_scoped_persistence.sql, migrations/002_enterprise_casino_metrics.sql, migrations/003_atomic_scoped_record_batch.sql, and migrations/004_batched_notification_candidates.sql."
+                "Cannot verify Supabase migration history. Confirm database "
+                "API access before investigating missing schema migrations."
             ) from exc
 
         if not (response.data or []):
@@ -76,6 +106,7 @@ class SupabaseScopedBackend:
             try:
                 self.client.table(table_name).select(columns).limit(1).execute()
             except Exception as exc:
+                self._raise_if_service_restricted(exc)
                 raise SupabaseSchemaError(
                     f"Required Supabase table or column is unavailable: {table_name}"
                 ) from exc
@@ -88,6 +119,7 @@ class SupabaseScopedBackend:
             try:
                 self.client.rpc(rpc_name, payload).execute()
             except Exception as exc:
+                self._raise_if_service_restricted(exc)
                 raise SupabaseSchemaError(
                     f"Required Supabase RPC is unavailable: {rpc_name}"
                 ) from exc
