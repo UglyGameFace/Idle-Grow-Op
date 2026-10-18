@@ -31,9 +31,10 @@ def _safe_int(value, default=0):
         return default
 
 
-def _seed_cost(seed_key: str) -> int:
+def _seed_cost(seed_key: str) -> int | None:
+    """A missing Shop listing is not a free seed."""
     item = SHOP_ITEMS.get(seed_key)
-    return int(_shop_price(item) or 0) if item else 0
+    return int(_shop_price(item) or 0) if item is not None else None
 
 
 class Quick(commands.Cog):
@@ -143,10 +144,16 @@ class Quick(commands.Cog):
         revenue = average_yield * float(data.get("base_value", 0) or 0) * market
         embed = discord.Embed(title=f"📊 Analysis: {strain.title()}", color=discord.Color.gold())
         embed.add_field(name="⏱️ Time", value=f"{int(float(data.get('time', 0)) / 60)} mins", inline=True)
-        embed.add_field(name="🌱 Seed Cost", value=f"${seed_cost:,}", inline=True)
+        if seed_cost is None:
+            cost_label = "Not sold in Shop"
+            profit_label = "Unavailable without a listed seed price"
+        else:
+            cost_label = f"${seed_cost:,}"
+            profit_label = f"**${int(revenue - seed_cost):,}**"
+        embed.add_field(name="🌱 Seed Cost", value=cost_label, inline=True)
         embed.add_field(name="📦 Avg Yield", value=f"{average_yield:.1f}g", inline=True)
         embed.add_field(name="💰 Est. Revenue", value=f"${int(revenue):,}", inline=True)
-        embed.add_field(name="📈 Net Profit", value=f"**${int(revenue - seed_cost):,}**", inline=False)
+        embed.add_field(name="📈 Net Profit", value=profit_label, inline=False)
         embed.set_footer(text=f"Current Market: {int(market * 100)}%")
         await ctx.send(embed=embed)
 
