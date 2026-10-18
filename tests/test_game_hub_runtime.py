@@ -13,8 +13,17 @@ from game_hub import (
     HubInteractionContext,
     CASINO_GAMES,
     GameHubView,
+    HubActionModal,
+    HubAuctionListModal,
+    HubBidModal,
+    HubCasinoBetModal,
     HubCasinoGameSelect,
     HubConcentrateSelect,
+    HubCrewCreateModal,
+    HubCrewDepositModal,
+    HubCrewJoinModal,
+    HubLaunderModal,
+    HubProcessModal,
     HubPlantQuantitySelect,
     HubStealTargetSelect,
     SAFE_HUB_COMMANDS,
@@ -33,6 +42,73 @@ def scope():
         scope_id=123,
         selection_explicit=True,
     )
+
+
+
+def test_hub_modals_route_unhandled_submission_errors_to_guild_reporter():
+    class Response:
+        def __init__(self, acknowledged):
+            self.done = acknowledged
+            self.messages = []
+
+        def is_done(self):
+            return self.done
+
+        async def send_message(self, message, *, ephemeral):
+            assert not self.done
+            self.done = True
+            self.messages.append((message, ephemeral))
+
+    async def scenario():
+        for modal_class, args in (
+            (HubBidModal, ()),
+            (HubAuctionListModal, ()),
+            (HubLaunderModal, ()),
+            (HubProcessModal, ("hash",)),
+            (HubCrewCreateModal, ()),
+            (HubCrewJoinModal, ()),
+            (HubCrewDepositModal, ()),
+            (HubCasinoBetModal, ("slots",)),
+        ):
+            for acknowledged in (False, True):
+                reporter = AsyncMock()
+                bot = SimpleNamespace(report_command_error=reporter)
+                view = GameHubView(SimpleNamespace(bot=bot), 42, 123)
+                modal = modal_class(view, *args)
+                assert isinstance(modal, HubActionModal)
+                response = Response(acknowledged)
+                followup = SimpleNamespace(send=AsyncMock())
+                interaction = SimpleNamespace(
+                    guild_id=123,
+                    user=SimpleNamespace(id=42),
+                    response=response,
+                    followup=followup,
+                )
+
+                await modal.on_error(interaction, RuntimeError("submission failed"))
+
+                reporter.assert_awaited_once_with(
+                    guild_id=123,
+                    title="Game Hub modal interaction failure",
+                    description=(
+                        f"surface=Game Hub modal control={modal.title} "
+                        "guild=123 user=42 error_type=RuntimeError"
+                    ),
+                )
+                if acknowledged:
+                    assert response.messages == []
+                    followup.send.assert_awaited_once_with(
+                        "❌ This panel action failed. Please try again or reopen the panel.",
+                        ephemeral=True,
+                    )
+                else:
+                    assert response.done is True
+                    assert len(response.messages) == 1
+                    assert "panel action failed" in response.messages[0][0]
+                    assert response.messages[0][1] is True
+                    followup.send.assert_not_awaited()
+
+    asyncio.run(scenario())
 
 
 def test_hub_allowlist_excludes_privileged_or_destructive_admin_surfaces():

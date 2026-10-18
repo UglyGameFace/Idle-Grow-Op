@@ -680,10 +680,15 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - Use the exact existing `_inv_dict()` normalization helper already behind `inv_get()` to render inventory items consistently. No new migration parser, gameplay math, purchases, inventory schema, or persistence behavior.
 - Added command-level tests for legacy-list items and the authoritative `items` dictionary. PR #50 merged as `6e9b325f9e07c8ca1a16775d0b7000ae8c116e9f`; main-head GitHub CI and Discloud commit status both succeeded. Live inventory acceptance remains pending.
 
-## Phase 11 Finding: Missing Shop Seed Prices Misrepresented as Free in `/calc` (PR pending)
+## Phase 11 Finding: Missing Shop Seed Prices Misrepresented as Free in `/calc` (PR #51 merged)
 - Seven strains defined in `GROWTH_CYCLES` are not present in `SHOP_ITEMS`, but the profit calculator `_seed_cost()` returned zero for these missing listings. This misrepresented a nonexistent Shop price as a free seed and overstated the net profit estimate.
 - Make the missing-price result explicit without adding seeds or choosing speculative prices. Continue calculating yield and estimated revenue, but report net profit as unavailable without a Shop cost. Preserve real listed prices, economy math, player scope, and save behavior.
-- Add runtime tests covering an unlisted strain and a priced, purchasable strain. No gameplay-balance changes; actual Discord acceptance still required.
+- Added runtime tests for an unlisted and a priced strain. PR #51 merged as `171ae33842c1381a0e4bb11bd1e359383d10f398`, with successful exact-main CI and Discloud commit status. No gameplay-balance changes; actual Discord acceptance still required.
+
+## Phase 11 Finding: Unexpected Game Hub Modal Errors Not Routed to Guild Reporter (PR pending)
+- Eight Game Hub forms (auction, laundering, concentrate processing, crew, and casino) inherit `discord.ui.Modal` directly. Their exceptions are handled by the modal's own default `on_error`, not `GameHubView.on_error`. This leaves the configured in-guild error reporter out of the loop for failures originating in a modal submission handler.
+- Introduce a shared `HubActionModal` base that forwards failures to the existing response-first `report_player_ui_error` path with safe modal-title metadata. Do not capture entered values such as wagers, bids, or form text in error-channel messages.
+- Test all eight modal classes, both acknowledged and unacknowledged responses, and successful delivery to the existing guild reporter. Live Discord modal acceptance remains outstanding.
 
 ## Next Step
 After exact-head CI and Discloud deployment succeed, perform these live acceptance cases on fresh Discord panels, in one server and the actual selected world mode:

@@ -323,7 +323,26 @@ class HubPlantQuantitySelect(discord.ui.Select):
         await self.view.refresh(interaction)
 
 
-class HubBidModal(discord.ui.Modal):
+class HubActionModal(discord.ui.Modal):
+    """Keep unexpected form submission errors in the guild's normal error logs."""
+
+    async def on_error(
+        self,
+        interaction: discord.Interaction,
+        error: Exception,
+    ) -> None:
+        # A Discord Modal is not a child of the originating View. Its failure
+        # callback does not run GameHubView.on_error(), so use the shared path.
+        await report_player_ui_error(
+            self.hub_view.cog.bot,
+            interaction,
+            error,
+            SimpleNamespace(label=self.title),
+            surface="Game Hub modal",
+        )
+
+
+class HubBidModal(HubActionModal):
     def __init__(self, view: "GameHubView") -> None:
         super().__init__(title="Place Auction Bid")
         self.hub_view = view
@@ -361,7 +380,7 @@ class HubBidModal(discord.ui.Modal):
         )
 
 
-class HubAuctionListModal(discord.ui.Modal):
+class HubAuctionListModal(HubActionModal):
     def __init__(self, view: "GameHubView") -> None:
         super().__init__(title="List Item on Auction")
         self.hub_view = view
@@ -407,7 +426,7 @@ class HubAuctionListModal(discord.ui.Modal):
         )
 
 
-class HubLaunderModal(discord.ui.Modal):
+class HubLaunderModal(HubActionModal):
     def __init__(self, view: "GameHubView") -> None:
         super().__init__(title="Launder Dirty Cash")
         self.hub_view = view
@@ -460,7 +479,7 @@ class HubConcentrateSelect(discord.ui.Select):
         await self.view.refresh(interaction)
 
 
-class HubProcessModal(discord.ui.Modal):
+class HubProcessModal(HubActionModal):
     def __init__(self, view: "GameHubView", concentrate_type: str) -> None:
         super().__init__(title=f"Process {concentrate_type.title()}")
         self.hub_view = view
@@ -495,7 +514,7 @@ class HubProcessModal(discord.ui.Modal):
         )
 
 
-class HubCrewCreateModal(discord.ui.Modal):
+class HubCrewCreateModal(HubActionModal):
     def __init__(self, view: "GameHubView") -> None:
         super().__init__(title="Create Crew")
         self.hub_view = view
@@ -514,7 +533,7 @@ class HubCrewCreateModal(discord.ui.Modal):
         )
 
 
-class HubCrewJoinModal(discord.ui.Modal):
+class HubCrewJoinModal(HubActionModal):
     def __init__(self, view: "GameHubView") -> None:
         super().__init__(title="Join Crew")
         self.hub_view = view
@@ -533,7 +552,7 @@ class HubCrewJoinModal(discord.ui.Modal):
         )
 
 
-class HubCrewDepositModal(discord.ui.Modal):
+class HubCrewDepositModal(HubActionModal):
     def __init__(self, view: "GameHubView") -> None:
         super().__init__(title="Deposit to Crew Bank")
         self.hub_view = view
@@ -603,7 +622,7 @@ class HubCasinoGameSelect(discord.ui.Select):
         await self.view.refresh(interaction)
 
 
-class HubCasinoBetModal(discord.ui.Modal):
+class HubCasinoBetModal(HubActionModal):
     def __init__(self, view: "GameHubView", game: str) -> None:
         game_labels = {key: label for key, label, _emoji in CASINO_GAMES}
         super().__init__(title=f"Play {game_labels.get(game, game.title())}")
