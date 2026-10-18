@@ -140,6 +140,79 @@ def test_purchase_item_rejects_locked_duplicate_and_unaffordable_without_mutatio
     asyncio.run(scenario())
 
 
+
+def test_legacy_inventory_pot_upgrade_cannot_bypass_maximum_limit():
+    async def scenario():
+        db = MemoryDatabase()
+        cog = Economy(SimpleNamespace(db=db))
+        scope = SimpleNamespace(scope_id=123)
+        profile = {
+            "grams": 100_000,
+            "level": 50,
+            "inventory": ["clay pot", "clay pot", "clay pot"],
+            "max_pots": 6,
+        }
+
+        ok, message = await cog._purchase_item(
+            scope, profile, 42, "clay pot",
+        )
+
+        assert ok is False
+        assert "maximum number" in message
+        assert profile["grams"] == 100_000
+        assert profile["max_pots"] == 6
+        assert profile["items"]["clay pot"] == 3
+        assert db.dirty == set()
+
+        embed = cog.build_shop_embed(
+            SimpleNamespace(emoji="🏙️", label="Current Server World"),
+            profile,
+            category="equipment",
+            selected_item="clay pot",
+        )
+        assert "Owned:** 3" in embed.fields[0].value
+        assert "Upgrade limit reached" in embed.fields[0].value
+
+        view = ShopView(cog, 42, 123, category="equipment")
+        view.rebuild(profile)
+        pot_option = next(
+            option
+            for option in view.children[1].options
+            if option.value == "clay pot"
+        )
+        assert "Maxed" in pot_option.description
+
+    asyncio.run(scenario())
+
+
+def test_legacy_pot_upgrade_below_limit_preserves_existing_count(monkeypatch):
+    async def scenario():
+        db = MemoryDatabase()
+        cog = Economy(SimpleNamespace(db=db))
+        scope = SimpleNamespace(scope_id=123)
+        profile = {
+            "grams": 100_000,
+            "level": 50,
+            "inventory": ["clay pot", "clay pot"],
+            "max_pots": 5,
+            "stats": {},
+            "achievements": [],
+        }
+        monkeypatch.setattr(economy_module, "add_progress", lambda *args, **kwargs: None)
+        monkeypatch.setattr(economy_module, "check_achievements", lambda *args, **kwargs: [])
+
+        ok, message = await cog._purchase_item(scope, profile, 42, "clay pot")
+
+        assert ok is True
+        assert "Bought" in message
+        assert profile["grams"] == 99_500
+        assert profile["max_pots"] == 6
+        assert profile["items"]["clay pot"] == 3
+        assert db.dirty == {(123, 42)}
+
+    asyncio.run(scenario())
+
+
 def test_shop_view_has_category_item_and_transaction_controls():
     db = MemoryDatabase()
     cog = Economy(SimpleNamespace(db=db))

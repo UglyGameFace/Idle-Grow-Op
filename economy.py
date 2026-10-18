@@ -141,6 +141,11 @@ class ShopItemSelect(discord.ui.Select):
             required = max(1, int(item.get("level_req", 1) or 1))
             owned = inv_get(profile, name)
             status = "Owned" if owned and item.get("type") in {"equipment", "tool", "defense"} else f"Lv {required}"
+            if item.get("type") == "pot_upgrade":
+                try:
+                    pot_upgrade_capacity(profile, name, POT_UPGRADE_LIMITS)
+                except ValueError:
+                    status = "Maxed"
             if level < required:
                 status = f"Locked • Lv {required}"
             options.append(
@@ -584,6 +589,11 @@ class Economy(commands.Cog):
                 state = f"💸 Need ${cost - wallet:,} more"
             elif item.get("type") in {"equipment", "tool", "defense"} and owned:
                 state = "✅ Already owned"
+            elif item.get("type") == "pot_upgrade":
+                try:
+                    pot_upgrade_capacity(profile, selected_item, POT_UPGRADE_LIMITS)
+                except ValueError:
+                    state = "🚫 Upgrade limit reached"
             if item.get("type") == "seed":
                 if selected_quantity == "max":
                     resolved_quantity = wallet // cost if cost > 0 else 1
@@ -706,6 +716,9 @@ class Economy(commands.Cog):
                 purchase_error = f"💸 You need **${total_cost - balance:,}** more."
             new_capacity = None
             if purchase_error is None and item.get("type") == "pot_upgrade":
+                # The upgrade validator reads the current items map. Migrate
+                # list-only legacy inventories first or they can exceed limits.
+                inv_get(user, clean_name)
                 try:
                     new_capacity = pot_upgrade_capacity(user, clean_name, POT_UPGRADE_LIMITS)
                 except ValueError:
