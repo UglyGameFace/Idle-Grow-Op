@@ -15,6 +15,7 @@ from onboarding import choose_onboarding_step
 from persistence_context import GuildContextRequired, require_guild_id
 from plant_lifecycle import MAX_PLANTS_PER_ACTION, plant_is_ready, plant_ready_at
 from progression_core import xp_needed_for_level
+from player_ui_errors import report_player_ui_error
 from utils import CONCENTRATE_TYPES, GROWTH_CYCLES, inv_get
 from world_modes import effective_pot_capacity, resolve_game_scope
 
@@ -1582,6 +1583,20 @@ class GameHubView(discord.ui.View):
                 ephemeral=True,
             )
         await self.run_command(interaction, command_name)
+
+    async def on_error(
+        self,
+        interaction: discord.Interaction,
+        error: Exception,
+        item: discord.ui.Item,
+    ) -> None:
+        await report_player_ui_error(
+            self.cog.bot,
+            interaction,
+            error,
+            item,
+            surface="Game Hub",
+        )
 
     async def on_timeout(self) -> None:
         for item in self.children:

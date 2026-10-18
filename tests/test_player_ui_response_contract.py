@@ -41,6 +41,87 @@ class ResponseStub:
         self.done = True
 
 
+def test_game_hub_and_shop_report_component_failures_and_acknowledge_safely():
+    async def scenario():
+        for view_class, surface in (
+            (GameHubView, "Game Hub"),
+            (ShopView, "Shop"),
+        ):
+            for already_acked in (False, True):
+                reported = AsyncMock()
+                bot = SimpleNamespace(report_command_error=reported)
+                view = view_class(SimpleNamespace(bot=bot), 42, 123)
+                response = ResponseStub()
+                response.done = already_acked
+
+                async def assert_ack_before_reporting(**_kwargs):
+                    assert response.done, "Reporter must not delay the initial Discord acknowledgement"
+
+                reported.side_effect = assert_ack_before_reporting
+                followup = SimpleNamespace(send=AsyncMock())
+                interaction = SimpleNamespace(
+                    user=SimpleNamespace(id=42),
+                    guild_id=123,
+                    response=response,
+                    followup=followup,
+                )
+                await view.on_error(
+                    interaction,
+                    RuntimeError("simulated callback failure"),
+                    SimpleNamespace(label="Plant Selected"),
+                )
+                reported.assert_awaited_once_with(
+                    guild_id=123,
+                    title=f"{surface} interaction failure",
+                    description=(
+                        f"surface={surface} control=Plant Selected guild=123 "
+                        "user=42 error_type=RuntimeError"
+                    ),
+                )
+                if already_acked:
+                    assert response.sent == []
+                    followup.send.assert_awaited_once_with(
+                        "❌ This panel action failed. Please try again or reopen the panel.",
+                        ephemeral=True,
+                    )
+                else:
+                    assert response.sent == [
+                        (
+                            "❌ This panel action failed. Please try again or reopen the panel.",
+                            {"ephemeral": True},
+                        )
+                    ]
+                    followup.send.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
+def test_ui_error_feedback_survives_failure_of_configured_reporter():
+    async def scenario():
+        reporter = AsyncMock(side_effect=RuntimeError("error channel unavailable"))
+        view = GameHubView(
+            SimpleNamespace(bot=SimpleNamespace(report_command_error=reporter)),
+            42,
+            123,
+        )
+        response = ResponseStub()
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=42),
+            guild_id=123,
+            response=response,
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+        await view.on_error(
+            interaction,
+            ValueError("broken UI callback"),
+            SimpleNamespace(label="Refresh"),
+        )
+        reporter.assert_awaited_once()
+        assert response.sent and "panel action failed" in response.sent[0][0]
+
+    asyncio.run(scenario())
+
+
 def test_shop_close_deletes_owned_private_panel():
     async def scenario():
         response = ResponseStub()
