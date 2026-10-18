@@ -690,6 +690,13 @@ Repository/source audit work is complete. Production Supabase migrations 003 and
 - Introduce a shared `HubActionModal` base that forwards failures to the existing response-first `report_player_ui_error` path with safe modal-title metadata. Do not capture entered values such as wagers, bids, or form text in error-channel messages.
 - Test all eight modal classes, both acknowledged and unacknowledged responses, and successful delivery to the existing guild reporter. Live Discord modal acceptance remains outstanding.
 
+## Phase 11 Production Blocker: Supabase Egress Quota Restriction (2026-10-18)
+- Live Discloud startup logs show Supabase HTTP 402 with `exceed_egress_quota`, surfaced by postgrest as `JSON could not be generated` and then wrongly reclassified as a missing schema migration. This is not evidence that migrations 001–004 are absent.
+- A read-only direct database check confirms all four required `app_schema_migrations` versions already exist. The data has 42 guild profiles, 3 guild worlds and 3 global accounts at the check time.
+- Supabase project IdleGrowOp is in a Free-plan organization and the same project API logs show major traffic from Dank Shield-related endpoints; a single service's request count alone is not a byte-accurate egress attribution. Its billing quota is external to the Idle Grow source code.
+- Change only the exception classification in `verify_schema`: 402 usage/billing restrictions must be explicit and not instruct admins to run migrations. Do not bypass quotas, switch to memory-only persistence, reset data, or alter payment controls.
+- Restore Supabase API service through the organization's legitimate quota/billing resolution path before live Discord gameplay acceptance can resume; investigate sharing and future isolation separately from this safe diagnostics fix.
+
 ## Next Step
 After exact-head CI and Discloud deployment succeed, perform these live acceptance cases on fresh Discord panels, in one server and the actual selected world mode:
 1. Confirm `/game`, `/menu`, `/play`, and `/shop` open on first press, including a cold profile load.

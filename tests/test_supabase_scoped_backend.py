@@ -9,6 +9,7 @@ from supabase_scoped_backend import (
     NOTIFICATION_BATCH_RPC,
     REQUIRED_SCHEMA_VERSION,
     SupabaseSchemaError,
+    SupabaseServiceRestrictedError,
     SupabaseScopedBackend,
 )
 
@@ -90,6 +91,57 @@ def install_schema_version(client):
     client.records[("app_schema_migrations", (("version", REQUIRED_SCHEMA_VERSION),))] = [
         {"version": REQUIRED_SCHEMA_VERSION}
     ]
+
+
+
+@pytest.mark.parametrize("failure_stage", ["migration", "table", "rpc"])
+def test_quota_restriction_is_not_misreported_as_missing_migrations(failure_stage):
+    restricted_response = (
+        "{'message': 'JSON could not be generated', 'code': 402, "
+        "'details': 'Service for this project is restricted due to "
+        "exceed_egress_quota'}"
+    )
+
+    class RestrictedQuery(Query):
+        def execute(self):
+            if (
+                (failure_stage == "migration" and self.table_name == "app_schema_migrations")
+                or (failure_stage == "table" and self.table_name == "guild_profiles")
+            ):
+                raise RuntimeError(restricted_response)
+            return super().execute()
+
+    class RestrictedRpcQuery(RpcQuery):
+        def execute(self):
+            if failure_stage == "rpc" and self.name == ATOMIC_SAVE_RPC:
+                raise RuntimeError(restricted_response)
+            return super().execute()
+
+    class RestrictedClient(FakeClient):
+        def table(self, table_name):
+            return RestrictedQuery(self, table_name)
+
+        def rpc(self, name, params):
+            return RestrictedRpcQuery(self, name, params)
+
+    client = RestrictedClient()
+    install_schema_version(client)
+    with pytest.raises(
+        SupabaseServiceRestrictedError,
+        match=r"HTTP 402: egress quota exceeded",
+    ) as failure:
+        run(SupabaseScopedBackend(client).verify_schema())
+    assert "not evidence of missing" in str(failure.value)
+    assert failure.value.__cause__ is not None
+
+
+def test_other_supabase_restrictions_report_external_availability():
+    error = RuntimeError(
+        "{'code': 402, 'details': 'Service for this project is restricted "
+        "due to overdue_payment'}"
+    )
+    with pytest.raises(SupabaseServiceRestrictedError, match="HTTP 402"):
+        SupabaseScopedBackend._raise_if_service_restricted(error)
 
 
 def test_schema_verification_requires_recorded_migration_and_all_tables():
