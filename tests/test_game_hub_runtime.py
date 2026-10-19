@@ -111,6 +111,126 @@ def test_hub_modals_route_unhandled_submission_errors_to_guild_reporter():
     asyncio.run(scenario())
 
 
+
+
+def test_hub_context_send_omits_none_view_for_first_response_and_followup():
+    class Response:
+        def __init__(self, acknowledged):
+            self.done = acknowledged
+            self.sent = []
+
+        def is_done(self):
+            return self.done
+
+        async def send_message(self, *, content=None, **kwargs):
+            if "view" in kwargs and kwargs["view"] is None:
+                raise TypeError("discord.py does not accept view=None")
+            self.sent.append((content, kwargs))
+            self.done = True
+
+    class Followup:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, *, content=None, **kwargs):
+            if "view" in kwargs and kwargs["view"] is None:
+                raise TypeError("expected view parameter to be of type View")
+            self.sent.append((content, kwargs))
+            return SimpleNamespace(kind="followup")
+
+    async def scenario():
+        for acknowledged in (False, True):
+            for supplied_view in (None, discord.ui.View()):
+                response = Response(acknowledged)
+                followup = Followup()
+                original = SimpleNamespace(kind="original")
+                interaction = SimpleNamespace(
+                    user=SimpleNamespace(id=42),
+                    guild=SimpleNamespace(id=123),
+                    channel=SimpleNamespace(id=456),
+                    message=None,
+                    created_at=datetime.datetime.now(datetime.timezone.utc),
+                    response=response,
+                    followup=followup,
+                    original_response=AsyncMock(return_value=original),
+                )
+                ctx = HubInteractionContext(
+                    SimpleNamespace(), interaction, SimpleNamespace()
+                )
+                sent = await ctx.send(
+                    embed="world-mode status",
+                    view=supplied_view,
+                    ephemeral=False,
+                )
+                if acknowledged:
+                    assert sent.kind == "followup"
+                    assert not response.sent
+                    assert len(followup.sent) == 1
+                    _, kwargs = followup.sent[0]
+                    assert kwargs["wait"] is True
+                    interaction.original_response.assert_not_awaited()
+                else:
+                    assert sent is original
+                    assert len(response.sent) == 1
+                    _, kwargs = response.sent[0]
+                    assert not followup.sent
+                    interaction.original_response.assert_awaited_once()
+                assert kwargs["ephemeral"] is True
+                assert kwargs["embed"] == "world-mode status"
+                if supplied_view is None:
+                    assert "view" not in kwargs
+                else:
+                    assert kwargs["view"] is supplied_view
+
+    asyncio.run(scenario())
+
+
+def test_world_mode_command_through_hub_handles_non_choice_none_view(monkeypatch):
+    import world_modes
+    from world_modes import WorldModes
+
+    class Response:
+        def is_done(self):
+            return True
+
+    async def scenario():
+        database = SimpleNamespace(get_world=AsyncMock(return_value={}))
+        bot = SimpleNamespace(db=database)
+        # This is the real command callback routed through the real
+        # HubInteractionContext used by the Game Hub command dispatcher.
+        monkeypatch.setattr(
+            world_modes,
+            "build_player_mode_embed",
+            AsyncMock(return_value="status embed"),
+        )
+        delivered = []
+
+        async def send(content=None, **kwargs):
+            assert kwargs.get("view", "omitted") is not None
+            delivered.append((content, kwargs))
+            return SimpleNamespace()
+
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=42),
+            guild=SimpleNamespace(id=123),
+            channel=SimpleNamespace(id=456),
+            message=None,
+            created_at=datetime.datetime.now(datetime.timezone.utc),
+            response=Response(),
+            followup=SimpleNamespace(send=send),
+        )
+        ctx = HubInteractionContext(bot, interaction, WorldModes.world_mode)
+        await WorldModes.world_mode.callback(WorldModes(bot), ctx)
+
+        database.get_world.assert_awaited_once_with(123)
+        assert len(delivered) == 1
+        assert delivered[0][1]["embed"] == "status embed"
+        assert "view" not in delivered[0][1]
+        assert delivered[0][1]["ephemeral"] is True
+        assert delivered[0][1]["wait"] is True
+
+    asyncio.run(scenario())
+
 def test_hub_allowlist_excludes_privileged_or_destructive_admin_surfaces():
     assert "setup" not in SAFE_HUB_COMMANDS
     assert "sync" not in SAFE_HUB_COMMANDS
