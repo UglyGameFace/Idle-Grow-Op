@@ -717,3 +717,10 @@ Avoid new gameplay features, cache redesign, or Issue #13 profile-signature expa
 - Exported and inserted **48 scoped records** while preserving large Discord IDs, original JSON payloads and timestamps. PostgreSQL-calculated digests matched across all tables: 3 accounts, 42 profiles, 3 worlds.
 - Implement the optional explicit Neon async Postgres backend with a small pool, retained atomic RPC contract and existing world isolation. \`IDLE_PERSISTENCE_BACKEND=neon\` and a private \`IDLE_NEON_DATABASE_URL\` are required for Discloud cutover; absent selection defaults to Supabase.
 - Original Supabase source remains unchanged; recheck for newer writes before cutover. Live Discord gameplay acceptance still pending.
+
+
+## Phase 11 Live Neon startup observation (2026-10-19)
+- PR #54 was merged; exact-main GitHub Actions CI and Discloud commit status passed. Supplied Discloud logs show bot connected to Discord, all 18 extensions loaded, 68 slash commands synchronized, and three world scopes updated.
+- The `on_ready` banner was still hardcoded to report "verified guild-scoped Supabase" irrespective of the actual selected persistence backend. Change the log label to reflect the verified live driver, without printing credentials.
+- Read-only database checks after the provided 00:11 Eastern startup found a Neon game-world `updated_at` at 04:11:16Z, with source Supabase latest world update still from Oct 18. This is strong evidence the deployed worker persisted a world tick on Neon, but not yet proof of end-to-end player command persistence.
+- Neon has 3 global accounts, 42 player profiles, and 3 guild-world records; actual gameplay action and restart checks remain pending.

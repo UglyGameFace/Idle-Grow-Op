@@ -112,3 +112,25 @@ def test_background_loops_use_native_cog_lifecycle_without_startup_guards():
     assert "async def on_ready" not in source
     assert ".is_running()" not in source
     assert "await self.bot.wait_until_ready()" in source
+
+
+
+def test_online_banner_uses_verified_database_backend_not_hardcoded_supabase():
+    from main import database_backend_label
+    from neon_scoped_backend import NeonScopedBackend
+    from supabase_scoped_backend import SupabaseScopedBackend
+
+    neon = NeonScopedBackend(
+        "postgresql://owner:fake@ep-test.us-east-1.aws.neon.tech/idle_grow_op"
+    )
+    assert database_backend_label(neon) == "Neon PostgreSQL"
+    assert database_backend_label(SupabaseScopedBackend(object())) == "Supabase"
+
+    class SmokeBackend:
+        pass
+
+    assert database_backend_label(SmokeBackend()) == "SmokeBackend"
+
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    assert 'logger.info("Database: verified guild-scoped Supabase")' not in main_source
+    assert "database_backend_label(bot.db.backend)" in main_source

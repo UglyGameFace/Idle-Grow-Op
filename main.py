@@ -10,7 +10,9 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 from guild_config import ERROR_LOG_CHANNEL_KEY, WORLD_SETTINGS_KEY
+from neon_scoped_backend import NeonScopedBackend
 from persistence_bootstrap import build_scoped_database
+from supabase_scoped_backend import SupabaseScopedBackend
 from persistence_context import GuildContextRequired
 
 
@@ -303,6 +305,15 @@ async def _tree_error(interaction: discord.Interaction, error: app_commands.AppC
 bot.tree.on_error = _tree_error
 
 
+def database_backend_label(backend: object) -> str:
+    """Display the verified runtime driver without exposing its connection URL."""
+    if isinstance(backend, NeonScopedBackend):
+        return "Neon PostgreSQL"
+    if isinstance(backend, SupabaseScopedBackend):
+        return "Supabase"
+    return type(backend).__name__
+
+
 @bot.event
 async def on_ready():
     logger.info("=" * 40)
@@ -311,7 +322,10 @@ async def on_ready():
     logger.info("Bot ID: %s", bot.user.id if bot.user else "unknown")
     logger.info("Python: %s", platform.python_version())
     logger.info("Discord.py: %s", discord.__version__)
-    logger.info("Database: verified guild-scoped Supabase")
+    logger.info(
+        "Database: verified guild-scoped %s",
+        database_backend_label(bot.db.backend),
+    )
     logger.info("Loaded extensions: %s", ", ".join(sorted(bot.extensions)))
     logger.info(
         "Command sync: %s",
