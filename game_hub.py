@@ -164,6 +164,12 @@ class HubInteractionContext:
         )
 
     async def send(self, content: str | None = None, **kwargs):
+        # Unlike editing an existing message, webhook sends reject view=None.
+        # Some routed commands (such as /world-mode without player choices)
+        # legitimately pass None to mean "no components". Omit that argument
+        # for both response paths, but preserve any actual interactive View.
+        if kwargs.get("view", discord.utils.MISSING) is None:
+            kwargs.pop("view")
         kwargs["ephemeral"] = True
         if not self.interaction.response.is_done():
             await self.interaction.response.send_message(content=content, **kwargs)

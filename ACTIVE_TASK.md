@@ -724,3 +724,10 @@ Avoid new gameplay features, cache redesign, or Issue #13 profile-signature expa
 - The `on_ready` banner was still hardcoded to report "verified guild-scoped Supabase" irrespective of the actual selected persistence backend. Change the log label to reflect the verified live driver, without printing credentials.
 - Read-only database checks after the provided 00:11 Eastern startup found a Neon game-world `updated_at` at 04:11:16Z, with source Supabase latest world update still from Oct 18. This is strong evidence the deployed worker persisted a world tick on Neon, but not yet proof of end-to-end player command persistence.
 - Neon has 3 global accounts, 42 player profiles, and 3 guild-world records; actual gameplay action and restart checks remain pending.
+
+
+## Phase 11: 2026-10-19 live Game Hub /world-mode response regression
+- Supplied Discloud logs confirm verified Neon PostgreSQL startup at 01:22:47 local log time, 18 extensions, 68 synced global commands, and repeated active world updates for hours. PyNaCl and davey warnings are voice-only.
+- At 10:54 local log time the Game Hub `/world-mode` action failed twice with `TypeError: expected view parameter to be of type View or LayoutView, not NoneType` in `HubInteractionContext.send`. The actual world-mode command passes `view=None` when the server policy does not present player-choice buttons.
+- Fix the shared Hub context response adapter to omit `view=None` from new response/followup message sends, while preserving real `discord.ui.View` objects. Neither world policy nor persistent game state should be mutated.
+- Cover initial and deferred/acknowledged response paths and a real `WorldModes.world_mode.callback` through the Hub adapter. Do not claim live Discord success from CI alone.
