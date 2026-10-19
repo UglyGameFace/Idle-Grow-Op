@@ -365,7 +365,12 @@ class ScopedDatabaseManager:
                 await task
             except asyncio.CancelledError:
                 pass
-        await self.flush()
+        try:
+            await self.flush()
+        finally:
+            close = getattr(self.backend, "close", None)
+            if callable(close):
+                await close()
 
     async def _flush_loop(self) -> None:
         while True:

@@ -1,10 +1,13 @@
 import os
 from collections.abc import Mapping
 
+from neon_scoped_backend import NeonScopedBackend
 from scoped_database import ScopedDatabaseManager
 from supabase_scoped_backend import SupabaseScopedBackend
 
 
+IDLE_PERSISTENCE_BACKEND_ENV = "IDLE_PERSISTENCE_BACKEND"
+IDLE_NEON_DATABASE_URL_ENV = "IDLE_NEON_DATABASE_URL"
 IDLE_SUPABASE_URL_ENV = "IDLE_SUPABASE_URL"
 IDLE_SUPABASE_SERVICE_ROLE_KEY_ENV = "IDLE_SUPABASE_SERVICE_ROLE_KEY"
 
@@ -28,25 +31,37 @@ async def build_scoped_database(
 ) -> ScopedDatabaseManager:
     """Build, verify, and start the production scoped database manager.
 
-    Idle Grow uses dedicated environment names so another bot hosted beside it
-    cannot accidentally supply a different Supabase project. The Discord bot is
-    a trusted server process and therefore requires the service-role key.
-    Public anon or publishable keys are intentionally unsupported.
+    Idle Grow uses dedicated environment names so other bots cannot
+    accidentally supply database credentials. The existing Supabase route
+    remains the default until Neon is explicitly selected; no automatic
+    cross-provider fallback is allowed if the new provider fails.
     """
 
     env = environ if environ is not None else os.environ
-    url = _required_env(env, IDLE_SUPABASE_URL_ENV)
-    service_role_key = _required_env(env, IDLE_SUPABASE_SERVICE_ROLE_KEY_ENV)
+    selected = str(env.get(IDLE_PERSISTENCE_BACKEND_ENV, "supabase")).lower().strip()
+    if selected == "neon":
+        backend = NeonScopedBackend(_required_env(env, IDLE_NEON_DATABASE_URL_ENV))
+        await backend.start()
+    elif selected == "supabase":
+        url = _required_env(env, IDLE_SUPABASE_URL_ENV)
+        key = _required_env(env, IDLE_SUPABASE_SERVICE_ROLE_KEY_ENV)
+        if create_client_fn is None:
+            from supabase import create_client
 
-    if create_client_fn is None:
-        from supabase import create_client
+            create_client_fn = create_client
+        backend = SupabaseScopedBackend(create_client_fn(url, key))
+    else:
+        raise PersistenceConfigurationError(
+            "IDLE_PERSISTENCE_BACKEND must be 'supabase' or 'neon'"
+        )
 
-        create_client_fn = create_client
-
-    client = create_client_fn(url, service_role_key)
-    backend = SupabaseScopedBackend(client)
-    await backend.verify_schema()
-
-    manager = ScopedDatabaseManager(backend, flush_interval=flush_interval)
-    await manager.start()
-    return manager
+    try:
+        await backend.verify_schema()
+        manager = ScopedDatabaseManager(backend, flush_interval=flush_interval)
+        await manager.start()
+        return manager
+    except Exception:
+        close = getattr(backend, "close", None)
+        if callable(close):
+            await close()
+        raise
