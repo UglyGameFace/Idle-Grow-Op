@@ -36,7 +36,7 @@ jobs:
 
       - name: Reject undefined runtime names
         run: |
-          ruff check             main.py casino_contracts.py guild_config.py plant_lifecycle.py profile_signature_contracts.py world_mode_contracts.py utils.py persistence_bootstrap.py persistence_context.py persistence_scope.py persistence_store.py scoped_database.py supabase_scoped_backend.py             admin.py ai.py crime.py crime_integrity.py economy.py game_hub.py economy_integrity.py farming.py gambling.py lab.py notification_preferences.py onboarding.py             progression.py progression_core.py progression_data.py quick.py profile_signatures.py sesh.py setup.py social.py tasks.py world_modes.py             --select F401,F821,F822,F823,F841
+          ruff check             main.py casino_contracts.py guild_config.py plant_lifecycle.py profile_signature_contracts.py world_mode_contracts.py utils.py persistence_bootstrap.py persistence_context.py persistence_scope.py persistence_store.py scoped_database.py supabase_scoped_backend.py neon_scoped_backend.py             admin.py ai.py crime.py crime_integrity.py economy.py game_hub.py economy_integrity.py farming.py gambling.py lab.py notification_preferences.py onboarding.py             progression.py progression_core.py progression_data.py quick.py profile_signatures.py sesh.py setup.py social.py tasks.py world_modes.py             --select F401,F821,F822,F823,F841
 
       - name: Run tests
         id: pytest
@@ -44,6 +44,8 @@ jobs:
           DISCORD_TOKEN: ""
           IDLE_SUPABASE_URL: ""
           IDLE_SUPABASE_SERVICE_ROLE_KEY: ""
+          IDLE_NEON_DATABASE_URL: ""
+          IDLE_PERSISTENCE_BACKEND: ""
         run: |
           set +e
           python -m pytest -q --tb=short -x > pytest.log 2>&1
@@ -72,6 +74,8 @@ jobs:
           DISCORD_TOKEN: ""
           IDLE_SUPABASE_URL: ""
           IDLE_SUPABASE_SERVICE_ROLE_KEY: ""
+          IDLE_NEON_DATABASE_URL: ""
+          IDLE_PERSISTENCE_BACKEND: ""
         run: |
           set +e
           python - <<'PY' > extension-load.log 2>&1
@@ -143,7 +147,7 @@ jobs:
       - name: Reject legacy persistence and backup artifacts
         run: |
           ! grep -R -nE '(^|[^A-Z_])SUPABASE_(URL|KEY|SERVICE_ROLE_KEY)|IDLE_SUPABASE_KEY|db_manager|class Database|\.world_state|\.get_user\(|await .*\.save\(\)|Local JSON|memory-only fallback' \
-            main.py utils.py persistence_bootstrap.py scoped_database.py supabase_scoped_backend.py \
+            main.py utils.py persistence_bootstrap.py scoped_database.py supabase_scoped_backend.py neon_scoped_backend.py \
             admin.py ai.py crime.py economy.py farming.py gambling.py lab.py notification_preferences.py onboarding.py progression.py quick.py sesh.py social.py tasks.py world_modes.py
           test ! -d cogs
           test ! -f .env

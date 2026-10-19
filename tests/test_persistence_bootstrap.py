@@ -105,3 +105,90 @@ def test_bootstrap_uses_only_idle_grow_credentials_and_starts_manager():
             await manager.close()
 
     run(scenario())
+
+
+def test_neon_selected_requires_dedicated_connection_setting():
+    with pytest.raises(PersistenceConfigurationError, match="IDLE_NEON_DATABASE_URL"):
+        run(build_scoped_database(environ={"IDLE_PERSISTENCE_BACKEND": "neon"}))
+
+
+def test_invalid_provider_never_silently_uses_supabase():
+    with pytest.raises(PersistenceConfigurationError, match="IDLE_PERSISTENCE_BACKEND"):
+        run(build_scoped_database(environ={"IDLE_PERSISTENCE_BACKEND": "unknown"}))
+
+
+def test_neon_selection_starts_backend_without_supabase_credentials(monkeypatch):
+    import persistence_bootstrap
+
+    created = []
+
+    class FakeNeon:
+        def __init__(self, dsn):
+            created.append(self)
+            self.dsn = dsn
+            self.opened = False
+            self.verified = False
+            self.closed = False
+
+        async def start(self):
+            self.opened = True
+
+        async def verify_schema(self):
+            assert self.opened
+            self.verified = True
+
+        async def close(self):
+            self.closed = True
+
+        async def load(self, _key):
+            return None
+
+        async def save_many(self, _records):
+            return None
+
+    monkeypatch.setattr(persistence_bootstrap, "NeonScopedBackend", FakeNeon)
+
+    async def scenario():
+        manager = await build_scoped_database(
+            environ={
+                "IDLE_PERSISTENCE_BACKEND": "neon",
+                "IDLE_NEON_DATABASE_URL": "postgresql://secret.test/neon",
+            },
+            create_client_fn=lambda *_: (_ for _ in ()).throw(
+                AssertionError("Supabase must not be used for Neon")
+            ),
+        )
+        assert created[0].verified
+        assert manager.backend is created[0]
+        await manager.close()
+        assert created[0].closed
+
+    run(scenario())
+
+
+def test_neon_failed_schema_check_closes_connection_pool(monkeypatch):
+    import persistence_bootstrap
+
+    state = {"closed": False}
+
+    class BrokenNeon:
+        def __init__(self, _dsn):
+            pass
+
+        async def start(self):
+            pass
+
+        async def verify_schema(self):
+            raise RuntimeError("schema check failed")
+
+        async def close(self):
+            state["closed"] = True
+
+    monkeypatch.setattr(persistence_bootstrap, "NeonScopedBackend", BrokenNeon)
+
+    with pytest.raises(RuntimeError, match="schema check failed"):
+        run(build_scoped_database(environ={
+            "IDLE_PERSISTENCE_BACKEND": "neon",
+            "IDLE_NEON_DATABASE_URL": "postgresql://example.test/neon",
+        }))
+    assert state["closed"]

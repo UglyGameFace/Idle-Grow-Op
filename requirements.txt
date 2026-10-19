@@ -2,3 +2,4 @@ discord.py
 python-dotenv
 aiohttp
 supabase
+asyncpg>=0.30,<1
