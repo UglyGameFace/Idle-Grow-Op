@@ -709,3 +709,11 @@ After exact-head CI and Discloud deployment succeed, perform these live acceptan
 8. Capture Discord behavior, deployment revision, and errors, if any. Do not mark Phase 11 complete until the acceptance evidence is recorded.
 
 Avoid new gameplay features, cache redesign, or Issue #13 profile-signature expansion during this active validation task.
+
+ 
+## Phase 11 Neon Data Isolation (2026-10-19)
+- Created Neon Free PostgreSQL 17 database \`idle_grow_op\` in project \`lively-recipe-63250602\` with a 512 MB project storage limit, no paid upgrade.
+- Installed the four original database migrations as 44 PostgreSQL statements with Supabase-only roles omitted. Four tables, RLS, versions and required functions verified.
+- Exported and inserted **48 scoped records** while preserving large Discord IDs, original JSON payloads and timestamps. PostgreSQL-calculated digests matched across all tables: 3 accounts, 42 profiles, 3 worlds.
+- Implement the optional explicit Neon async Postgres backend with a small pool, retained atomic RPC contract and existing world isolation. \`IDLE_PERSISTENCE_BACKEND=neon\` and a private \`IDLE_NEON_DATABASE_URL\` are required for Discloud cutover; absent selection defaults to Supabase.
+- Original Supabase source remains unchanged; recheck for newer writes before cutover. Live Discord gameplay acceptance still pending.

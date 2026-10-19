@@ -111,7 +111,7 @@ class NeonScopedBackend:
     async def load(self, key: RecordKey) -> Mapping[str, Any] | None:
         table, filters = SupabaseScopedBackend._table_and_filters(key)
         where = " AND ".join(
-            f"{column} = \${index}"
+            f"{column} = ${index}"
             for index, column in enumerate(filters, 1)
         )
         async with self._ready_pool().acquire() as conn:
